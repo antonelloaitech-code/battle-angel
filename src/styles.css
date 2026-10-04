@@ -1,9 +1,28 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #161616;
-  background: #f5f5f2;
+  color: #f3f5f4;
+  background: #0d0f10;
+  color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  --bg: #0d0f10;
+  --surface: #151819;
+  --surface-soft: #1b1f20;
+  --surface-strong: #24292a;
+  --text: #f3f5f4;
+  --muted: #9ca5a2;
+  --border: #2d3334;
+  --accent: #57b98d;
+  --accent-dark: #8ad2b2;
+  --accent-soft: #17352a;
+  --danger: #f08a8a;
+  --danger-soft: #3a1f21;
+}
+
+:root[data-theme="light"] {
+  color: #161616;
+  background: #f5f5f2;
+  color-scheme: light;
   --bg: #f5f5f2;
   --surface: #ffffff;
   --surface-soft: #edede8;
@@ -78,6 +97,54 @@ button:disabled,
 }
 
 .topbar-title { min-width: 0; }
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.theme-toggle {
+  min-height: 46px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 800;
+  text-transform: lowercase;
+}
+
+.brand-name {
+  color: var(--text);
+  font-size: 1.02rem;
+  font-weight: 900;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  text-transform: lowercase;
+}
+
+.brand-name-compact {
+  font-size: 0.92rem;
+}
+
+.brand-slogan {
+  margin-top: 5px;
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-transform: lowercase;
+}
+
+.brand-slogan-compact {
+  margin-top: 3px;
+  font-size: 0.76rem;
+}
 
 .brand-kicker,
 .eyebrow,
@@ -203,6 +270,44 @@ h2 {
   justify-content: flex-end;
 }
 
+.rest-motivation {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: #000;
+}
+
+.rest-motivation-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.rest-motivation video {
+  display: block;
+  width: 100%;
+  max-height: 430px;
+  background: #000;
+}
+
+.motivation-play-fallback {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 800;
+}
+
 .folder-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -210,7 +315,7 @@ h2 {
 }
 
 .folder-card {
-  min-height: 132px;
+  min-height: 112px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -227,11 +332,6 @@ h2 {
 }
 
 .folder-card:active { background: var(--surface-soft); }
-
-.folder-icon {
-  font-size: 1.8rem;
-  line-height: 1;
-}
 
 .folder-card-copy {
   min-width: 0;
@@ -262,6 +362,93 @@ h2 {
   color: var(--accent-dark);
   font-size: 0.71rem;
   font-weight: 800;
+}
+
+.motivation-library {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.motivation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.motivation-heading h2 {
+  margin-top: 3px;
+  font-size: 1.3rem;
+}
+
+.motivation-copy {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.motivation-count {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 99px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.motivation-picker {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.motivation-status {
+  margin-top: 9px;
+}
+
+.motivation-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.motivation-item {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--surface-soft);
+}
+
+.motivation-item video {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  background: #000;
+}
+
+.motivation-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+}
+
+.motivation-item-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.motivation-remove {
+  min-height: 40px;
+  flex: 0 0 auto;
 }
 
 .add-folder,
@@ -370,9 +557,22 @@ input::placeholder { color: #97978f; }
 
 .field-span-2 { grid-column: 1 / -1; }
 
-.file-picker input,
-.add-reference input {
-  display: none;
+.file-picker,
+.add-reference {
+  position: relative;
+  overflow: hidden;
+}
+
+.file-picker input[type="file"],
+.add-reference input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 100px;
 }
 
 .file-picker-button {
@@ -392,6 +592,13 @@ input::placeholder { color: #97978f; }
   font-size: 0.85rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.upload-help {
+  padding: 0 14px 14px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .optional-details {
@@ -567,8 +774,7 @@ input::placeholder { color: #97978f; }
   text-align: center;
 }
 
-.empty-icon { font-size: 2.2rem; }
-.empty-title { margin-top: 7px; font-weight: 850; }
+.empty-title { font-weight: 850; }
 .empty-copy { margin-top: 5px; color: var(--muted); line-height: 1.5; }
 
 .status-line,
@@ -613,6 +819,38 @@ input::placeholder { color: #97978f; }
   gap: 10px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.account-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.backup-status {
+  margin-top: 8px;
+  text-align: right;
+}
+
+@media (max-width: 520px) {
+  .account-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .account-actions {
+    width: 100%;
+  }
+
+  .account-actions .secondary-button {
+    flex: 1 1 0;
+  }
+
+  .backup-status {
+    text-align: left;
+  }
 }
 
 .login-wrap {
@@ -882,7 +1120,9 @@ input::placeholder { color: #97978f; }
 
 @media (max-width: 430px) {
   .shell { padding-inline: 12px; }
-  .timer-chip { min-width: 82px; padding-inline: 10px; }
+  .topbar-actions { gap: 6px; }
+  .theme-toggle { min-width: 56px; padding-inline: 9px; }
+  .timer-chip { min-width: 76px; padding-inline: 10px; }
   .add-folder form { flex-direction: column; }
   .edit-actions > * { flex: 1 1 calc(50% - 8px); }
   .workout-nav:has(#reopen-exercise) { grid-template-columns: 1fr; }

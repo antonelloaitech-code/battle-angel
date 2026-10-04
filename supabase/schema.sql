@@ -1,6 +1,6 @@
--- GymFlow database + private video storage
+-- battle angel database + private video storage
 -- Run this whole file in Supabase Dashboard -> SQL Editor.
--- Safe to run again when upgrading from the first GymFlow version.
+-- Safe to run again when upgrading from the first battle angel version.
 
 create extension if not exists pgcrypto;
 
@@ -26,14 +26,14 @@ create table if not exists public.exercises (
   unique (user_id, video_path)
 );
 
--- Upgrade columns for projects created with GymFlow v1.
+-- Upgrade columns for projects created with battle angel v1.
 alter table public.exercises
   add column if not exists exercise_group uuid default gen_random_uuid();
 
 alter table public.exercises
   add column if not exists video_order integer not null default 1;
 
--- GymFlow v3 coaching fields. These live on each video row in an exercise group;
+-- battle angel v3 coaching fields. These live on each video row in an exercise group;
 -- the app keeps every row in the group synchronized so the UI stays simple.
 alter table public.exercises
   add column if not exists sets_target integer not null default 3;
@@ -85,6 +85,19 @@ select user_id, 'Triceps', 6
 from renamed_arms
 on conflict (user_id, name) do nothing;
 
+
+-- Cloud-synced in-progress workout state. One active/paused workout per user.
+-- This complements local browser storage so the current exercise/set follows the user across devices.
+create table if not exists public.workout_progress (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  folder_id uuid not null references public.folders(id) on delete cascade,
+  current_index integer not null default 0 check (current_index >= 0),
+  sets_done jsonb not null default '{}'::jsonb check (jsonb_typeof(sets_done) = 'object'),
+  completed_group_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(completed_group_ids) = 'array'),
+  status text not null default 'paused' check (status in ('active', 'paused')),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists folders_user_sort_idx
   on public.folders(user_id, sort_order, created_at);
 
@@ -99,9 +112,11 @@ create index if not exists exercises_user_idx
 
 alter table public.folders enable row level security;
 alter table public.exercises enable row level security;
+alter table public.workout_progress enable row level security;
 
 grant select, insert, update, delete on public.folders to authenticated;
 grant select, insert, update, delete on public.exercises to authenticated;
+grant select, insert, update, delete on public.workout_progress to authenticated;
 
 -- Folder policies
 
@@ -159,6 +174,41 @@ with check (
 drop policy if exists "exercises_delete_own" on public.exercises;
 create policy "exercises_delete_own"
 on public.exercises for delete to authenticated
+using (auth.uid() = user_id);
+
+-- Workout progress policies
+
+drop policy if exists "workout_progress_select_own" on public.workout_progress;
+create policy "workout_progress_select_own"
+on public.workout_progress for select to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "workout_progress_insert_own" on public.workout_progress;
+create policy "workout_progress_insert_own"
+on public.workout_progress for insert to authenticated
+with check (
+  auth.uid() = user_id
+  and exists (
+    select 1 from public.folders f
+    where f.id = folder_id and f.user_id = auth.uid()
+  )
+);
+
+drop policy if exists "workout_progress_update_own" on public.workout_progress;
+create policy "workout_progress_update_own"
+on public.workout_progress for update to authenticated
+using (auth.uid() = user_id)
+with check (
+  auth.uid() = user_id
+  and exists (
+    select 1 from public.folders f
+    where f.id = folder_id and f.user_id = auth.uid()
+  )
+);
+
+drop policy if exists "workout_progress_delete_own" on public.workout_progress;
+create policy "workout_progress_delete_own"
+on public.workout_progress for delete to authenticated
 using (auth.uid() = user_id);
 
 -- Private Storage bucket. The app uses signed URLs to play videos.
