@@ -1,6 +1,6 @@
-# GymFlow
+# battle angel
 
-GymFlow is a deliberately low-friction personal gym app. Build each muscle workout once with saved reference videos, then use Workout Mode at the gym so you do not need to reopen TikTok or remember the plan.
+battle angel is a deliberately low-friction personal gym app. Build each muscle workout once with saved reference videos, then use Workout Mode at the gym so you do not need to reopen TikTok or remember the plan.
 
 ## Default folders
 
@@ -11,15 +11,15 @@ GymFlow is a deliberately low-friction personal gym app. Build each muscle worko
 - Biceps
 - Triceps
 
-## The gym flow
+## the gym flow
 
 1. Tap the muscle you are training.
 2. Tap **Start workout**.
-3. GymFlow shows one exercise at a time.
+3. battle angel shows one exercise at a time.
 4. Watch the saved reference clip if you need it.
 5. Follow the sets, rep range, coaching cues, and last weight.
 6. Tap the big **Set done - rest 2:30** button.
-7. After the final set, GymFlow moves to the next exercise automatically.
+7. After the final set, battle angel moves to the next exercise automatically.
 
 There is intentionally no social feed, calorie tracking, streak system, RPE spreadsheet, or analytics dashboard.
 
@@ -54,13 +54,13 @@ It shows:
 
 Weight is optional. If you change it, it saves automatically when you leave the field or press Enter.
 
-Workout progress is stored locally on the device. If the page refreshes or the browser closes during an active session, GymFlow can reopen the active workout automatically. Choosing **Exit** pauses it and the muscle folder shows **Resume workout** next time.
+Workout progress is stored locally on the device. If the page refreshes or the browser closes during an active session, battle angel can reopen the active workout automatically. Choosing **Exit** pauses it and the muscle folder shows **Resume workout** next time.
 
 ## TikTok videos
 
-If your reference is a TikTok, save/download the video to your phone first where permitted, then upload the saved file to GymFlow.
+If your reference is a TikTok, save/download the video to your phone first where permitted, then upload the saved file to battle angel.
 
-GymFlow stores the actual uploaded video in your private Supabase Storage bucket. It does not depend on the TikTok URL still working at the gym.
+battle angel stores the actual uploaded video in your private Supabase Storage bucket. It does not depend on the TikTok URL still working at the gym.
 
 # Setup
 
@@ -75,7 +75,7 @@ GymFlow stores the actual uploaded video in your private Supabase Storage bucket
 
 Do not put the service-role key in this frontend app.
 
-### If you already installed an older GymFlow version
+### If you already installed an older battle angel version
 
 Run the new `supabase/schema.sql` again before deploying this version.
 
@@ -91,23 +91,19 @@ It keeps the existing exercise grouping, videos, folders, and private Storage ru
 
 The previous Arms-to-Biceps/Triceps migration is still included for older installs.
 
-## 2. Configure Supabase Auth redirect URLs
+## 2. Create your battle angel login
 
-In Supabase open **Authentication -> URL Configuration**.
+battle angel uses email + password so there are no magic-link emails or email rate limits during normal use.
 
-For local development add:
+1. In Supabase open **Authentication -> Users**.
+2. Choose **Add user -> Create new user**.
+3. Enter the email and password you want to use for battle angel.
+4. Turn on **Auto Confirm User** / mark the user as confirmed.
+5. Create the user.
 
-```text
-http://localhost:5173/**
-```
+Then sign in to battle angel with that email and password. Supabase persists the browser session, so on your own phone you should normally stay signed in between gym sessions.
 
-After Netlify gives you a production URL, add that too, for example:
-
-```text
-https://your-gymflow-site.netlify.app/**
-```
-
-Set the Site URL to the production Netlify URL after deployment.
+Because battle angel now uses password login, a magic-link redirect URL is not required for normal sign-in.
 
 ## 3. Run locally
 
@@ -145,11 +141,10 @@ Vite normally opens at `http://localhost:5173`.
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_PUBLISHABLE_KEY`
 6. Deploy.
-7. Add the final Netlify URL to Supabase Authentication URL Configuration.
 
 ## 5. Optional personal-app lock-down
 
-If GymFlow is only for you, create your account first and then disable new user signups in Supabase Auth settings. Your existing account can continue signing in while random visitors cannot create accounts.
+If battle angel is only for you, keep public signups disabled. Create your account manually in **Authentication -> Users** with Auto Confirm enabled. The app itself only signs in existing users; it does not expose a public sign-up flow.
 
 # Data and privacy
 

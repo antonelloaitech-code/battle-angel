@@ -159,13 +159,16 @@ function renderLogin(message = '') {
   app.innerHTML = `
     <main class="shell login-wrap">
       <section class="login-card" aria-labelledby="login-title">
-        <div class="brand-kicker">GYM FLOW</div>
-        <h1 id="login-title">Your workout. No scrolling TikTok.</h1>
-        <p>Sign in once. At the gym it is just muscle, exercise, set, rest, next.</p>
+        <div class="brand-name">battle angel</div>
+        <div class="brand-slogan">a warrior's spirit needs a warrior's body</div>
+        <h1 id="login-title">Open. Train. Done.</h1>
+        <p>Sign in once on this phone. battle angel keeps you signed in so your normal gym flow stays friction-free.</p>
         <form class="login-form" id="login-form">
           <label for="email" class="eyebrow">EMAIL</label>
-          <input id="email" type="email" autocomplete="email" required placeholder="you@example.com" />
-          <button class="primary-button" type="submit">Email me a sign-in link</button>
+          <input id="email" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required placeholder="you@example.com" />
+          <label for="password" class="eyebrow">PASSWORD</label>
+          <input id="password" type="password" autocomplete="current-password" required minlength="6" placeholder="your battle angel password" />
+          <button class="primary-button" type="submit">Sign in</button>
         </form>
         <div id="login-status" class="status-line" aria-live="polite">${escapeHtml(message)}</div>
       </section>
@@ -176,25 +179,25 @@ function renderLogin(message = '') {
   form.addEventListener('submit', async (event) => {
     event.preventDefault()
     const email = document.querySelector('#email').value.trim()
+    const password = document.querySelector('#password').value
     const button = form.querySelector('button')
     button.disabled = true
-    button.textContent = 'Sending...'
+    button.textContent = 'Signing in...'
     status.textContent = ''
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin }
-    })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
-      status.textContent = error.message
+      const friendly = error.message.toLowerCase().includes('invalid login credentials')
+        ? 'Email or password is incorrect.'
+        : error.message
+      status.textContent = friendly
       button.disabled = false
-      button.textContent = 'Email me a sign-in link'
+      button.textContent = 'Sign in'
       return
     }
 
-    status.textContent = 'Check your email and tap the link. You can close this page.'
-    button.textContent = 'Link sent'
+    button.textContent = 'opening battle angel...'
   })
 }
 
@@ -279,7 +282,8 @@ function renderShell(content, options = {}) {
     <main class="shell ${workoutMode ? 'workout-shell' : ''}">
       <header class="topbar">
         <div class="topbar-title">
-          <div class="brand-kicker">GYM FLOW</div>
+          <div class="brand-name brand-name-compact">battle angel</div>
+          ${!activeFolder && !workoutMode ? `<div class="brand-slogan brand-slogan-compact">a warrior's spirit needs a warrior's body</div>` : ''}
           <h1 id="page-title">${escapeHtml(title)}</h1>
         </div>
         <button type="button" id="timer-toggle" class="timer-chip" aria-expanded="false">&#9201; <span id="timer-mini">2:30</span></button>

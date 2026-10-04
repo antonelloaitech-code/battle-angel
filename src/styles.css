@@ -79,6 +79,34 @@ button:disabled,
 
 .topbar-title { min-width: 0; }
 
+.brand-name {
+  color: var(--text);
+  font-size: 1.02rem;
+  font-weight: 900;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  text-transform: lowercase;
+}
+
+.brand-name-compact {
+  font-size: 0.92rem;
+}
+
+.brand-slogan {
+  margin-top: 5px;
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-transform: lowercase;
+}
+
+.brand-slogan-compact {
+  margin-top: 3px;
+  font-size: 0.76rem;
+}
+
 .brand-kicker,
 .eyebrow,
 .timer-label {

@@ -1,6 +1,6 @@
--- GymFlow database + private video storage
+-- battle angel database + private video storage
 -- Run this whole file in Supabase Dashboard -> SQL Editor.
--- Safe to run again when upgrading from the first GymFlow version.
+-- Safe to run again when upgrading from the first battle angel version.
 
 create extension if not exists pgcrypto;
 
@@ -26,14 +26,14 @@ create table if not exists public.exercises (
   unique (user_id, video_path)
 );
 
--- Upgrade columns for projects created with GymFlow v1.
+-- Upgrade columns for projects created with battle angel v1.
 alter table public.exercises
   add column if not exists exercise_group uuid default gen_random_uuid();
 
 alter table public.exercises
   add column if not exists video_order integer not null default 1;
 
--- GymFlow v3 coaching fields. These live on each video row in an exercise group;
+-- battle angel v3 coaching fields. These live on each video row in an exercise group;
 -- the app keeps every row in the group synchronized so the UI stays simple.
 alter table public.exercises
   add column if not exists sets_target integer not null default 3;
