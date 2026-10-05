@@ -1761,3 +1761,272 @@ input::placeholder { color: #97978f; }
     margin: 0;
   }
 }
+
+/* v1.8: multiple modules per day + zero-friction rest lock screen */
+.today-workout-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.today-workout-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 9px 10px 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--surface-soft);
+}
+
+.today-workout-name {
+  min-width: 0;
+  font-size: 1.2rem;
+  font-weight: 900;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+
+.today-module-start {
+  min-width: 88px;
+  min-height: 46px;
+  padding: 9px 14px;
+}
+
+.calendar-workout {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  line-height: 1.05;
+}
+
+.move-plan-form select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 9px;
+  font: inherit;
+  font-size: 16px;
+}
+
+.move-plan-form:has(select) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.weekly-row {
+  display: block;
+  padding: 12px;
+}
+
+.weekly-day-label {
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.weekly-muscle-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.weekly-muscle-button {
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--text);
+  padding: 8px 11px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.weekly-muscle-button.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.rest-lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: stretch;
+  overflow: hidden;
+  background: #000;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  touch-action: manipulation;
+}
+
+.rest-lock-video,
+.rest-lock-blank {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+  background: #000;
+}
+
+.rest-lock-timer {
+  grid-area: 1 / 1;
+  z-index: 2;
+  align-self: start;
+  justify-self: center;
+  margin-top: 14px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: clamp(2rem, 11vw, 4.25rem);
+  line-height: 1;
+  font-weight: 950;
+  letter-spacing: -0.055em;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+@media (max-width: 390px) {
+  .today-workout-row {
+    grid-template-columns: minmax(0, 1fr) 82px;
+    padding-left: 12px;
+  }
+  .today-workout-name { font-size: 1.05rem; }
+  .today-module-start { min-width: 0; padding-inline: 9px; }
+  .weekly-muscle-button { padding-inline: 9px; }
+}
+
+/* v1.8.1: one screen, one button + offline */
+.workout-shell {
+  padding-bottom: calc(112px + env(safe-area-inset-bottom, 0px));
+}
+
+.workout-shell .topbar {
+  margin-bottom: 10px;
+}
+
+.workout-shell .topbar h1 {
+  font-size: clamp(1.25rem, 5.5vw, 1.6rem);
+}
+
+.workout-shell .big-action {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  z-index: 25;
+  width: auto;
+  max-width: 656px;
+  margin: 0 auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.workout-shell .big-action:disabled {
+  opacity: 1;
+  background: var(--surface-strong);
+  color: var(--muted);
+}
+
+.focus-card h2 {
+  padding-top: 18px;
+}
+
+.workout-video-frame video {
+  max-height: 42vh;
+}
+
+.video-tabs {
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+}
+
+button.set-dot {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.offline-note {
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 750;
+}
+
+.load-error-card {
+  padding: 22px 18px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.load-error-title {
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.load-error-card p {
+  margin: 8px 0 16px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.load-error-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.rest-sound-hint {
+  grid-area: 1 / 1;
+  z-index: 2;
+  align-self: end;
+  justify-self: center;
+  margin-bottom: 18px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.8rem;
+  font-weight: 750;
+  pointer-events: none;
+}
+
+.boot-shell {
+  min-height: 70vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 18px;
+}
+
+.boot-pulse {
+  width: 44px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--accent);
+  animation: boot-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes boot-pulse {
+  from { opacity: 0.25; transform: scaleX(0.5); }
+  to { opacity: 1; transform: scaleX(1); }
+}

@@ -37,11 +37,11 @@ Planning is optional and cloud-synced.
 
 ### one-off calendar plan
 
-Open **Plan**, tap a date, then tap a muscle. Move or clear a date whenever plans change.
+Open **Plan**, tap a date, then tap one or more muscles. Tap a selected muscle again to remove it. Move one module or clear the whole date whenever plans change.
 
 ### recurring weekly plan
 
-Open **Plan -> Weekly** and pick a muscle for each weekday. Changes save automatically. A manually changed calendar date overrides the weekly plan, so you can move or skip one day without changing the recurring week.
+Open **Plan -> Weekly** and pick one or more muscles for each weekday. Changes save automatically. A manually changed calendar date overrides the weekly plan, so you can move or skip modules without changing the recurring week.
 
 ### repeat last week
 
@@ -63,20 +63,15 @@ Motivation stays closed under **More -> Edit motivation** until you open it. Mot
 
 ## safe database upgrade
 
-If you already have battle angel with uploaded workouts/videos, run only:
+If you already have battle angel with uploaded workouts/videos and already ran the planning setup, run only:
 
-`supabase/planning_upgrade.sql`
+`supabase/multi_workout_upgrade.sql`
 
 in **Supabase -> SQL Editor** once before deploying this version.
 
 It is additive. It does **not** delete or replace existing folders, exercises, reference videos, motivation videos, weights, cues, or Storage objects.
 
-The upgrade adds:
-
-- recurring weekly planning
-- explicit skipped-date overrides
-- minimal completed-workout history for missed-day handling
-- cloud sync for the one-tap backup-exercise state
+This upgrade only changes planner uniqueness rules so one date/weekday can contain multiple workout modules. It does not delete or rewrite your existing workouts, exercises, videos, planning rows, or storage files.
 
 For a brand-new installation, `supabase/schema.sql` contains the full schema including the same upgrade.
 
@@ -115,3 +110,45 @@ The app currently enforces a 50 MB per-video limit to match the configured Supab
 ## backup
 
 Open **More -> Backup library** to create a ZIP containing the workout library, planning data, motivation references, and uploaded videos. Save the ZIP somewhere independent such as iCloud Drive or your computer.
+
+## v1.8 — multiple workouts per day + rest lock screen
+
+- A calendar day can contain multiple workout modules (for example Chest + Triceps).
+- Weekly recurring planning can also contain multiple modules on the same weekday.
+- Tap a muscle in Plan to add/remove it from that date; selected muscles stay highlighted.
+- Move is kept collapsed and lets you choose which module to move when a date has more than one.
+- Rest is now a full-screen lock-in view: no buttons, only the 2:30 countdown and your motivation clip. It returns to the workout automatically when the timer ends.
+- Run `supabase/multi_workout_upgrade.sql` once before using multi-workout planning on an existing database. The migration only changes planner uniqueness rules; it does not delete workouts, exercises, or videos.
+
+## v1.8.1 — lock-in fixes
+
+No new database changes. If you haven't run `supabase/multi_workout_upgrade.sql` yet, run it once (that's the v1.8 one).
+
+**Workout loop**
+- "Set done" is pinned to the bottom of the screen, always under your thumb. No scrolling.
+- Skipped a busy machine? After you finish an exercise, the app goes to the next *unfinished* one and only ends the workout when everything is done.
+- Set dots are tappable: tap a ✓ to undo a mis-tapped set, tap a number to mark sets done without starting a rest.
+- Double taps on "Set done" are ignored.
+- The weight you type sticks, even offline (it syncs when you're back online).
+- Deleting an exercise mid-workout keeps the rest of your progress.
+
+**Rest**
+- Reopening the app during rest goes straight back to the rest screen (it used to show an error).
+- Motivation starts muted so your music keeps playing. Tap anywhere on the rest screen for sound; the app remembers your choice.
+- The end-of-rest beep works on iPhone (audio is unlocked by your "Set done" tap), and the screen stays awake while you train.
+- Reference clips play silently on loop, no tap needed.
+
+**Offline + speed**
+- After the first visit the app opens instantly from what the phone already knows, then refreshes in the background.
+- With no signal, the app still opens, Today shows your saved plan, and any workout you've opened or saved before runs with its saved videos. Completed workouts and weights sync later.
+- "Save videos" also saves your motivation clips.
+- Clips you upload from this phone are saved on it right away, so it never downloads them again.
+- Video links are reused during a session, so reopening a workout doesn't re-download its clips.
+
+**Fixes**
+- Retrying a failed large upload can no longer create an exercise that points at a missing file.
+- Move Up/Down always works, even when two exercises share a position.
+- Plan tab: coming back to it never leaves you editing a date from another month.
+- Three reference videos fit on one tab row.
+- The old Arms → Biceps rename no longer runs on every launch (or in schema.sql).
+- Backup uses less memory while building the ZIP.

@@ -66,24 +66,8 @@ alter table public.exercises
 alter table public.exercises
   alter column exercise_group set not null;
 
--- First-version migration: split the old Arms default into Biceps + Triceps.
--- Existing Arms videos stay in the renamed Biceps folder so nothing is deleted.
-with renamed_arms as (
-  update public.folders f
-  set name = 'Biceps', sort_order = 5
-  where lower(f.name) = 'arms'
-    and not exists (
-      select 1
-      from public.folders b
-      where b.user_id = f.user_id
-        and lower(b.name) = 'biceps'
-    )
-  returning user_id
-)
-insert into public.folders (user_id, name, sort_order)
-select user_id, 'Triceps', 6
-from renamed_arms
-on conflict (user_id, name) do nothing;
+-- (v1.8.1) The old one-time "Arms -> Biceps + Triceps" rename was removed so re-running this file
+-- can never rename a folder you deliberately call "Arms".
 
 
 -- Cloud-synced in-progress workout state. One active/paused workout per user.
@@ -99,7 +83,7 @@ create table if not exists public.workout_progress (
 );
 
 
--- Optional calendar plan. One workout module can be assigned to each calendar day.
+-- Optional calendar plan. Multiple workout modules can be assigned to the same calendar day.
 -- This is additive only: it does not alter or delete existing folders, exercises, videos, or progress.
 create table if not exists public.workout_schedule (
   id uuid primary key default gen_random_uuid(),
@@ -107,8 +91,7 @@ create table if not exists public.workout_schedule (
   workout_date date not null,
   folder_id uuid not null references public.folders(id) on delete cascade,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (user_id, workout_date)
+  updated_at timestamptz not null default now()
 );
 
 create index if not exists folders_user_sort_idx
@@ -331,8 +314,7 @@ create table if not exists public.workout_schedule (
   folder_id uuid references public.folders(id) on delete cascade,
   is_skipped boolean not null default false,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (user_id, workout_date)
+  updated_at timestamptz not null default now()
 );
 
 alter table public.workout_schedule
@@ -341,6 +323,17 @@ alter table public.workout_schedule
 alter table public.workout_schedule
   alter column folder_id drop not null;
 
+-- v1.8: allow more than one workout module on the same date.
+alter table public.workout_schedule
+  drop constraint if exists workout_schedule_user_id_workout_date_key;
+
+create unique index if not exists workout_schedule_user_date_folder_unique
+  on public.workout_schedule(user_id, workout_date, folder_id);
+
+create unique index if not exists workout_schedule_user_date_skip_unique
+  on public.workout_schedule(user_id, workout_date)
+  where is_skipped = true;
+
 -- Recurring weekly plan: 0=Sunday, 1=Monday ... 6=Saturday.
 create table if not exists public.workout_weekly_plan (
   id uuid primary key default gen_random_uuid(),
@@ -348,11 +341,17 @@ create table if not exists public.workout_weekly_plan (
   weekday smallint not null check (weekday between 0 and 6),
   folder_id uuid not null references public.folders(id) on delete cascade,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (user_id, weekday)
+  updated_at timestamptz not null default now()
 );
 
 -- Minimal history only records completed workouts so missed-day handling is reliable.
+-- v1.8: allow multiple recurring modules on the same weekday.
+alter table public.workout_weekly_plan
+  drop constraint if exists workout_weekly_plan_user_id_weekday_key;
+
+create unique index if not exists workout_weekly_plan_user_weekday_folder_unique
+  on public.workout_weekly_plan(user_id, weekday, folder_id);
+
 create table if not exists public.workout_history (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,

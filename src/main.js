@@ -58,6 +58,22 @@ let historyAvailable = true
 let planningUpgradeAvailable = true
 let plannerStatusMessage = ''
 let offlineObjectUrls = []
+const motivationUrlByPath = new Map()
+let signedUrlCache = new Map()
+let viewVersion = 0
+let currentView = ''
+let usingCachedData = false
+let lastSetTapAt = 0
+let audioCtx = null
+let wakeLock = null
+let lastVideoSignAt = 0
+
+const SIGNED_URL_TTL_SECONDS = 60 * 60 * 12
+const MOTIVATION_SOUND_KEY = 'battle-angel-motivation-sound'
+const SET_TAP_GUARD_MS = 1200
+const NETWORK_FALLBACK_MS = 4000
+const SIGN_TIMEOUT_MS = 6000
+const EXERCISE_COLUMNS = 'id,name,video_path,sort_order,video_order,exercise_group,created_at,sets_target,reps_target,last_weight,cue_1,cue_2,cue_3,backup_exercise'
 
 function escapeHtml(value = '') {
   return String(value).replace(/[&<>'"]/g, (char) => ({
@@ -200,6 +216,7 @@ function normalizeWorkoutStateValue(value, fallbackUpdatedAt = Date.now()) {
     setsDone: value.setsDone && typeof value.setsDone === 'object' && !Array.isArray(value.setsDone) ? value.setsDone : {},
     completedGroupIds: Array.isArray(value.completedGroupIds) ? value.completedGroupIds : [],
     backupGroupIds: Array.isArray(value.backupGroupIds) ? value.backupGroupIds : [],
+    currentGroupId: typeof value.currentGroupId === 'string' ? value.currentGroupId : null,
     status: value.status === 'paused' ? 'paused' : 'active',
     updatedAt: Number(value.updatedAt || fallbackUpdatedAt)
   }
@@ -247,10 +264,12 @@ function isMissingPlanningUpgradeError(error) {
 }
 
 async function loadSchedule() {
-  scheduleEntries = []
-  weeklyPlanEntries = []
-  workoutHistory = []
-  if (!currentUser || !scheduleAvailable) return
+  if (!currentUser || !scheduleAvailable) {
+    scheduleEntries = []
+    weeklyPlanEntries = []
+    workoutHistory = mergePendingCompletions([])
+    return
+  }
 
   let scheduleResult = await supabase
     .from('workout_schedule')
@@ -268,75 +287,90 @@ async function loadSchedule() {
   if (scheduleResult.error) {
     if (isMissingScheduleTableError(scheduleResult.error)) {
       scheduleAvailable = false
+      scheduleEntries = []
+      weeklyPlanEntries = []
+      workoutHistory = mergePendingCompletions([])
       return
     }
     throw scheduleResult.error
   }
 
-  scheduleEntries = (scheduleResult.data || []).map((entry) => ({ ...entry, is_skipped: Boolean(entry.is_skipped) }))
+  const nextSchedule = (scheduleResult.data || []).map((entry) => ({ ...entry, is_skipped: Boolean(entry.is_skipped) }))
+  let nextWeekly = []
+  let nextHistory = []
+  const wantsWeekly = planningUpgradeAvailable && weeklyPlanAvailable
+  const wantsHistory = planningUpgradeAvailable && historyAvailable
+  const [weeklyResult, historyResult] = await Promise.all([
+    wantsWeekly
+      ? supabase.from('workout_weekly_plan').select('id,weekday,folder_id,created_at,updated_at').order('weekday', { ascending: true }).order('created_at', { ascending: true })
+      : null,
+    wantsHistory
+      ? supabase.from('workout_history').select('id,workout_date,folder_id,completed_at').gte('workout_date', addDaysKey(todayDateKey(), -35)).order('workout_date', { ascending: false })
+      : null
+  ])
 
-  if (planningUpgradeAvailable && weeklyPlanAvailable) {
-    const { data, error } = await supabase
-      .from('workout_weekly_plan')
-      .select('id,weekday,folder_id,created_at,updated_at')
-      .order('weekday', { ascending: true })
-    if (error) {
-      if (isMissingPlanningUpgradeError(error)) {
+  if (weeklyResult) {
+    if (weeklyResult.error) {
+      if (isMissingPlanningUpgradeError(weeklyResult.error)) {
         weeklyPlanAvailable = false
         planningUpgradeAvailable = false
-      } else throw error
-    } else weeklyPlanEntries = data || []
+      } else throw weeklyResult.error
+    } else nextWeekly = weeklyResult.data || []
   }
 
-  if (planningUpgradeAvailable && historyAvailable) {
-    const since = addDaysKey(todayDateKey(), -35)
-    const { data, error } = await supabase
-      .from('workout_history')
-      .select('id,workout_date,folder_id,completed_at')
-      .gte('workout_date', since)
-      .order('workout_date', { ascending: false })
-    if (error) {
-      if (isMissingPlanningUpgradeError(error)) {
+  if (historyResult) {
+    if (historyResult.error) {
+      if (isMissingPlanningUpgradeError(historyResult.error)) {
         historyAvailable = false
         planningUpgradeAvailable = false
-      } else throw error
-    } else workoutHistory = data || []
+      } else throw historyResult.error
+    } else nextHistory = historyResult.data || []
   }
+
+  scheduleEntries = nextSchedule
+  weeklyPlanEntries = nextWeekly
+  workoutHistory = mergePendingCompletions(nextHistory)
 }
 
-function getScheduleEntry(dateKey) {
-  return scheduleEntries.find((entry) => entry.workout_date === dateKey) || null
+function getScheduleEntries(dateKey) {
+  return scheduleEntries.filter((entry) => entry.workout_date === dateKey)
 }
 
-function getWeeklyPlanEntry(dateKey) {
+function hasDateScheduleOverride(dateKey) {
+  return getScheduleEntries(dateKey).length > 0
+}
+
+function getWeeklyPlanEntries(dateKey) {
   const weekday = dateFromKey(dateKey).getDay()
-  return weeklyPlanEntries.find((entry) => Number(entry.weekday) === weekday) || null
+  return weeklyPlanEntries.filter((entry) => Number(entry.weekday) === weekday)
 }
 
-function getWeeklyFolder(dateKey) {
-  const entry = getWeeklyPlanEntry(dateKey)
-  return entry ? folders.find((folder) => folder.id === entry.folder_id) || null : null
+function getWeeklyFolders(dateKey) {
+  const ids = new Set(getWeeklyPlanEntries(dateKey).map((entry) => entry.folder_id))
+  return folders.filter((folder) => ids.has(folder.id))
+}
+
+function getScheduledFolders(dateKey) {
+  const overrides = getScheduleEntries(dateKey)
+  if (overrides.length) {
+    const chosenIds = new Set(overrides.filter((entry) => !entry.is_skipped && entry.folder_id).map((entry) => entry.folder_id))
+    return folders.filter((folder) => chosenIds.has(folder.id))
+  }
+  return getWeeklyFolders(dateKey)
 }
 
 function getScheduledFolder(dateKey) {
-  const entry = getScheduleEntry(dateKey)
-  if (entry) {
-    if (entry.is_skipped) return null
-    return folders.find((folder) => folder.id === entry.folder_id) || null
-  }
-  return getWeeklyFolder(dateKey)
+  return getScheduledFolders(dateKey)[0] || null
 }
 
 function wasWorkoutCompleted(dateKey, folderId) {
   return workoutHistory.some((entry) => entry.workout_date === dateKey && entry.folder_id === folderId)
 }
 
-function getMissedYesterdayFolder() {
-  if (!historyAvailable || !planningUpgradeAvailable || getScheduledFolder(todayDateKey())) return null
+function getMissedYesterdayFolders() {
+  if (!historyAvailable || !planningUpgradeAvailable || getScheduledFolders(todayDateKey()).length) return []
   const yesterday = addDaysKey(todayDateKey(), -1)
-  const folder = getScheduledFolder(yesterday)
-  if (!folder || wasWorkoutCompleted(yesterday, folder.id)) return null
-  return folder
+  return getScheduledFolders(yesterday).filter((folder) => !wasWorkoutCompleted(yesterday, folder.id))
 }
 
 function queueCloudProgress(task) {
@@ -572,7 +606,7 @@ async function downloadFullBackup() {
     let historyRows = []
     if (planningUpgradeAvailable) {
       const [weeklyResult, historyResult] = await Promise.all([
-        supabase.from('workout_weekly_plan').select('id,weekday,folder_id,created_at,updated_at').order('weekday', { ascending: true }),
+        supabase.from('workout_weekly_plan').select('id,weekday,folder_id,created_at,updated_at').order('weekday', { ascending: true }).order('created_at', { ascending: true }),
         supabase.from('workout_history').select('id,workout_date,folder_id,completed_at').order('workout_date', { ascending: true })
       ])
       if (!weeklyResult.error) weeklyPlanRows = weeklyResult.data || []
@@ -592,7 +626,9 @@ async function downloadFullBackup() {
       history: historyRows
     }
 
-    const chunks = []
+    const parts = []
+    let chunks = []
+    let chunkBytes = 0
     let zipResolve
     let zipReject
     const zipFinished = new Promise((resolve, reject) => {
@@ -605,7 +641,14 @@ async function downloadFullBackup() {
         return
       }
       chunks.push(data)
-      if (final) zipResolve(new Blob(chunks, { type: 'application/zip' }))
+      chunkBytes += data.length
+      // Fold finished chunks into a Blob regularly so the whole library never sits in JS memory at once.
+      if (chunkBytes >= 16 * 1024 * 1024 || final) {
+        parts.push(new Blob(chunks))
+        chunks = []
+        chunkBytes = 0
+      }
+      if (final) zipResolve(new Blob(parts, { type: 'application/zip' }))
     })
 
     addZipBytes(zip, 'battle-angel-backup.json', strToU8(JSON.stringify(manifest, null, 2)))
@@ -642,6 +685,8 @@ async function downloadFullBackup() {
 
 function renderLogin(message = '') {
   workoutMode = false
+  viewVersion += 1
+  currentView = 'login'
   app.innerHTML = `
     <main class="shell login-wrap">
       <section class="login-card" aria-labelledby="login-title">
@@ -688,7 +733,7 @@ function renderLogin(message = '') {
 }
 
 async function ensureDefaultFolders() {
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('folders')
     .select('id,name,sort_order,created_at')
     .order('sort_order', { ascending: true })
@@ -697,50 +742,21 @@ async function ensureDefaultFolders() {
   if (error) throw error
 
   const visibleFolders = data.filter((folder) => folder.name !== MOTIVATION_FOLDER_NAME)
+  if (visibleFolders.length) return data
 
-  if (!visibleFolders.length) {
-    const rows = DEFAULT_FOLDERS.map((name, index) => ({
-      user_id: currentUser.id,
-      name,
-      sort_order: index + 1
-    }))
+  const rows = DEFAULT_FOLDERS.map((name, index) => ({
+    user_id: currentUser.id,
+    name,
+    sort_order: index + 1
+  }))
 
-    const { data: created, error: insertError } = await supabase
-      .from('folders')
-      .insert(rows)
-      .select('id,name,sort_order,created_at')
-
-    if (insertError) throw insertError
-    return created.sort((a, b) => a.sort_order - b.sort_order)
-  }
-
-  const arms = data.find((folder) => folder.name.toLowerCase() === 'arms')
-  const hasBiceps = data.some((folder) => folder.name.toLowerCase() === 'biceps')
-  const hasTriceps = data.some((folder) => folder.name.toLowerCase() === 'triceps')
-  if (arms && !hasBiceps) {
-    const { error: renameError } = await supabase
-      .from('folders')
-      .update({ name: 'Biceps', sort_order: 5 })
-      .eq('id', arms.id)
-    if (renameError) throw renameError
-
-    if (!hasTriceps) {
-      const { error: tricepsError } = await supabase.from('folders').insert({
-        user_id: currentUser.id,
-        name: 'Triceps',
-        sort_order: 6
-      })
-      if (tricepsError) throw tricepsError
-    }
-  }
-
-  const { data: finalFolders, error: finalError } = await supabase
+  const { data: created, error: insertError } = await supabase
     .from('folders')
+    .insert(rows)
     .select('id,name,sort_order,created_at')
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true })
-  if (finalError) throw finalError
-  return finalFolders
+
+  if (insertError) throw insertError
+  return [...data, ...created.sort((a, b) => a.sort_order - b.sort_order)]
 }
 
 async function ensureMotivationFolder(existingFolders = []) {
@@ -770,8 +786,10 @@ async function ensureMotivationFolder(existingFolders = []) {
 }
 
 async function loadMotivationVideos() {
-  motivationVideos = []
-  if (!motivationFolder) return
+  if (!motivationFolder) {
+    motivationVideos = []
+    return
+  }
 
   const { data: rows, error } = await supabase
     .from('exercises')
@@ -781,41 +799,297 @@ async function loadMotivationVideos() {
     .order('created_at', { ascending: true })
 
   if (error) throw error
-  if (!rows.length) return
+  motivationVideos = await hydrateMotivationRows(rows || [])
+}
 
-  const { data: signed, error: signError } = await supabase.storage
-    .from(VIDEO_BUCKET)
-    .createSignedUrls(rows.map((row) => row.video_path), 60 * 60 * 12)
-
-  if (signError) throw signError
-  motivationVideos = rows.map((row, index) => ({
-    ...row,
-    signedUrl: signed[index]?.signedUrl || ''
-  }))
+async function hydrateMotivationRows(rows) {
+  const keep = new Set(rows.map((row) => row.video_path))
+  for (const [path, url] of motivationUrlByPath) {
+    if (!keep.has(path)) {
+      URL.revokeObjectURL(url)
+      motivationUrlByPath.delete(path)
+    }
+  }
+  if (!rows.length) return []
+  return hydrateVideoRows(rows, null, motivationUrlByPath)
 }
 
 async function loadFolders() {
   const allFolders = await ensureDefaultFolders()
   motivationFolder = await ensureMotivationFolder(allFolders)
-  folders = allFolders.filter((folder) => folder.name !== MOTIVATION_FOLDER_NAME)
-  const { data: rows, error } = await supabase
-    .from('exercises')
-    .select('folder_id,exercise_group')
+  const visibleFolders = allFolders.filter((folder) => folder.name !== MOTIVATION_FOLDER_NAME)
 
-  if (error) throw error
+  const [countResult] = await Promise.all([
+    supabase.from('exercises').select('folder_id,exercise_group'),
+    loadMotivationVideos(),
+    loadSchedule()
+  ])
+  if (countResult.error) throw countResult.error
 
   const groupMap = {}
-  rows.forEach((row) => {
+  ;(countResult.data || []).forEach((row) => {
     if (!groupMap[row.folder_id]) groupMap[row.folder_id] = new Set()
     groupMap[row.folder_id].add(row.exercise_group)
   })
 
-  folders = folders.map((folder) => ({
+  folders = visibleFolders.map((folder) => ({
     ...folder,
     count: groupMap[folder.id]?.size || 0
   }))
+  usingCachedData = false
+  saveSnapshot()
+  flushPendingWrites()
+}
 
-  await Promise.all([loadMotivationVideos(), loadSchedule()])
+// ---------- offline-first helpers ----------
+
+function snapshotKey() {
+  return `battle-angel-snapshot-${currentUser?.id || 'anon'}`
+}
+
+function folderRowsKey(folderId) {
+  return `battle-angel-rows-${currentUser?.id || 'anon'}-${folderId}`
+}
+
+function pendingKey() {
+  return `battle-angel-pending-${currentUser?.id || 'anon'}`
+}
+
+function readJson(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writeJson(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Storage full or blocked: the app still works online.
+  }
+}
+
+function stripVideoUrls(rows) {
+  return rows.map(({ signedUrl, offline, ...row }) => row)
+}
+
+function saveSnapshot() {
+  if (!currentUser) return
+  writeJson(snapshotKey(), {
+    savedAt: Date.now(),
+    folders,
+    motivationFolder,
+    motivationRows: stripVideoUrls(motivationVideos),
+    scheduleEntries,
+    weeklyPlanEntries,
+    workoutHistory
+  })
+}
+
+async function restoreSnapshot() {
+  const snapshot = readJson(snapshotKey(), null)
+  if (!snapshot || !Array.isArray(snapshot.folders)) return false
+  folders = snapshot.folders
+  motivationFolder = snapshot.motivationFolder || null
+  scheduleEntries = snapshot.scheduleEntries || []
+  weeklyPlanEntries = snapshot.weeklyPlanEntries || []
+  workoutHistory = mergePendingCompletions(snapshot.workoutHistory || [])
+  motivationVideos = await hydrateMotivationRows(snapshot.motivationRows || [])
+  return true
+}
+
+function cacheFolderRows(folderId, rows) {
+  writeJson(folderRowsKey(folderId), stripVideoUrls(rows))
+}
+
+function readCachedFolderRows(folderId) {
+  const rows = readJson(folderRowsKey(folderId), null)
+  return Array.isArray(rows) ? rows : null
+}
+
+function raceTimeout(promise, ms) {
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error('Network timeout')), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer))
+}
+
+function isNetworkError(error) {
+  const text = `${error?.name || ''} ${error?.message || error || ''}`.toLowerCase()
+  return navigator.onLine === false || /fetch|network|timeout|load failed|offline|retryable/.test(text)
+}
+
+async function fetchFolderRows(folderId) {
+  const cached = readCachedFolderRows(folderId)
+  if (navigator.onLine === false && cached) return { rows: cached, fromCache: true }
+  try {
+    const query = supabase
+      .from('exercises')
+      .select(EXERCISE_COLUMNS)
+      .eq('folder_id', folderId)
+      .order('sort_order', { ascending: true })
+      .order('video_order', { ascending: true })
+      .order('created_at', { ascending: true })
+    const { data, error } = cached ? await raceTimeout(query, NETWORK_FALLBACK_MS) : await query
+    if (error) throw error
+    const rows = data || []
+    cacheFolderRows(folderId, rows)
+    return { rows, fromCache: false }
+  } catch (error) {
+    if (cached) return { rows: cached, fromCache: true }
+    throw error
+  }
+}
+
+async function signVideoPaths(paths) {
+  const now = Date.now()
+  const unique = [...new Set(paths.filter(Boolean))]
+  const missing = unique.filter((path) => {
+    const cached = signedUrlCache.get(path)
+    return !cached || cached.expiresAt - now < 60 * 60 * 1000
+  })
+  if (missing.length && navigator.onLine !== false) {
+    try {
+      const { data, error } = await raceTimeout(supabase.storage.from(VIDEO_BUCKET).createSignedUrls(missing, SIGNED_URL_TTL_SECONDS), SIGN_TIMEOUT_MS)
+      if (error) throw error
+      ;(data || []).forEach((item, index) => {
+        const path = item?.path || missing[index]
+        if (item?.signedUrl) signedUrlCache.set(path, { url: item.signedUrl, expiresAt: now + SIGNED_URL_TTL_SECONDS * 1000 })
+      })
+      lastVideoSignAt = now
+    } catch (error) {
+      console.warn('Could not sign video URLs:', error)
+    }
+  }
+  return Object.fromEntries(unique.map((path) => [path, signedUrlCache.get(path)?.url || '']))
+}
+
+// Saved (offline) copies win; everything else gets a reusable signed URL so the browser can cache it.
+async function hydrateVideoRows(rows, objectUrlBucket = offlineObjectUrls, objectUrlByPath = null) {
+  const withBlobs = await Promise.all(rows.map(async (row) => {
+    if (objectUrlByPath?.has(row.video_path)) return { row, existingUrl: objectUrlByPath.get(row.video_path) }
+    return { row, blob: await getOfflineVideo(row.video_path) }
+  }))
+  const needsSigning = withBlobs.filter((item) => !item.blob && !item.existingUrl).map((item) => item.row.video_path)
+  const signed = needsSigning.length ? await signVideoPaths(needsSigning) : {}
+  return withBlobs.map(({ row, blob, existingUrl }) => {
+    if (existingUrl) return { ...row, signedUrl: existingUrl, offline: true }
+    if (blob) {
+      const offlineUrl = URL.createObjectURL(blob)
+      if (objectUrlByPath) objectUrlByPath.set(row.video_path, offlineUrl)
+      else objectUrlBucket.push(offlineUrl)
+      return { ...row, signedUrl: offlineUrl, offline: true }
+    }
+    return { ...row, signedUrl: signed[row.video_path] || '', offline: false }
+  })
+}
+
+function readPending() {
+  const pending = readJson(pendingKey(), {})
+  return {
+    weights: pending.weights && typeof pending.weights === 'object' ? pending.weights : {},
+    completions: Array.isArray(pending.completions) ? pending.completions : []
+  }
+}
+
+function writePending(pending) {
+  writeJson(pendingKey(), pending)
+}
+
+function mergePendingCompletions(history) {
+  const pending = currentUser ? readPending().completions : []
+  const merged = [...history]
+  pending.forEach((item) => {
+    if (!merged.some((entry) => entry.workout_date === item.workout_date && entry.folder_id === item.folder_id)) {
+      merged.unshift({ id: `pending-${item.folder_id}-${item.workout_date}`, ...item })
+    }
+  })
+  return merged
+}
+
+let flushingPending = false
+async function flushPendingWrites() {
+  if (!currentUser || flushingPending || navigator.onLine === false) return
+  const pending = readPending()
+  if (!Object.keys(pending.weights).length && !pending.completions.length) return
+  flushingPending = true
+  try {
+    for (const [groupId, value] of Object.entries(pending.weights)) {
+      const { error } = await supabase.from('exercises').update({ last_weight: value }).eq('exercise_group', groupId)
+      if (!error) {
+        const next = readPending()
+        if (next.weights[groupId] === value) delete next.weights[groupId]
+        writePending(next)
+      }
+    }
+    for (const item of pending.completions) {
+      const { error } = await supabase.from('workout_history').upsert({
+        user_id: currentUser.id,
+        workout_date: item.workout_date,
+        folder_id: item.folder_id,
+        completed_at: item.completed_at
+      }, { onConflict: 'user_id,workout_date,folder_id' })
+      if (!error) {
+        const next = readPending()
+        next.completions = next.completions.filter((entry) => !(entry.workout_date === item.workout_date && entry.folder_id === item.folder_id))
+        writePending(next)
+      }
+    }
+  } finally {
+    flushingPending = false
+  }
+}
+
+function dataSignature() {
+  return JSON.stringify([folders, scheduleEntries, weeklyPlanEntries, workoutHistory.map((entry) => [entry.workout_date, entry.folder_id]), motivationVideos.map((video) => video.id)])
+}
+
+// Re-render the current tab with fresh data, but only if the user hasn't moved on and something actually changed.
+async function refreshInBackground() {
+  if (!currentUser) return
+  const version = viewVersion
+  const before = dataSignature()
+  const wasCached = usingCachedData
+  try {
+    await loadFolders()
+  } catch (error) {
+    console.warn('Background refresh failed:', error)
+    return
+  }
+  if (viewVersion !== version || (dataSignature() === before && !wasCached)) return
+  if (currentView === 'home') renderHome()
+  else if (currentView === 'workouts') renderWorkouts()
+}
+
+function requestPersistentStorage() {
+  try {
+    navigator.storage?.persist?.().catch(() => {})
+  } catch {
+    // Not supported: saved videos still work, the browser may just evict them under pressure.
+  }
+}
+
+async function deleteOfflineVideos(paths) {
+  const list = (paths || []).filter(Boolean)
+  if (!list.length) return
+  try {
+    const db = await openOfflineVideoDb()
+    await new Promise((resolve) => {
+      const tx = db.transaction(OFFLINE_DB_STORE, 'readwrite')
+      const store = tx.objectStore(OFFLINE_DB_STORE)
+      list.forEach((path) => store.delete(path))
+      tx.oncomplete = resolve
+      tx.onerror = resolve
+    })
+    db.close()
+  } catch {
+    // Nothing saved on this device.
+  }
+  list.forEach((path) => signedUrlCache.delete(path))
 }
 
 function getRestMotivationVideo() {
@@ -835,21 +1109,6 @@ function chooseMotivationForNewRest() {
   return motivationVideos[nextIndex]
 }
 
-function renderRestMotivationPlayer() {
-  const video = getRestMotivationVideo()
-  if (!video) return ''
-
-  return `
-    <div class="rest-motivation" id="rest-motivation">
-      <div class="rest-motivation-label">
-        <span>motivation</span>
-        <span>${escapeHtml(video.name)}</span>
-      </div>
-      <video id="rest-motivation-video" playsinline webkit-playsinline preload="metadata" loop src="${escapeHtml(video.signedUrl)}" aria-label="Motivation video: ${escapeHtml(video.name)}"></video>
-      <button type="button" id="motivation-play-fallback" class="motivation-play-fallback hidden">Play motivation</button>
-    </div>`
-}
-
 function stopRestMotivationPlayback(resetToStart = false) {
   const video = document.querySelector('#rest-motivation-video')
   if (!video) return
@@ -863,34 +1122,71 @@ function stopRestMotivationPlayback(resetToStart = false) {
   }
 }
 
-function syncRestMotivationPlayback() {
-  const video = document.querySelector('#rest-motivation-video')
-  const fallback = document.querySelector('#motivation-play-fallback')
-  if (!video) return
+function motivationSoundOn() {
+  try {
+    return window.localStorage.getItem(MOTIVATION_SOUND_KEY) === 'on'
+  } catch {
+    return false
+  }
+}
 
-  if (fallback) {
-    fallback.addEventListener('click', () => {
-      const result = video.play()
-      if (result?.then) result.then(() => fallback.classList.add('hidden')).catch(() => {})
+function setMotivationSound(on) {
+  try {
+    window.localStorage.setItem(MOTIVATION_SOUND_KEY, on ? 'on' : 'off')
+  } catch {
+    // Preference just won't persist.
+  }
+}
+
+function showRestLockScreen() {
+  if (!timerEndAt) return
+  viewVersion += 1
+  currentView = 'rest'
+  keepAwake()
+  const video = getRestMotivationVideo()
+  const remaining = getRemainingSeconds()
+  const soundOn = motivationSoundOn()
+  app.innerHTML = `
+    <main class="rest-lock-screen" aria-label="Rest timer">
+      ${video?.signedUrl ? `<video id="rest-motivation-video" class="rest-lock-video" playsinline webkit-playsinline preload="auto" loop ${soundOn ? '' : 'muted'} src="${escapeHtml(video.signedUrl)}" aria-label="Motivation video"></video>` : '<div class="rest-lock-blank" aria-hidden="true"></div>'}
+      <div id="timer-value" class="rest-lock-timer" aria-live="off">${formatTime(remaining)}</div>
+      ${video?.signedUrl ? `<div id="rest-sound-hint" class="rest-sound-hint">${soundOn ? 'sound on · tap to mute' : 'muted · tap for sound'}</div>` : ''}
+    </main>`
+
+  const restVideo = document.querySelector('#rest-motivation-video')
+  if (restVideo) {
+    restVideo.loop = true
+    restVideo.muted = !soundOn
+    const tryPlay = () => {
+      const result = restVideo.play()
+      if (result?.catch) result.catch(() => {})
+    }
+    tryPlay()
+    const shownAt = Date.now()
+    document.querySelector('.rest-lock-screen')?.addEventListener('pointerdown', () => {
+      if (Date.now() - shownAt < 700) return
+      const nextSoundOn = restVideo.muted
+      restVideo.muted = !nextSoundOn
+      setMotivationSound(nextSoundOn)
+      const hint = document.querySelector('#rest-sound-hint')
+      if (hint) hint.textContent = nextSoundOn ? 'sound on · tap to mute' : 'muted · tap for sound'
+      tryPlay()
     })
   }
+  updateTimerUI()
+}
 
-  if (!timerEndAt) {
-    video.pause()
+function returnFromRestScreen() {
+  if (currentView !== 'rest') return
+  if (workoutMode && activeFolder && workoutState) {
+    renderWorkout()
     return
   }
-
-  const panel = document.querySelector('#timer-panel')
-  const toggle = document.querySelector('#timer-toggle')
-  panel?.classList.remove('hidden')
-  toggle?.setAttribute('aria-expanded', 'true')
-
-  video.loop = true
-  video.muted = false
-  const result = video.play()
-  if (result?.catch) {
-    result.catch(() => fallback?.classList.remove('hidden'))
+  if (activeFolder) {
+    renderFolder(activeExerciseGroups)
+    return
   }
+  renderHome()
 }
 
 function renderBottomNav(activeTab) {
@@ -912,7 +1208,7 @@ function bindBottomNav() {
       if (tab === 'workouts') renderWorkouts()
       if (tab === 'plan') {
         plannerMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-        plannerSelectedDate = plannerSelectedDate || todayDateKey()
+        if (!plannerSelectedDate || plannerSelectedDate.slice(0, 7) !== todayDateKey().slice(0, 7)) plannerSelectedDate = todayDateKey()
         renderPlanner()
       }
       if (tab === 'more') renderMore()
@@ -924,6 +1220,8 @@ function renderShell(content, options = {}) {
   const title = options.title || (activeFolder ? activeFolder.name : 'Today')
   const showAccount = options.showAccount !== false
   const showTimer = options.showTimer !== false
+  viewVersion += 1
+  currentView = options.view || options.navTab || ''
   app.innerHTML = `
     <main class="shell ${workoutMode ? 'workout-shell' : ''} ${options.navTab ? 'has-bottom-nav' : ''}">
       <header class="topbar">
@@ -932,22 +1230,9 @@ function renderShell(content, options = {}) {
           <h1 id="page-title">${escapeHtml(title)}</h1>
         </div>
         ${showTimer ? `<div class="topbar-actions">
-          <button type="button" id="timer-toggle" class="timer-chip" aria-expanded="${timerEndAt ? 'true' : 'false'}">rest <span id="timer-mini">2:30</span></button>
+          <button type="button" id="timer-toggle" class="timer-chip">rest <span id="timer-mini">2:30</span></button>
         </div>` : ''}
       </header>
-      ${showTimer ? `<section id="timer-panel" class="timer-panel ${timerEndAt ? '' : 'hidden'}" aria-label="Rest timer">
-        <div class="timer-row">
-          <div>
-            <div class="timer-label">REST</div>
-            <div id="timer-value" class="timer-value" aria-live="polite">2:30</div>
-          </div>
-          <div class="timer-actions">
-            <button type="button" id="timer-start" class="primary-button">Start</button>
-            <button type="button" id="timer-reset" class="secondary-button">Reset</button>
-          </div>
-        </div>
-        ${renderRestMotivationPlayer()}
-      </section>` : ''}
       <div id="main-content">${content}</div>
       ${showAccount ? `<details class="account-menu">
         <summary>More</summary>
@@ -966,7 +1251,6 @@ function renderShell(content, options = {}) {
   if (showTimer) {
     bindTimerControls()
     updateTimerUI()
-    syncRestMotivationPlayback()
   }
   if (showAccount) {
     document.querySelector('#theme-toggle')?.addEventListener('click', toggleTheme)
@@ -1020,46 +1304,58 @@ function renderHome(errorMessage = '') {
   const saved = workoutState || readWorkoutState()
   const savedFolder = saved ? folders.find((folder) => folder.id === saved.folderId) : null
   const todayKey = todayDateKey()
-  const todayFolder = getScheduledFolder(todayKey)
-  const todaySaved = todayFolder && saved?.folderId === todayFolder.id
-  const missedFolder = savedFolder ? null : getMissedYesterdayFolder()
+  const todayFolders = getScheduledFolders(todayKey)
+  const missedFolders = savedFolder ? [] : getMissedYesterdayFolders()
+  const todayIds = new Set(todayFolders.map((folder) => folder.id))
 
-  const resumeCard = savedFolder && (!todayFolder || savedFolder.id !== todayFolder.id) ? `
+  const resumeCard = savedFolder && !todayIds.has(savedFolder.id) ? `
     <button type="button" class="resume-home" id="resume-home">
       <span>Resume</span>
       <strong>${escapeHtml(savedFolder.name)}</strong>
     </button>` : ''
 
+  const todayRows = todayFolders.map((folder) => {
+    const isSaved = saved?.folderId === folder.id
+    const isDone = wasWorkoutCompleted(todayKey, folder.id)
+    return `
+      <div class="today-workout-row">
+        <div class="today-workout-name">${escapeHtml(folder.name)}</div>
+        <button type="button" class="start-workout-button today-module-start" data-start-today="${folder.id}" ${isDone ? 'disabled' : ''}>${isDone ? 'Done' : (isSaved ? 'Resume' : 'Start')}</button>
+      </div>`
+  }).join('')
+
   const todayCard = `
     <section class="today-card">
       <div class="today-label">Today</div>
-      ${todayFolder ? `
-        <div class="today-workout">${escapeHtml(todayFolder.name)}</div>
-        <button type="button" class="start-workout-button today-start" id="start-today">${todaySaved ? 'Resume workout' : 'Start workout'}</button>
+      ${todayFolders.length ? `
+        <div class="today-workout-list">${todayRows}</div>
         <button type="button" class="quiet-action" id="preload-today">Save videos</button>
         <div id="preload-status" class="micro-status" aria-live="polite"></div>` : `
         <div class="today-empty">No workout planned</div>
         <button type="button" class="secondary-button full-button today-choose" id="choose-workout">Choose workout</button>`}
     </section>`
 
-  const missedCard = missedFolder ? `
+  const missedCard = missedFolders.length ? `
     <button type="button" class="missed-card" id="move-missed-today">
       <span>Missed yesterday</span>
-      <strong>${escapeHtml(missedFolder.name)}</strong>
+      <strong>${escapeHtml(missedFolders.map((folder) => folder.name).join(' + '))}</strong>
       <small>Move to today</small>
     </button>` : ''
 
   renderShell(`
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
+    ${usingCachedData ? '<div class="offline-note">Offline · showing your saved plan</div>' : ''}
     ${resumeCard}
     ${todayCard}
-    ${missedCard}`, { title: 'Today', showAccount: false, showTimer: false, navTab: 'today' })
+    ${missedCard}`, { title: 'Today', showAccount: false, showTimer: false, navTab: 'today', view: 'home' })
 
-  document.querySelector('#start-today')?.addEventListener('click', () => openFolder(todayFolder.id, { mode: 'workout' }))
+  document.querySelectorAll('[data-start-today]').forEach((button) => {
+    button.addEventListener('click', () => openFolder(button.dataset.startToday, { mode: 'workout' }))
+  })
   document.querySelector('#resume-home')?.addEventListener('click', () => openFolder(savedFolder.id, { mode: 'workout' }))
   document.querySelector('#choose-workout')?.addEventListener('click', renderWorkouts)
   document.querySelector('#move-missed-today')?.addEventListener('click', moveMissedToToday)
-  document.querySelector('#preload-today')?.addEventListener('click', () => preloadFolderVideos(todayFolder.id))
+  document.querySelector('#preload-today')?.addEventListener('click', () => preloadScheduledVideos(todayFolders))
 }
 
 function renderWorkouts(errorMessage = '') {
@@ -1084,7 +1380,7 @@ function renderWorkouts(errorMessage = '') {
         <button class="primary-button" type="submit">Add</button>
       </form>
       <div id="folder-status" class="status-line inline-status" aria-live="polite"></div>
-    </details>`, { title: 'Workouts', showAccount: false, showTimer: false, navTab: 'workouts' })
+    </details>`, { title: 'Workouts', showAccount: false, showTimer: false, navTab: 'workouts', view: 'workouts' })
 
   document.querySelectorAll('[data-folder-id]').forEach((button) => {
     button.addEventListener('click', () => openFolder(button.dataset.folderId))
@@ -1116,6 +1412,12 @@ function renderMore(errorMessage = '') {
   })
 }
 
+function calendarWorkoutLabel(folderList) {
+  if (!folderList.length) return ''
+  const names = folderList.slice(0, 2).map((folder) => folder.name)
+  return `${names.join(' · ')}${folderList.length > 2 ? ` +${folderList.length - 2}` : ''}`
+}
+
 function calendarCells(monthStart) {
   const year = monthStart.getFullYear()
   const month = monthStart.getMonth()
@@ -1127,13 +1429,13 @@ function calendarCells(monthStart) {
   for (let day = 1; day <= days; day += 1) {
     const date = new Date(year, month, day)
     const key = formatLocalDateKey(date)
-    const scheduled = getScheduledFolder(key)
+    const scheduled = getScheduledFolders(key)
     const isToday = key === todayDateKey()
     const selected = key === plannerSelectedDate
     cells.push(`
-      <button type="button" class="calendar-day ${isToday ? 'is-today' : ''} ${scheduled ? 'is-planned' : ''} ${selected ? 'is-selected' : ''}" data-plan-date="${key}">
+      <button type="button" class="calendar-day ${isToday ? 'is-today' : ''} ${scheduled.length ? 'is-planned' : ''} ${selected ? 'is-selected' : ''}" data-plan-date="${key}">
         <span class="calendar-number">${day}</span>
-        ${scheduled ? `<span class="calendar-workout">${escapeHtml(scheduled.name)}</span>` : ''}
+        ${scheduled.length ? `<span class="calendar-workout">${escapeHtml(calendarWorkoutLabel(scheduled))}</span>` : ''}
       </button>`)
   }
   return cells.join('')
@@ -1146,10 +1448,13 @@ function renderPlanner(errorMessage = '') {
   folderEditMode = false
   if (!plannerSelectedDate) plannerSelectedDate = todayDateKey()
 
-  const selectedFolder = getScheduledFolder(plannerSelectedDate)
+  const selectedFolders = getScheduledFolders(plannerSelectedDate)
+  const selectedIds = new Set(selectedFolders.map((folder) => folder.id))
+  const weeklyFolders = getWeeklyFolders(plannerSelectedDate)
   const tomorrowKey = addDaysKey(plannerSelectedDate, 1)
   const folderButtons = folders.map((folder) => `
-    <button type="button" class="plan-muscle-button ${selectedFolder?.id === folder.id ? 'selected' : ''}" data-schedule-folder="${folder.id}">${escapeHtml(folder.name)}</button>`).join('')
+    <button type="button" class="plan-muscle-button ${selectedIds.has(folder.id) ? 'selected' : ''}" data-schedule-folder="${folder.id}">${escapeHtml(folder.name)}</button>`).join('')
+  const moveOptions = selectedFolders.map((folder) => `<option value="${folder.id}">${escapeHtml(folder.name)}</option>`).join('')
 
   renderShell(`
     <div class="planner-toolbar">
@@ -1162,7 +1467,7 @@ function renderPlanner(errorMessage = '') {
     </div>
     <button type="button" class="quiet-action planner-repeat" id="repeat-last-week">Repeat last week</button>
     ${!scheduleAvailable ? `<div class="notice error">Planning is not enabled yet.</div>` : ''}
-    ${!planningUpgradeAvailable ? `<div class="notice info">Run the new planning upgrade SQL once to enable weekly plans and missed-day handling.</div>` : ''}
+    ${!planningUpgradeAvailable ? `<div class="notice info">Run the planning upgrade SQL once.</div>` : ''}
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${plannerStatusMessage ? `<div class="status-line planner-status">${escapeHtml(plannerStatusMessage)}</div>` : ''}
     <div class="calendar-weekdays" aria-hidden="true">
@@ -1172,15 +1477,17 @@ function renderPlanner(errorMessage = '') {
     <section class="plan-day-editor">
       <div class="plan-day-title">${escapeHtml(formatPlanDate(plannerSelectedDate))}</div>
       <div class="plan-muscle-grid">${folderButtons}</div>
-      ${selectedFolder ? `<div class="plan-day-actions">
+      ${selectedFolders.length ? `<div class="plan-day-actions">
         <details class="move-plan">
           <summary>Move</summary>
           <form id="move-plan-form" class="move-plan-form">
+            ${selectedFolders.length > 1 ? `<select id="move-plan-folder" aria-label="Workout to move">${moveOptions}</select>` : `<input id="move-plan-folder" type="hidden" value="${selectedFolders[0].id}" />`}
             <input id="move-plan-date" type="date" value="${tomorrowKey}" aria-label="Move workout to date" />
             <button type="submit" class="secondary-button">Move</button>
           </form>
         </details>
-        <button type="button" class="text-button danger-text" id="clear-plan">Clear</button>
+        <button type="button" class="text-button danger-text" id="clear-plan">Clear day</button>
+        ${hasDateScheduleOverride(plannerSelectedDate) && weeklyFolders.length ? '<button type="button" class="text-button" id="reset-weekly">Use weekly</button>' : ''}
       </div>` : ''}
     </section>`, { title: 'Plan', showAccount: false, showTimer: false, navTab: 'plan' })
 
@@ -1206,57 +1513,77 @@ function renderPlanner(errorMessage = '') {
     })
   })
   document.querySelectorAll('[data-schedule-folder]').forEach((button) => {
-    button.addEventListener('click', () => saveScheduledWorkout(plannerSelectedDate, button.dataset.scheduleFolder))
+    button.addEventListener('click', () => toggleScheduledWorkout(plannerSelectedDate, button.dataset.scheduleFolder))
   })
   document.querySelector('#clear-plan')?.addEventListener('click', () => clearScheduledWorkout(plannerSelectedDate))
+  document.querySelector('#reset-weekly')?.addEventListener('click', () => resetScheduledWorkoutToWeekly(plannerSelectedDate))
   document.querySelector('#move-plan-form')?.addEventListener('submit', (event) => {
     event.preventDefault()
-    const target = document.querySelector('#move-plan-date').value
-    moveScheduledWorkout(plannerSelectedDate, target)
+    moveScheduledWorkout(plannerSelectedDate, document.querySelector('#move-plan-date').value, document.querySelector('#move-plan-folder').value)
   })
 }
 
 function renderWeeklyPlan(errorMessage = '') {
   if (!planningUpgradeAvailable || !weeklyPlanAvailable) {
-    plannerStatusMessage = 'Run the planning upgrade SQL once first.'
+    plannerStatusMessage = 'Run the planning upgrade SQL first.'
     renderPlanner()
     return
   }
-  const days = [
-    [1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'], [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday'], [0, 'Sunday']
-  ]
-  const rows = days.map(([weekday, label]) => {
-    const current = weeklyPlanEntries.find((entry) => Number(entry.weekday) === weekday)
-    const options = [`<option value="">Rest</option>`, ...folders.map((folder) => `<option value="${folder.id}" ${current?.folder_id === folder.id ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`)].join('')
-    return `<label class="weekly-row"><span>${label}</span><select data-weekly-day="${weekday}">${options}</select></label>`
+  const labels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  const rows = labels.map((label, weekday) => {
+    const selected = new Set(weeklyPlanEntries.filter((entry) => Number(entry.weekday) === weekday).map((entry) => entry.folder_id))
+    const buttons = folders.map((folder) => `<button type="button" class="weekly-muscle-button ${selected.has(folder.id) ? 'selected' : ''}" data-weekly-day="${weekday}" data-weekly-folder="${folder.id}">${escapeHtml(folder.name)}</button>`).join('')
+    return `<section class="weekly-row"><div class="weekly-day-label">${label}</div><div class="weekly-muscle-grid">${buttons}</div></section>`
   }).join('')
+
   renderShell(`
     <button type="button" class="back-button" id="weekly-back">Back</button>
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     <div class="weekly-plan-list">${rows}</div>
     <div id="weekly-status" class="status-line planner-status" aria-live="polite"></div>`, { title: 'Weekly plan', showAccount: false, showTimer: false })
   document.querySelector('#weekly-back').addEventListener('click', renderPlanner)
-  document.querySelectorAll('[data-weekly-day]').forEach((select) => {
-    select.addEventListener('change', () => saveWeeklyPlanDay(Number(select.dataset.weeklyDay), select.value))
+  document.querySelectorAll('[data-weekly-day][data-weekly-folder]').forEach((button) => {
+    button.addEventListener('click', () => toggleWeeklyPlanDay(Number(button.dataset.weeklyDay), button.dataset.weeklyFolder))
   })
 }
 
-async function upsertScheduledWorkout(dateKey, folderId, isSkipped = false) {
-  const payload = {
-    user_id: currentUser.id,
-    workout_date: dateKey,
-    folder_id: isSkipped ? null : folderId,
-    updated_at: new Date().toISOString()
+async function saveDateOverride(dateKey, folderIds) {
+  const uniqueIds = [...new Set((folderIds || []).filter(Boolean))]
+  const { error: deleteError } = await supabase.from('workout_schedule').delete().eq('workout_date', dateKey)
+  if (deleteError) throw deleteError
+
+  if (uniqueIds.length) {
+    const rows = uniqueIds.map((folderId) => ({
+      user_id: currentUser.id,
+      workout_date: dateKey,
+      folder_id: folderId,
+      is_skipped: false,
+      updated_at: new Date().toISOString()
+    }))
+    const { error } = await supabase.from('workout_schedule').insert(rows)
+    if (error) throw error
+    return
   }
-  if (planningUpgradeAvailable) payload.is_skipped = Boolean(isSkipped)
-  const { error } = await supabase.from('workout_schedule').upsert(payload, { onConflict: 'user_id,workout_date' })
-  if (error) throw error
+
+  if (planningUpgradeAvailable && getWeeklyFolders(dateKey).length) {
+    const { error } = await supabase.from('workout_schedule').insert({
+      user_id: currentUser.id,
+      workout_date: dateKey,
+      folder_id: null,
+      is_skipped: true,
+      updated_at: new Date().toISOString()
+    })
+    if (error) throw error
+  }
 }
 
-async function saveScheduledWorkout(dateKey, folderId) {
+async function toggleScheduledWorkout(dateKey, folderId) {
   if (!scheduleAvailable || !dateKey || !folderId) return
+  const currentIds = new Set(getScheduledFolders(dateKey).map((folder) => folder.id))
+  if (currentIds.has(folderId)) currentIds.delete(folderId)
+  else currentIds.add(folderId)
   try {
-    await upsertScheduledWorkout(dateKey, folderId, false)
+    await saveDateOverride(dateKey, [...currentIds])
     await loadSchedule()
     plannerStatusMessage = ''
     renderPlanner()
@@ -1269,13 +1596,7 @@ async function saveScheduledWorkout(dateKey, folderId) {
 async function clearScheduledWorkout(dateKey) {
   if (!scheduleAvailable || !dateKey) return
   try {
-    const hasWeekly = Boolean(getWeeklyFolder(dateKey))
-    if (hasWeekly && planningUpgradeAvailable) {
-      await upsertScheduledWorkout(dateKey, null, true)
-    } else {
-      const { error } = await supabase.from('workout_schedule').delete().eq('workout_date', dateKey)
-      if (error) throw error
-    }
+    await saveDateOverride(dateKey, [])
     await loadSchedule()
     plannerStatusMessage = ''
     renderPlanner()
@@ -1284,20 +1605,29 @@ async function clearScheduledWorkout(dateKey) {
   }
 }
 
-async function moveScheduledWorkout(fromDate, toDate) {
-  if (!scheduleAvailable || !fromDate || !toDate || fromDate === toDate) return
-  const sourceFolder = getScheduledFolder(fromDate)
-  if (!sourceFolder) return
-  const existing = getScheduledFolder(toDate)
-  if (existing && existing.id !== sourceFolder.id && !confirm(`${formatPlanDate(toDate, { short: true })} already has a workout. Replace it?`)) return
+async function resetScheduledWorkoutToWeekly(dateKey) {
+  try {
+    const { error } = await supabase.from('workout_schedule').delete().eq('workout_date', dateKey)
+    if (error) throw error
+    await loadSchedule()
+    plannerStatusMessage = ''
+    renderPlanner()
+  } catch (error) {
+    renderPlanner(error.message)
+  }
+}
+
+async function moveScheduledWorkout(fromDate, toDate, folderId) {
+  if (!scheduleAvailable || !fromDate || !toDate || fromDate === toDate || !folderId) return
+  const sourceIds = getScheduledFolders(fromDate).map((folder) => folder.id)
+  if (!sourceIds.includes(folderId)) return
+  const targetIds = getScheduledFolders(toDate).map((folder) => folder.id)
+  const nextSource = sourceIds.filter((id) => id !== folderId)
+  const nextTarget = [...new Set([...targetIds, folderId])]
 
   try {
-    await upsertScheduledWorkout(toDate, sourceFolder.id, false)
-    if (planningUpgradeAvailable) await upsertScheduledWorkout(fromDate, null, true)
-    else {
-      const { error } = await supabase.from('workout_schedule').delete().eq('workout_date', fromDate)
-      if (error) throw error
-    }
+    await saveDateOverride(fromDate, nextSource)
+    await saveDateOverride(toDate, nextTarget)
     await loadSchedule()
     plannerSelectedDate = toDate
     plannerMonthStart = new Date(dateFromKey(toDate).getFullYear(), dateFromKey(toDate).getMonth(), 1)
@@ -1318,21 +1648,14 @@ function startOfWeekKey(dateKey) {
 async function repeatLastWeek() {
   if (!scheduleAvailable) return
   const weekStart = startOfWeekKey(plannerSelectedDate || todayDateKey())
-  const hasPlans = Array.from({ length: 7 }, (_, i) => getScheduledFolder(addDaysKey(weekStart, i))).some(Boolean)
+  const hasPlans = Array.from({ length: 7 }, (_, i) => getScheduledFolders(addDaysKey(weekStart, i)).length > 0).some(Boolean)
   if (hasPlans && !confirm('Replace this week with last week?')) return
   try {
     for (let i = 0; i < 7; i += 1) {
       const target = addDaysKey(weekStart, i)
       const source = addDaysKey(target, -7)
-      const sourceFolder = getScheduledFolder(source)
-      if (sourceFolder) {
-        await upsertScheduledWorkout(target, sourceFolder.id, false)
-      } else if (planningUpgradeAvailable && getWeeklyFolder(target)) {
-        await upsertScheduledWorkout(target, null, true)
-      } else {
-        const { error } = await supabase.from('workout_schedule').delete().eq('workout_date', target)
-        if (error) throw error
-      }
+      const sourceIds = getScheduledFolders(source).map((folder) => folder.id)
+      await saveDateOverride(target, sourceIds)
     }
     await loadSchedule()
     plannerStatusMessage = 'Last week copied.'
@@ -1342,12 +1665,13 @@ async function repeatLastWeek() {
   }
 }
 
-async function saveWeeklyPlanDay(weekday, folderId) {
+async function toggleWeeklyPlanDay(weekday, folderId) {
   const status = document.querySelector('#weekly-status')
+  const exists = weeklyPlanEntries.some((entry) => Number(entry.weekday) === weekday && entry.folder_id === folderId)
   if (status) status.textContent = 'Saving...'
   try {
-    if (!folderId) {
-      const { error } = await supabase.from('workout_weekly_plan').delete().eq('weekday', weekday)
+    if (exists) {
+      const { error } = await supabase.from('workout_weekly_plan').delete().eq('weekday', weekday).eq('folder_id', folderId)
       if (error) throw error
     } else {
       const { error } = await supabase.from('workout_weekly_plan').upsert({
@@ -1355,27 +1679,25 @@ async function saveWeeklyPlanDay(weekday, folderId) {
         weekday,
         folder_id: folderId,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id,weekday' })
+      }, { onConflict: 'user_id,weekday,folder_id' })
       if (error) throw error
     }
     await loadSchedule()
-    if (status) status.textContent = 'Saved'
+    renderWeeklyPlan()
   } catch (error) {
-    if (status) status.textContent = error.message
+    renderWeeklyPlan(error.message)
   }
 }
 
 async function moveMissedToToday() {
   const yesterday = addDaysKey(todayDateKey(), -1)
-  const folder = getScheduledFolder(yesterday)
-  if (!folder) return
+  const missed = getMissedYesterdayFolders()
+  if (!missed.length) return
   try {
-    await upsertScheduledWorkout(todayDateKey(), folder.id, false)
-    if (planningUpgradeAvailable) await upsertScheduledWorkout(yesterday, null, true)
-    else {
-      const { error } = await supabase.from('workout_schedule').delete().eq('workout_date', yesterday)
-      if (error) throw error
-    }
+    const todayIds = getScheduledFolders(todayDateKey()).map((folder) => folder.id)
+    await saveDateOverride(todayDateKey(), [...new Set([...todayIds, ...missed.map((folder) => folder.id)])])
+    const remainingYesterday = getScheduledFolders(yesterday).filter((folder) => wasWorkoutCompleted(yesterday, folder.id)).map((folder) => folder.id)
+    await saveDateOverride(yesterday, remainingYesterday)
     await loadSchedule()
     renderHome()
   } catch (error) {
@@ -1458,43 +1780,65 @@ function revokeOfflineObjectUrls() {
   offlineObjectUrls = []
 }
 
-async function preloadFolderVideos(folderId) {
+async function preloadScheduledVideos(folderList) {
   const button = document.querySelector('#preload-today')
   const status = document.querySelector('#preload-status')
-  if (!folderId || !button || !status) return
+  if (!button || !status || !folderList?.length) return
   button.disabled = true
-  status.textContent = 'Preparing...'
+  requestPersistentStorage()
   try {
-    const { data: rows, error } = await supabase
-      .from('exercises')
-      .select('name,video_path')
-      .eq('folder_id', folderId)
-      .order('sort_order', { ascending: true })
-      .order('video_order', { ascending: true })
-    if (error) throw error
-    if (!rows?.length) {
-      status.textContent = 'No videos yet.'
-      return
+    for (let i = 0; i < folderList.length; i += 1) {
+      status.textContent = `Saving ${i + 1}/${folderList.length} workouts...`
+      await preloadFolderVideos(folderList[i].id, { sharedButton: button, sharedStatus: status, quietFinish: true })
     }
-    const { data: signed, error: signError } = await supabase.storage.from(VIDEO_BUCKET).createSignedUrls(rows.map((row) => row.video_path), 60 * 60 * 12)
-    if (signError) throw signError
-    for (let i = 0; i < rows.length; i += 1) {
-      const existing = await getOfflineVideo(rows[i].video_path)
-      if (existing) {
-        status.textContent = `Saving videos ${i + 1}/${rows.length}`
-        continue
-      }
-      status.textContent = `Saving videos ${i + 1}/${rows.length}`
-      const response = await fetch(signed[i]?.signedUrl || '')
-      if (!response.ok) throw new Error(`Could not save ${rows[i].name}.`)
-      const blob = await response.blob()
-      await putOfflineVideo(rows[i].video_path, blob, rows[i].name)
+    if (motivationVideos.length) {
+      status.textContent = 'Saving motivation...'
+      await saveRowsOffline(motivationVideos, status, 'motivation')
+      motivationVideos = await hydrateMotivationRows(stripVideoUrls(motivationVideos))
     }
-    status.textContent = 'Videos ready.'
+    status.textContent = 'Videos ready. This phone can train offline.'
     button.textContent = 'Videos ready'
   } catch (error) {
     status.textContent = error.message || 'Could not save videos.'
     button.disabled = false
+  }
+}
+
+async function saveRowsOffline(rows, status, label = 'videos') {
+  const list = rows.filter((row) => row.video_path)
+  const missing = []
+  for (const row of list) {
+    if (!(await getOfflineVideo(row.video_path))) missing.push(row)
+  }
+  if (!missing.length) return
+  const signed = await signVideoPaths(missing.map((row) => row.video_path))
+  for (let i = 0; i < missing.length; i += 1) {
+    const row = missing[i]
+    if (status) status.textContent = `Saving ${label} ${i + 1}/${missing.length}`
+    const url = signed[row.video_path]
+    if (!url) throw new Error(`Could not save ${row.name}.`)
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`Could not save ${row.name}.`)
+    const blob = await response.blob()
+    await putOfflineVideo(row.video_path, blob, row.name)
+  }
+}
+
+async function preloadFolderVideos(folderId, options = {}) {
+  const button = options.sharedButton || document.querySelector('#preload-today')
+  const status = options.sharedStatus || document.querySelector('#preload-status')
+  if (!folderId || !button || !status) return
+  button.disabled = true
+  if (!options.quietFinish) status.textContent = 'Preparing...'
+  const { rows } = await fetchFolderRows(folderId)
+  if (!rows?.length) {
+    if (!options.quietFinish) status.textContent = 'No videos yet.'
+    return
+  }
+  await saveRowsOffline(rows, status)
+  if (!options.quietFinish) {
+    status.textContent = 'Videos ready.'
+    button.textContent = 'Videos ready'
   }
 }
 
@@ -1534,55 +1878,47 @@ async function openFolder(folderId, options = {}) {
   if (previousFolderId !== folder.id) folderEditMode = Boolean(options.editMode)
   else if (typeof options.editMode === 'boolean') folderEditMode = options.editMode
   renderFolderLoading()
+  const version = viewVersion
 
-  const { data: rows, error } = await supabase
-    .from('exercises')
-    .select('id,name,video_path,sort_order,video_order,exercise_group,created_at,sets_target,reps_target,last_weight,cue_1,cue_2,cue_3,backup_exercise')
-    .eq('folder_id', folder.id)
-    .order('sort_order', { ascending: true })
-    .order('video_order', { ascending: true })
-    .order('created_at', { ascending: true })
-
-  if (error) {
-    renderFolder([], error.message)
+  let result
+  try {
+    result = await fetchFolderRows(folder.id)
+  } catch (error) {
+    if (viewVersion !== version) return
+    renderFolderError(folder.id, options, error)
     return
   }
-
-  let signedUrlMap = {}
-  if (rows.length) {
-    const paths = rows.map((row) => row.video_path)
-    const { data: signed, error: signError } = await supabase.storage
-      .from(VIDEO_BUCKET)
-      .createSignedUrls(paths, 60 * 60 * 12)
-
-    if (signError) {
-      renderFolder([], signError.message)
-      return
-    }
-
-    signedUrlMap = Object.fromEntries(
-      rows.map((row, index) => [row.video_path, signed[index]?.signedUrl || ''])
-    )
-  }
+  if (viewVersion !== version) return
 
   revokeOfflineObjectUrls()
-  const hydratedRows = await Promise.all(rows.map(async (row) => {
-    const cachedBlob = await getOfflineVideo(row.video_path)
-    if (cachedBlob) {
-      const offlineUrl = URL.createObjectURL(cachedBlob)
-      offlineObjectUrls.push(offlineUrl)
-      return { ...row, signedUrl: offlineUrl, offline: true }
-    }
-    return { ...row, signedUrl: signedUrlMap[row.video_path], offline: false }
-  }))
+  const hydratedRows = await hydrateVideoRows(result.rows)
+  if (viewVersion !== version) return
   activeExerciseGroups = groupExerciseRows(hydratedRows)
 
   if (options.mode === 'workout' && activeExerciseGroups.length) {
-    startOrResumeWorkout({ forceResume: true })
+    startOrResumeWorkout()
     return
   }
 
-  renderFolder(activeExerciseGroups)
+  renderFolder(activeExerciseGroups, '', result.fromCache ? 'Offline · showing the saved copy of this workout.' : '')
+}
+
+function renderFolderError(folderId, options, error) {
+  const offline = navigator.onLine === false || /fetch|network|abort|timeout/i.test(String(error?.message || error))
+  renderShell(`
+    <section class="load-error-card">
+      <div class="load-error-title">${offline ? 'No connection' : 'Could not load this workout'}</div>
+      <p>${offline ? 'This workout has not been opened on this phone yet, so there is no saved copy. Tap Save videos on Today while you have signal.' : escapeHtml(error?.message || 'Please try again.')}</p>
+      <div class="load-error-actions">
+        <button type="button" class="primary-button" id="retry-folder">Try again</button>
+        <button type="button" class="secondary-button" id="error-back">Back</button>
+      </div>
+    </section>`, { showAccount: false, showTimer: false })
+  document.querySelector('#retry-folder').addEventListener('click', () => openFolder(folderId, options))
+  document.querySelector('#error-back').addEventListener('click', () => {
+    activeFolder = null
+    renderHome()
+  })
 }
 
 function renderFolderLoading() {
@@ -1653,8 +1989,9 @@ function renderPlanCard(group, index, total, editing = false) {
     </article>`
 }
 
-function renderFolder(groups, errorMessage = '') {
+function renderFolder(groups, errorMessage = '', infoMessage = '') {
   workoutMode = false
+  releaseWakeLock()
   if (!groups.length) folderEditMode = true
   const editing = folderEditMode
   const exerciseCards = groups.map((group, index) => renderPlanCard(group, index, groups.length, editing)).join('')
@@ -1670,6 +2007,7 @@ function renderFolder(groups, errorMessage = '') {
     ${groups.length ? `<button type="button" class="start-workout-button" id="start-workout">${escapeHtml(startLabel)} <span aria-hidden="true">&rarr;</span></button>` : ''}
     <button type="button" class="secondary-button full-button edit-workout-button ${editing ? 'editing' : ''}" id="toggle-edit-workout">${editing ? 'Done editing' : 'Edit workout'}</button>
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
+    ${infoMessage ? `<div class="offline-note">${escapeHtml(infoMessage)}</div>` : ''}
     ${editing ? `<details class="add-exercise" id="add-exercise-box" ${groups.length ? '' : 'open'}>
       <summary>+ Add exercise</summary>
       <form id="add-exercise-form" class="add-exercise-form">
@@ -1731,10 +2069,10 @@ function renderFolder(groups, errorMessage = '') {
         <div class="empty-title">No exercises yet</div>
       </section>`}`, { showAccount: false, showTimer: false })
 
-  document.querySelector('#back-home').addEventListener('click', async () => {
+  document.querySelector('#back-home').addEventListener('click', () => {
     folderEditMode = false
-    await loadFolders()
     renderWorkouts()
+    refreshInBackground()
   })
   document.querySelector('#delete-folder')?.addEventListener('click', deleteActiveFolder)
   document.querySelector('#toggle-edit-workout').addEventListener('click', () => {
@@ -1867,8 +2205,10 @@ async function removeMotivationVideo(rowId, videoPath) {
     return
   }
 
+  deleteOfflineVideos([videoPath])
   if (restMotivationId === rowId) restMotivationId = null
   await loadMotivationVideos()
+  saveSnapshot()
   renderMore()
 }
 
@@ -2067,16 +2407,18 @@ async function uploadVideoFile(file, objectPath, onProgress) {
   if (file.size <= STANDARD_UPLOAD_MAX_BYTES) {
     onProgress(5)
     const { error } = await supabase.storage.from(VIDEO_BUCKET).upload(objectPath, file, {
-      cacheControl: '3600',
+      cacheControl: '31536000',
       contentType: inferVideoMime(file),
       upsert: false
     })
     if (error) throw error
     onProgress(100)
-    return
+  } else {
+    await uploadResumable(file, objectPath, onProgress)
   }
 
-  await uploadResumable(file, objectPath, onProgress)
+  // The phone that uploads a clip never needs to download it again.
+  putOfflineVideo(objectPath, file, cleanFileName(file.name)).then(requestPersistentStorage).catch(() => {})
 }
 
 async function uploadResumable(file, objectPath, onProgress) {
@@ -2096,11 +2438,12 @@ async function uploadResumable(file, objectPath, onProgress) {
       },
       uploadDataDuringCreation: true,
       removeFingerprintOnSuccess: true,
+      storeFingerprintForResuming: false,
       metadata: {
         bucketName: VIDEO_BUCKET,
         objectName: objectPath,
         contentType: inferVideoMime(file),
-        cacheControl: '3600'
+        cacheControl: '31536000'
       },
       chunkSize: 6 * 1024 * 1024,
       onError: reject,
@@ -2108,14 +2451,10 @@ async function uploadResumable(file, objectPath, onProgress) {
       onSuccess: resolve
     })
 
-    // Some Safari privacy/storage modes can block TUS's saved-upload lookup.
-    // That should never prevent a new upload from starting.
-    upload.findPreviousUploads()
-      .then((previous) => {
-        if (previous.length) upload.resumeFromPreviousUpload(previous[0])
-        upload.start()
-      })
-      .catch(() => upload.start())
+    // Never resume an earlier attempt: it was created for a different object path, so the
+    // finished file would land somewhere other than the path saved in the database.
+    // Retries inside this attempt are still handled by retryDelays.
+    upload.start()
   })
 }
 
@@ -2125,25 +2464,21 @@ async function moveExercise(groupId, direction) {
   const targetIndex = direction === 'up' ? index - 1 : index + 1
   if (targetIndex < 0 || targetIndex >= activeExerciseGroups.length) return
 
-  const current = activeExerciseGroups[index]
-  const target = activeExerciseGroups[targetIndex]
+  const ordered = [...activeExerciseGroups]
+  const [moved] = ordered.splice(index, 1)
+  ordered.splice(targetIndex, 0, moved)
 
-  const { error: firstError } = await supabase
-    .from('exercises')
-    .update({ sort_order: target.sort_order })
-    .eq('exercise_group', current.id)
-  if (firstError) {
-    alert(firstError.message)
-    return
-  }
-
-  const { error: secondError } = await supabase
-    .from('exercises')
-    .update({ sort_order: current.sort_order })
-    .eq('exercise_group', target.id)
-  if (secondError) {
-    alert(secondError.message)
-    return
+  for (let i = 0; i < ordered.length; i += 1) {
+    const nextOrder = i + 1
+    if (ordered[i].sort_order === nextOrder) continue
+    const { error } = await supabase
+      .from('exercises')
+      .update({ sort_order: nextOrder })
+      .eq('exercise_group', ordered[i].id)
+    if (error) {
+      alert(error.message)
+      break
+    }
   }
 
   await openFolder(activeFolder.id)
@@ -2165,6 +2500,7 @@ async function removeVideo(rowId, videoPath, groupId) {
     alert(rowError.message)
     return
   }
+  deleteOfflineVideos([videoPath])
 
   const { data: remaining, error: remainingError } = await supabase
     .from('exercises')
@@ -2205,9 +2541,31 @@ async function deleteExerciseGroup(groupId) {
     alert(error.message)
     return
   }
+  deleteOfflineVideos(paths)
 
   const saved = workoutState || readWorkoutState()
-  if (saved?.folderId === activeFolder.id) clearWorkoutState()
+  if (saved?.folderId === activeFolder.id) {
+    const remainingGroups = activeExerciseGroups.filter((item) => item.id !== groupId)
+    if (!remainingGroups.length) {
+      clearWorkoutState()
+    } else {
+      const setsDone = { ...(saved.setsDone || {}) }
+      delete setsDone[groupId]
+      const nextState = {
+        ...saved,
+        setsDone,
+        completedGroupIds: (saved.completedGroupIds || []).filter((id) => id !== groupId),
+        backupGroupIds: (saved.backupGroupIds || []).filter((id) => id !== groupId)
+      }
+      if (nextState.currentGroupId === groupId) {
+        const removedIndex = activeExerciseGroups.findIndex((item) => item.id === groupId)
+        const fallback = remainingGroups[Math.min(Math.max(removedIndex, 0), remainingGroups.length - 1)]
+        nextState.currentGroupId = fallback.id
+        nextState.currentIndex = remainingGroups.indexOf(fallback)
+      }
+      saveWorkoutState(nextState)
+    }
+  }
   await openFolder(activeFolder.id)
 }
 
@@ -2232,6 +2590,7 @@ async function deleteActiveFolder() {
       alert(storageError.message)
       return
     }
+    deleteOfflineVideos(videos.map((item) => item.video_path))
   }
 
   const { error } = await supabase.from('folders').delete().eq('id', activeFolder.id)
@@ -2250,6 +2609,7 @@ function createFreshWorkoutState() {
   return {
     folderId: activeFolder.id,
     currentIndex: 0,
+    currentGroupId: activeExerciseGroups[0]?.id || null,
     setsDone: {},
     completedGroupIds: [],
     backupGroupIds: [],
@@ -2258,7 +2618,7 @@ function createFreshWorkoutState() {
   }
 }
 
-function startOrResumeWorkout(options = {}) {
+function startOrResumeWorkout() {
   if (!activeFolder || !activeExerciseGroups.length) return
   folderEditMode = false
   const saved = workoutState || readWorkoutState()
@@ -2268,33 +2628,54 @@ function startOrResumeWorkout(options = {}) {
   } else {
     workoutState = createFreshWorkoutState()
   }
-  workoutState.currentIndex = clamp(workoutState.currentIndex, 0, activeExerciseGroups.length - 1)
+  getCurrentWorkoutGroup()
   saveWorkoutState()
   workoutMode = true
+  keepAwake()
   renderWorkout()
+}
+
+function setWorkoutIndex(index) {
+  if (!workoutState || !activeExerciseGroups.length) return
+  workoutState.currentIndex = clamp(index, 0, activeExerciseGroups.length - 1)
+  workoutState.currentGroupId = activeExerciseGroups[workoutState.currentIndex].id
 }
 
 function getCurrentWorkoutGroup() {
   if (!workoutState || !activeExerciseGroups.length) return null
-  workoutState.currentIndex = clamp(workoutState.currentIndex, 0, activeExerciseGroups.length - 1)
+  const byId = workoutState.currentGroupId
+    ? activeExerciseGroups.findIndex((group) => group.id === workoutState.currentGroupId)
+    : -1
+  setWorkoutIndex(byId >= 0 ? byId : workoutState.currentIndex)
   return activeExerciseGroups[workoutState.currentIndex]
 }
 
+function isGroupComplete(groupId) {
+  return Boolean(workoutState?.completedGroupIds?.includes(groupId))
+}
+
+function nextUnfinishedIndex(fromIndex) {
+  const total = activeExerciseGroups.length
+  for (let step = 1; step <= total; step += 1) {
+    const index = (fromIndex + step) % total
+    if (!isGroupComplete(activeExerciseGroups[index].id)) return index
+  }
+  return -1
+}
+
 function renderWorkoutVideoSwitcher(group) {
-  if (!group.videos.length) return ''
-  if (group.videos.length === 1) {
+  const videos = group.videos.filter((video) => video.signedUrl)
+  if (!videos.length) return ''
+  const videoTag = (video, index, active) => `<video controls playsinline webkit-playsinline muted loop ${active ? 'autoplay preload="auto"' : 'preload="none"'} src="${escapeHtml(video.signedUrl)}" aria-label="${escapeHtml(group.name)} reference video ${index + 1}"></video>`
+  if (videos.length === 1) {
     return `
-      <div class="workout-video-frame">
-        <video controls playsinline webkit-playsinline preload="metadata" src="${escapeHtml(group.videos[0].signedUrl)}" aria-label="${escapeHtml(group.name)} reference video"></video>
-      </div>`
+      <div class="workout-video-frame">${videoTag(videos[0], 0, true)}</div>`
   }
 
-  const tabs = group.videos.map((video, index) => `
+  const tabs = videos.map((video, index) => `
     <button type="button" class="video-tab ${index === 0 ? 'active' : ''}" data-video-tab="${index}">Video ${index + 1}</button>`).join('')
-  const panels = group.videos.map((video, index) => `
-    <div class="workout-video-frame ${index === 0 ? '' : 'hidden'}" data-video-panel="${index}">
-      <video controls playsinline webkit-playsinline preload="metadata" src="${escapeHtml(video.signedUrl)}" aria-label="${escapeHtml(group.name)} reference video ${index + 1}"></video>
-    </div>`).join('')
+  const panels = videos.map((video, index) => `
+    <div class="workout-video-frame ${index === 0 ? '' : 'hidden'}" data-video-panel="${index}">${videoTag(video, index, index === 0)}</div>`).join('')
 
   return `
     <div class="video-switcher" data-video-switcher>
@@ -2307,8 +2688,22 @@ function renderSetDots(group, setsDone, completed) {
   return Array.from({ length: group.sets_target }, (_, index) => {
     const done = completed || index < setsDone
     const current = !completed && index === setsDone
-    return `<span class="set-dot ${done ? 'done' : ''} ${current ? 'current' : ''}" aria-hidden="true">${done ? '&#10003;' : index + 1}</span>`
+    const label = done ? `Set ${index + 1} done. Tap to undo.` : `Mark set ${index + 1} done`
+    return `<button type="button" class="set-dot ${done ? 'done' : ''} ${current ? 'current' : ''}" data-set-dot="${index}" aria-label="${label}">${done ? '&#10003;' : index + 1}</button>`
   }).join('')
+}
+
+function setSetCount(groupId, count) {
+  const group = activeExerciseGroups.find((item) => item.id === groupId)
+  if (!group || !workoutState) return
+  const next = clamp(count, 0, group.sets_target)
+  workoutState.setsDone[groupId] = next
+  const done = new Set(workoutState.completedGroupIds)
+  if (next >= group.sets_target) done.add(groupId)
+  else done.delete(groupId)
+  workoutState.completedGroupIds = [...done]
+  saveWorkoutState()
+  renderWorkout()
 }
 
 function renderWorkout() {
@@ -2318,18 +2713,24 @@ function renderWorkout() {
     renderFolder(activeExerciseGroups)
     return
   }
+  if (timerEndAt) {
+    showRestLockScreen()
+    return
+  }
 
-  const completed = workoutState.completedGroupIds.includes(group.id)
+  const completed = isGroupComplete(group.id)
   const setsDone = clamp(Number(workoutState.setsDone[group.id] || 0), 0, group.sets_target)
   const setNumber = Math.min(setsDone + 1, group.sets_target)
-  const completedCount = workoutState.completedGroupIds.length
+  const completedCount = activeExerciseGroups.filter((item) => isGroupComplete(item.id)).length
+  const allDone = completedCount === activeExerciseGroups.length
   const progress = activeExerciseGroups.length ? (completedCount / activeExerciseGroups.length) * 100 : 0
-  const isLastExercise = workoutState.currentIndex === activeExerciseGroups.length - 1
+  const isLastExercise = activeExerciseGroups.every((item) => item.id === group.id || isGroupComplete(item.id))
   const isLastSet = setNumber >= group.sets_target
   let actionLabel = `Set ${setNumber} done - rest 2:30`
   if (isLastSet && !isLastExercise) actionLabel = 'Finish exercise - rest 2:30'
   if (isLastSet && isLastExercise) actionLabel = 'Finish workout'
-  if (completed) actionLabel = 'Exercise complete'
+  if (completed) actionLabel = allDone ? 'Finish workout' : 'Exercise complete'
+  const actionDisabled = completed && !allDone
 
   const cues = [group.cue_1, group.cue_2, group.cue_3].filter(Boolean)
   const usingBackup = workoutState.backupGroupIds?.includes(group.id)
@@ -2349,11 +2750,10 @@ function renderWorkout() {
     <div class="workout-progress" aria-label="Workout progress"><span style="width:${progress}%"></span></div>
 
     <article class="focus-card">
-      <div class="focus-number">${workoutState.currentIndex + 1}</div>
       <h2>${escapeHtml(displayName)}</h2>
-      <div class="focus-prescription">${group.sets_target} sets x ${escapeHtml(group.reps_target)} reps</div>
+      <div class="focus-prescription">${group.sets_target} sets x ${escapeHtml(group.reps_target)} reps${group.last_weight ? ` &middot; ${escapeHtml(group.last_weight)}` : ''}</div>
 
-      ${cues.length ? `<div class="coach-cues"><div class="eyebrow">CUES</div>${cues.map((cue) => `<div class="coach-cue"><span>&#10003;</span>${escapeHtml(cue)}</div>`).join('')}</div>` : ''}
+      ${cues.length ? renderCueChips(group) : ''}
 
       ${renderWorkoutVideoSwitcher(group)}
 
@@ -2374,7 +2774,7 @@ function renderWorkout() {
         <div id="weight-status" class="micro-status" aria-live="polite"></div>
       </div>
 
-      <button type="button" id="complete-set" class="big-action" ${completed ? 'disabled' : ''}>${escapeHtml(actionLabel)}</button>
+      <button type="button" id="complete-set" class="big-action" ${actionDisabled ? 'disabled' : ''}>${escapeHtml(actionLabel)}</button>
 
       <div class="workout-nav">
         <button type="button" class="secondary-button" id="previous-exercise" ${workoutState.currentIndex === 0 ? 'disabled' : ''}>&larr; Previous</button>
@@ -2386,12 +2786,27 @@ function renderWorkout() {
   document.querySelector('#exit-workout').addEventListener('click', pauseAndExitWorkout)
   document.querySelector('#cancel-workout').addEventListener('click', cancelWorkout)
   document.querySelector('#toggle-backup')?.addEventListener('click', () => toggleWorkoutBackup(group.id))
-  document.querySelector('#complete-set').addEventListener('click', completeCurrentSet)
+  document.querySelector('#complete-set').addEventListener('click', () => {
+    if (allDone) {
+      unlockAudio()
+      finishWorkout()
+      return
+    }
+    completeCurrentSet()
+  })
+  document.querySelectorAll('[data-set-dot]').forEach((dot) => {
+    dot.addEventListener('click', () => {
+      const index = Number(dot.dataset.setDot)
+      const doneNow = completed ? group.sets_target : setsDone
+      setSetCount(group.id, index < doneNow ? index : index + 1)
+    })
+  })
   document.querySelector('#previous-exercise').addEventListener('click', () => jumpWorkout(-1))
   document.querySelector('#next-exercise').addEventListener('click', () => jumpWorkout(1))
   const reopen = document.querySelector('#reopen-exercise')
   if (reopen) reopen.addEventListener('click', reopenCurrentExercise)
   const weight = document.querySelector('#workout-weight')
+  weight.addEventListener('input', () => { group.last_weight = weight.value })
   weight.addEventListener('change', () => saveWorkoutWeight(group.id, weight.value))
   weight.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
@@ -2400,6 +2815,7 @@ function renderWorkout() {
     }
   })
   bindVideoSwitcher()
+  keepAwake()
 }
 
 function toggleWorkoutBackup(groupId) {
@@ -2424,7 +2840,9 @@ function bindVideoSwitcher() {
       panels.forEach((panel) => {
         const shouldShow = panel.dataset.videoPanel === index
         panel.classList.toggle('hidden', !shouldShow)
-        if (!shouldShow) panel.querySelector('video')?.pause()
+        const video = panel.querySelector('video')
+        if (!shouldShow) video?.pause()
+        else video?.play()?.catch?.(() => {})
       })
     })
   })
@@ -2433,54 +2851,74 @@ function bindVideoSwitcher() {
 async function saveWorkoutWeight(groupId, value) {
   const nextValue = String(value || '').trim().slice(0, 40)
   const status = document.querySelector('#weight-status')
-  if (status) status.textContent = 'Saving...'
-  const { error } = await supabase
-    .from('exercises')
-    .update({ last_weight: nextValue })
-    .eq('exercise_group', groupId)
+  const group = activeExerciseGroups.find((item) => item.id === groupId)
+  if (group) {
+    group.last_weight = nextValue
+    group.videos.forEach((video) => { video.last_weight = nextValue })
+    if (activeFolder) cacheFolderRows(activeFolder.id, activeExerciseGroups.flatMap((item) => item.videos))
+  }
+  const pending = readPending()
+  pending.weights[groupId] = nextValue
+  writePending(pending)
 
-  if (error) {
-    if (status) status.textContent = error.message
+  if (navigator.onLine === false) {
+    if (status) status.textContent = 'Saved on this phone · syncs later'
     return
   }
-
-  const group = activeExerciseGroups.find((item) => item.id === groupId)
-  if (group) group.last_weight = nextValue
-  if (status) status.textContent = 'Saved'
+  if (status) status.textContent = 'Saving...'
+  let error = null
+  try {
+    const result = await raceTimeout(supabase.from('exercises').update({ last_weight: nextValue }).eq('exercise_group', groupId), NETWORK_FALLBACK_MS * 2)
+    error = result.error
+  } catch (timeoutError) {
+    error = timeoutError
+  }
+  const liveStatus = document.querySelector('#weight-status')
+  if (error) {
+    if (liveStatus) liveStatus.textContent = 'Saved on this phone · syncs later'
+    return
+  }
+  const next = readPending()
+  if (next.weights[groupId] === nextValue) delete next.weights[groupId]
+  writePending(next)
+  if (liveStatus) liveStatus.textContent = 'Saved'
 }
 
 function completeCurrentSet() {
+  const now = Date.now()
+  if (now - lastSetTapAt < SET_TAP_GUARD_MS) return
+  lastSetTapAt = now
+  unlockAudio()
   const group = getCurrentWorkoutGroup()
-  if (!group || workoutState.completedGroupIds.includes(group.id)) return
+  if (!group || isGroupComplete(group.id)) return
 
   const previousDone = clamp(Number(workoutState.setsDone[group.id] || 0), 0, group.sets_target)
   const nextDone = Math.min(group.sets_target, previousDone + 1)
   workoutState.setsDone[group.id] = nextDone
 
   if (nextDone >= group.sets_target) {
-    if (!workoutState.completedGroupIds.includes(group.id)) workoutState.completedGroupIds.push(group.id)
+    if (!isGroupComplete(group.id)) workoutState.completedGroupIds.push(group.id)
 
-    if (workoutState.currentIndex >= activeExerciseGroups.length - 1) {
+    const nextIndex = nextUnfinishedIndex(workoutState.currentIndex)
+    if (nextIndex === -1) {
       saveWorkoutState()
       finishWorkout()
       return
     }
 
-    workoutState.currentIndex += 1
+    setWorkoutIndex(nextIndex)
     saveWorkoutState()
     startTimer(true)
-    renderWorkout()
     return
   }
 
   saveWorkoutState()
   startTimer(true)
-  renderWorkout()
 }
 
 function jumpWorkout(delta) {
   if (!workoutState) return
-  workoutState.currentIndex = clamp(workoutState.currentIndex + delta, 0, activeExerciseGroups.length - 1)
+  setWorkoutIndex(workoutState.currentIndex + delta)
   saveWorkoutState()
   renderWorkout()
 }
@@ -2500,6 +2938,7 @@ function cancelWorkout() {
   resetTimer()
   workoutMode = false
   folderEditMode = false
+  releaseWakeLock()
   renderFolder(activeExerciseGroups)
 }
 
@@ -2517,17 +2956,18 @@ function pauseAndExitWorkout() {
 
 async function recordWorkoutCompletion(folderId, dateKey) {
   if (!currentUser || !historyAvailable || !planningUpgradeAvailable || !folderId) return
-  const { error } = await supabase.from('workout_history').upsert({
-    user_id: currentUser.id,
-    workout_date: dateKey,
-    folder_id: folderId,
-    completed_at: new Date().toISOString()
-  }, { onConflict: 'user_id,workout_date,folder_id' })
-  if (error) {
-    console.warn('Could not record workout completion:', error)
-    return
+  const completedAt = new Date().toISOString()
+  if (!wasWorkoutCompleted(dateKey, folderId)) {
+    workoutHistory = [{ id: `local-${folderId}-${dateKey}`, workout_date: dateKey, folder_id: folderId, completed_at: completedAt }, ...workoutHistory]
   }
-  await loadSchedule().catch(() => {})
+  const pending = readPending()
+  pending.completions = [
+    ...pending.completions.filter((entry) => !(entry.workout_date === dateKey && entry.folder_id === folderId)),
+    { workout_date: dateKey, folder_id: folderId, completed_at: completedAt }
+  ]
+  writePending(pending)
+  saveSnapshot()
+  await flushPendingWrites()
 }
 
 function finishWorkout() {
@@ -2536,6 +2976,7 @@ function finishWorkout() {
   clearWorkoutState()
   resetTimer()
   workoutMode = false
+  releaseWakeLock()
   renderShell(`
     <section class="finish-card">
       <div class="finish-check">&#10003;</div>
@@ -2543,24 +2984,17 @@ function finishWorkout() {
       <button type="button" class="start-workout-button" id="finish-home">Done</button>
     </section>`, { title: 'Workout complete', showAccount: false, showTimer: false })
 
-  document.querySelector('#finish-home').addEventListener('click', async () => {
-    await loadFolders()
+  document.querySelector('#finish-home').addEventListener('click', () => {
     renderHome()
+    refreshInBackground()
   })
 }
 
 function bindTimerControls() {
-  const toggle = document.querySelector('#timer-toggle')
-  const panel = document.querySelector('#timer-panel')
-  toggle.addEventListener('click', () => {
-    panel.classList.toggle('hidden')
-    toggle.setAttribute('aria-expanded', String(!panel.classList.contains('hidden')))
+  document.querySelector('#timer-toggle')?.addEventListener('click', () => {
+    unlockAudio()
+    startTimer(true)
   })
-  document.querySelector('#timer-start').addEventListener('click', () => {
-    if (timerEndAt) pauseTimer()
-    else startTimer(false)
-  })
-  document.querySelector('#timer-reset').addEventListener('click', resetTimer)
 }
 
 function getRemainingSeconds() {
@@ -2589,8 +3023,7 @@ function startTimer(forceRestart = false) {
   clearTimerInterval()
   timerInterval = window.setInterval(tickTimer, 250)
   persistTimerState()
-  updateTimerUI()
-  if (!forceRestart) syncRestMotivationPlayback()
+  showRestLockScreen()
 }
 
 function pauseTimer() {
@@ -2598,7 +3031,6 @@ function pauseTimer() {
   timerEndAt = null
   clearTimerInterval()
   persistTimerState()
-  updateTimerUI()
   stopRestMotivationPlayback(false)
 }
 
@@ -2607,7 +3039,6 @@ function resetTimer() {
   timerPausedSeconds = REST_SECONDS
   clearTimerInterval()
   persistTimerState()
-  updateTimerUI()
   stopRestMotivationPlayback(true)
 }
 
@@ -2615,16 +3046,13 @@ function tickTimer() {
   const remaining = getRemainingSeconds()
   if (remaining <= 0) {
     timerEndAt = null
-    timerPausedSeconds = 0
+    timerPausedSeconds = REST_SECONDS
     clearTimerInterval()
     persistTimerState()
     stopRestMotivationPlayback(true)
     tryBeep()
-    window.setTimeout(() => {
-      if (timerEndAt || getRemainingSeconds() > 0) return
-      document.querySelector('#timer-panel')?.classList.add('hidden')
-      document.querySelector('#timer-toggle')?.setAttribute('aria-expanded', 'false')
-    }, 450)
+    window.setTimeout(returnFromRestScreen, 180)
+    return
   }
   updateTimerUI()
 }
@@ -2636,71 +3064,203 @@ function clearTimerInterval() {
 
 function updateTimerUI() {
   const remaining = getRemainingSeconds()
+  const text = formatTime(remaining)
   const mini = document.querySelector('#timer-mini')
   const value = document.querySelector('#timer-value')
-  const start = document.querySelector('#timer-start')
-  if (!mini || !value || !start) return
+  if (mini) mini.textContent = timerEndAt ? text : '2:30'
+  if (value) value.textContent = text
+}
 
-  if (remaining <= 0) {
-    mini.textContent = 'Done'
-    value.textContent = 'DONE'
-    start.textContent = 'Again'
-    return
+// iPhone only lets Web Audio start inside a tap, so one context is created/resumed on "Set done"
+// and reused for the end-of-rest beep.
+function unlockAudio() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextClass) return
+    audioCtx = audioCtx || new AudioContextClass()
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
+  } catch {
+    // Timer still works without sound.
   }
-
-  const text = formatTime(remaining)
-  mini.textContent = text
-  value.textContent = text
-  start.textContent = timerEndAt ? 'Pause' : (remaining === REST_SECONDS ? 'Start' : 'Resume')
 }
 
 function tryBeep() {
   try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext
-    if (!AudioContext) return
-    const ctx = new AudioContext()
-    const oscillator = ctx.createOscillator()
-    const gain = ctx.createGain()
-    oscillator.connect(gain)
-    gain.connect(ctx.destination)
-    oscillator.frequency.value = 740
-    gain.gain.setValueAtTime(0.08, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
-    oscillator.start()
-    oscillator.stop(ctx.currentTime + 0.35)
+    if (!audioCtx) return
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
+    const start = audioCtx.currentTime + 0.02
+    ;[0, 0.22, 0.44].forEach((offset, index) => {
+      const oscillator = audioCtx.createOscillator()
+      const gain = audioCtx.createGain()
+      oscillator.connect(gain)
+      gain.connect(audioCtx.destination)
+      oscillator.frequency.value = index === 2 ? 988 : 740
+      gain.gain.setValueAtTime(0.0001, start + offset)
+      gain.gain.exponentialRampToValueAtTime(0.18, start + offset + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + 0.18)
+      oscillator.start(start + offset)
+      oscillator.stop(start + offset + 0.2)
+    })
   } catch {
     // Timer still works if audio is blocked.
   }
 }
 
+// Keep the screen on while training so the rest timer stays visible and the beep can fire.
+let wantWakeLock = false
+let wakeLockRequesting = false
+async function keepAwake() {
+  wantWakeLock = true
+  if (wakeLock || wakeLockRequesting || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return
+  wakeLockRequesting = true
+  try {
+    const lock = await navigator.wakeLock.request('screen')
+    if (!wantWakeLock) {
+      lock.release().catch(() => {})
+      return
+    }
+    wakeLock = lock
+    lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null })
+  } catch {
+    wakeLock = null
+  } finally {
+    wakeLockRequesting = false
+  }
+}
+
+function releaseWakeLock() {
+  wantWakeLock = false
+  const lock = wakeLock
+  wakeLock = null
+  lock?.release?.().catch?.(() => {})
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return
+  if (workoutMode || timerEndAt) keepAwake()
+  // Signed video links last 12 h; refresh them if the app sat in the background that long.
+  if (currentUser && lastVideoSignAt && Date.now() - lastVideoSignAt > 11 * 60 * 60 * 1000) {
+    lastVideoSignAt = Date.now()
+    if (workoutMode && activeFolder && !timerEndAt) openFolder(activeFolder.id, { mode: 'workout' })
+    else loadMotivationVideos().catch(() => {})
+  }
+})
+
+window.addEventListener('online', () => {
+  flushPendingWrites()
+  if (usingCachedData) refreshInBackground()
+})
+
+function renderBootLoading() {
+  viewVersion += 1
+  currentView = 'boot'
+  app.innerHTML = `
+    <main class="shell boot-shell">
+      <div class="brand-name">battle angel</div>
+      <div class="boot-pulse" aria-label="Loading"></div>
+    </main>`
+}
+
+function shouldAutoResume(saved) {
+  const resumableFolder = saved && folders.find((folder) => folder.id === saved.folderId)
+  return resumableFolder && saved.status === 'active' && (Date.now() - saved.updatedAt) < AUTO_RESUME_WINDOW_MS ? resumableFolder : null
+}
+
+async function routeAfterLoad(saved) {
+  const resumableFolder = shouldAutoResume(saved)
+  if (resumableFolder) {
+    await openFolder(resumableFolder.id, { mode: 'workout' })
+    return
+  }
+  if (saved?.status === 'active') {
+    saved.status = 'paused'
+    saveWorkoutState(saved)
+  }
+  renderHome()
+}
+
+function readStoredAuthUser() {
+  try {
+    const projectRef = new URL(SUPABASE_URL).hostname.split('.')[0]
+    const stored = JSON.parse(window.localStorage.getItem(`sb-${projectRef}-auth-token`) || 'null')
+    return stored?.user?.id ? stored.user : null
+  } catch {
+    return null
+  }
+}
+
 async function boot() {
-  const { data: { session } } = await supabase.auth.getSession()
-  currentUser = session?.user || null
+  const storedUser = readStoredAuthUser()
+  const canStartFromSnapshot = Boolean(storedUser && readJson(`battle-angel-snapshot-${storedUser.id}`, null))
+  let sessionCheck = null
+
+  if (canStartFromSnapshot) {
+    // Signed in before on this phone: open instantly, verify the session in the background.
+    currentUser = storedUser
+    sessionCheck = supabase.auth.getSession()
+  } else {
+    const { data: { session } } = await supabase.auth.getSession()
+    currentUser = session?.user || null
+  }
 
   if (!currentUser) {
     renderLogin()
   } else {
-    try {
-      restoreTimerState()
-      await loadFolders()
-      const saved = await syncWorkoutStateFromCloud()
-      const resumableFolder = saved && folders.find((folder) => folder.id === saved.folderId)
-      const shouldAutoResume = resumableFolder && saved.status === 'active' && (Date.now() - saved.updatedAt) < AUTO_RESUME_WINDOW_MS
-      if (shouldAutoResume) {
-        await openFolder(resumableFolder.id, { mode: 'workout' })
-      } else {
-        if (saved?.status === 'active') {
-          saved.status = 'paused'
-          saveWorkoutState(saved)
-        }
-        renderHome()
+    restoreTimerState()
+    const hasSnapshot = await restoreSnapshot()
+    usingCachedData = hasSnapshot && navigator.onLine === false
+    if (hasSnapshot) {
+      // Open instantly from what this phone already knows; the network catches up behind the scenes.
+      workoutState = readWorkoutState()
+      try {
+        await routeAfterLoad(workoutState)
+      } catch (error) {
+        renderHome(error.message)
       }
-    } catch (error) {
-      renderHome(error.message)
+      const version = viewVersion
+      const before = dataSignature()
+      const localUpdatedAt = workoutState?.updatedAt || 0
+      try {
+        if (sessionCheck) {
+          const { data: { session }, error } = await sessionCheck
+          if (!session) {
+            if (error && isNetworkError(error)) throw error
+            currentUser = null
+            renderLogin(error ? 'Please sign in again.' : '')
+            supabase.auth.onAuthStateChange((_event, nextSession) => {
+              window.setTimeout(() => handleSessionChange(nextSession), 0)
+            })
+            return
+          }
+          currentUser = session.user
+        }
+        await loadFolders()
+        const saved = await syncWorkoutStateFromCloud()
+        const cloudChangedWorkout = (saved?.updatedAt || 0) > localUpdatedAt
+        if (viewVersion === version && currentView === 'home' && (dataSignature() !== before || cloudChangedWorkout)) {
+          if (cloudChangedWorkout && shouldAutoResume(saved)) await routeAfterLoad(saved)
+          else renderHome()
+        }
+      } catch (error) {
+        console.warn('Working offline:', error)
+        usingCachedData = true
+        if (viewVersion === version && currentView === 'home') renderHome()
+      }
+    } else {
+      renderBootLoading()
+      try {
+        await loadFolders()
+        const saved = await syncWorkoutStateFromCloud()
+        await routeAfterLoad(saved)
+      } catch (error) {
+        renderHome(error.message)
+      }
     }
   }
 
-  supabase.auth.onAuthStateChange((_event, nextSession) => {
+  supabase.auth.onAuthStateChange((event, nextSession) => {
+    // A failed refresh while offline reports "no session" without signing out; only a real sign-out ends the session.
+    if (!nextSession && event !== 'SIGNED_OUT' && currentUser) return
     window.setTimeout(() => handleSessionChange(nextSession), 0)
   })
 }
@@ -2723,6 +3283,8 @@ async function handleSessionChange(session) {
   historyAvailable = true
   planningUpgradeAvailable = true
   plannerSelectedDate = null
+  signedUrlCache = new Map()
+  usingCachedData = false
   clearTimerInterval()
   timerEndAt = null
   timerPausedSeconds = REST_SECONDS
@@ -2740,6 +3302,12 @@ async function handleSessionChange(session) {
   } catch (error) {
     renderHome(error.message)
   }
+}
+
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error) => console.warn('Offline shell unavailable:', error))
+  })
 }
 
 boot()

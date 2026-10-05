@@ -16,8 +16,7 @@ create table if not exists public.workout_schedule (
   folder_id uuid references public.folders(id) on delete cascade,
   is_skipped boolean not null default false,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (user_id, workout_date)
+  updated_at timestamptz not null default now()
 );
 
 alter table public.workout_schedule
@@ -26,6 +25,17 @@ alter table public.workout_schedule
 alter table public.workout_schedule
   alter column folder_id drop not null;
 
+-- v1.8: allow more than one workout module on the same date.
+alter table public.workout_schedule
+  drop constraint if exists workout_schedule_user_id_workout_date_key;
+
+create unique index if not exists workout_schedule_user_date_folder_unique
+  on public.workout_schedule(user_id, workout_date, folder_id);
+
+create unique index if not exists workout_schedule_user_date_skip_unique
+  on public.workout_schedule(user_id, workout_date)
+  where is_skipped = true;
+
 -- Recurring weekly plan: 0=Sunday, 1=Monday ... 6=Saturday.
 create table if not exists public.workout_weekly_plan (
   id uuid primary key default gen_random_uuid(),
@@ -33,11 +43,17 @@ create table if not exists public.workout_weekly_plan (
   weekday smallint not null check (weekday between 0 and 6),
   folder_id uuid not null references public.folders(id) on delete cascade,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (user_id, weekday)
+  updated_at timestamptz not null default now()
 );
 
 -- Minimal history only records completed workouts so missed-day handling is reliable.
+-- v1.8: allow multiple recurring modules on the same weekday.
+alter table public.workout_weekly_plan
+  drop constraint if exists workout_weekly_plan_user_id_weekday_key;
+
+create unique index if not exists workout_weekly_plan_user_weekday_folder_unique
+  on public.workout_weekly_plan(user_id, weekday, folder_id);
+
 create table if not exists public.workout_history (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
