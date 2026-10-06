@@ -3,6 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
+const APP_VERSION = '1.10.2'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -1665,6 +1666,7 @@ function renderMore(errorMessage = '') {
       <button type="button" class="secondary-button full-button" id="backup-library">Backup library</button>
       <button type="button" class="secondary-button full-button" id="sign-out">Sign out</button>
       <div id="backup-status" class="status-line backup-status" aria-live="polite"></div>
+      <div class="app-version">battle angel v${APP_VERSION}</div>
     </section>`, { title: 'More', showAccount: false, showTimer: false, navTab: 'more' })
 
   document.querySelector('#theme-toggle')?.addEventListener('click', () => { toggleTheme(); renderMore() })
@@ -1777,8 +1779,8 @@ function renderWeekProgress(dateKey, options = {}) {
 function renderDoneControls(dateKey) {
   if (dateKey > todayDateKey()) return ''
   const dayFolders = getDayFolders(dateKey)
-  if (!dayFolders.length) return ''
-  if (!historyAvailable || !planningUpgradeAvailable) return ''
+  if (!dayFolders.length) return '<div class="plan-done-empty">Tap the muscles you trained to mark them done.</div>'
+  if (!canMarkDone()) return '<div class="plan-done-empty">Run schema.sql in Supabase to turn on marking days done.</div>'
   const rows = dayFolders.map((folder) => {
     const done = wasWorkoutCompleted(dateKey, folder.id)
     return `
@@ -1823,6 +1825,7 @@ function renderPlanner(errorMessage = '') {
       <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
     </div>
     <div class="calendar-grid" aria-label="Workout calendar">${calendarCells(plannerMonthStart)}</div>
+    ${canMarkDone() ? '<div class="calendar-hint">Hold a day to mark it done</div>' : ''}
     <section class="plan-day-editor">
       <div class="plan-day-title">${escapeHtml(formatPlanDate(plannerSelectedDate))}</div>
       ${renderWeekProgress(plannerSelectedDate, { streak: startOfWeekKey(plannerSelectedDate) === startOfWeekKey(todayDateKey()) })}
@@ -1856,8 +1859,39 @@ function renderPlanner(errorMessage = '') {
   })
   document.querySelector('#weekly-plan')?.addEventListener('click', renderWeeklyPlan)
   document.querySelector('#repeat-last-week')?.addEventListener('click', repeatLastWeek)
+  const LONG_PRESS_MS = 450
   document.querySelectorAll('[data-plan-date]').forEach((button) => {
+    let pressTimer = null
+    let start = null
+    let longPressed = false
+    const cancelPress = () => {
+      if (pressTimer) window.clearTimeout(pressTimer)
+      pressTimer = null
+      button.classList.remove('is-pressing')
+    }
+    button.addEventListener('pointerdown', (event) => {
+      longPressed = false
+      start = { x: event.clientX, y: event.clientY }
+      button.classList.add('is-pressing')
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null
+        longPressed = true
+        button.classList.remove('is-pressing')
+        quickToggleDayDone(button.dataset.planDate)
+      }, LONG_PRESS_MS)
+    })
+    button.addEventListener('pointermove', (event) => {
+      if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) cancelPress()
+    })
+    button.addEventListener('pointerup', cancelPress)
+    button.addEventListener('pointercancel', cancelPress)
+    button.addEventListener('pointerleave', cancelPress)
+    button.addEventListener('contextmenu', (event) => event.preventDefault())
     button.addEventListener('click', () => {
+      if (longPressed) {
+        longPressed = false
+        return
+      }
       plannerSelectedDate = button.dataset.planDate
       plannerStatusMessage = ''
       renderPlanner()
@@ -2062,26 +2096,61 @@ async function moveMissedToToday() {
   }
 }
 
-async function setWorkoutDone(dateKey, folderId, done) {
-  if (!currentUser || !dateKey || !folderId || dateKey > todayDateKey()) return
+// Updates this phone right away and queues the cloud write, so it works offline too.
+function applyDoneLocally(dateKey, folderId, done) {
+  const match = (entry) => entry.workout_date === dateKey && entry.folder_id === folderId
+  const pending = readPending()
+  pending.completions = pending.completions.filter((entry) => !match(entry))
+  pending.uncompletions = pending.uncompletions.filter((entry) => !match(entry))
   if (done) {
-    // Shows immediately; the cloud write retries on its own if the phone is offline.
-    const syncing = recordWorkoutCompletion(folderId, dateKey)
+    const completedAt = new Date().toISOString()
+    if (!wasWorkoutCompleted(dateKey, folderId)) {
+      workoutHistory = [{ id: `local-${folderId}-${dateKey}`, workout_date: dateKey, folder_id: folderId, completed_at: completedAt }, ...workoutHistory]
+    }
+    pending.completions.push({ workout_date: dateKey, folder_id: folderId, completed_at: completedAt })
+  } else {
+    workoutHistory = workoutHistory.filter((entry) => !match(entry))
+    pending.uncompletions.push({ workout_date: dateKey, folder_id: folderId })
+  }
+  writePending(pending)
+}
+
+function canMarkDone() {
+  return historyAvailable && planningUpgradeAvailable
+}
+
+async function setWorkoutDone(dateKey, folderId, done) {
+  if (!currentUser || !dateKey || !folderId || dateKey > todayDateKey() || !canMarkDone()) return
+  applyDoneLocally(dateKey, folderId, done)
+  saveSnapshot()
+  renderPlanner()
+  await flushPendingWrites()
+}
+
+// Long-press a day on the calendar: marks every workout on that day done, or undoes them if all are done.
+async function quickToggleDayDone(dateKey) {
+  plannerSelectedDate = dateKey
+  if (dateKey > todayDateKey()) {
+    plannerStatusMessage = "Future days can't be marked done yet."
     renderPlanner()
-    await syncing
     return
   }
-
-  workoutHistory = workoutHistory.filter((entry) => !(entry.workout_date === dateKey && entry.folder_id === folderId))
-  const pending = readPending()
-  pending.completions = pending.completions.filter((entry) => !(entry.workout_date === dateKey && entry.folder_id === folderId))
-  // Queued like a completion, so undo works offline and syncs when the phone reconnects.
-  pending.uncompletions = [
-    ...pending.uncompletions.filter((entry) => !(entry.workout_date === dateKey && entry.folder_id === folderId)),
-    { workout_date: dateKey, folder_id: folderId }
-  ]
-  writePending(pending)
+  if (!canMarkDone()) {
+    plannerStatusMessage = 'Run schema.sql in Supabase to turn on marking days done.'
+    renderPlanner()
+    return
+  }
+  const dayFolders = getDayFolders(dateKey)
+  if (!dayFolders.length) {
+    plannerStatusMessage = 'Pick the muscles you trained below, then hold the day again.'
+    renderPlanner()
+    return
+  }
+  const allDone = dayFolders.every((folder) => wasWorkoutCompleted(dateKey, folder.id))
+  dayFolders.forEach((folder) => applyDoneLocally(dateKey, folder.id, !allDone))
   saveSnapshot()
+  const names = dayFolders.map((folder) => folder.name).join(' + ')
+  plannerStatusMessage = allDone ? `${names} on ${formatPlanDate(dateKey, { short: true })}: undone.` : `${names} on ${formatPlanDate(dateKey, { short: true })}: done.`
   renderPlanner()
   await flushPendingWrites()
 }
@@ -2279,8 +2348,9 @@ function logWeight(group, dateKey = todayDateKey()) {
 }
 
 function renderWeightHistory(group) {
+  if (!weightLogAvailable) return '<div class="weight-history-empty">Weight history is off. Run schema.sql in Supabase to turn it on.</div>'
   const history = getWeightHistory(group.id)
-  if (!history.length) return ''
+  if (!history.length) return '<div class="weight-history-empty">Weight history: enter a weight and finish a set to start it.</div>'
   const rows = history.slice(0, 8).map((row) => `
     <li><span>${escapeHtml(formatPlanDate(row.workout_date, { short: true }))}</span><strong>${escapeHtml(row.weight)}</strong></li>`).join('')
   return `
@@ -3578,18 +3648,8 @@ function pauseAndExitWorkout() {
 }
 
 async function recordWorkoutCompletion(folderId, dateKey) {
-  if (!currentUser || !historyAvailable || !planningUpgradeAvailable || !folderId) return
-  const completedAt = new Date().toISOString()
-  if (!wasWorkoutCompleted(dateKey, folderId)) {
-    workoutHistory = [{ id: `local-${folderId}-${dateKey}`, workout_date: dateKey, folder_id: folderId, completed_at: completedAt }, ...workoutHistory]
-  }
-  const pending = readPending()
-  pending.uncompletions = pending.uncompletions.filter((entry) => !(entry.workout_date === dateKey && entry.folder_id === folderId))
-  pending.completions = [
-    ...pending.completions.filter((entry) => !(entry.workout_date === dateKey && entry.folder_id === folderId)),
-    { workout_date: dateKey, folder_id: folderId, completed_at: completedAt }
-  ]
-  writePending(pending)
+  if (!currentUser || !canMarkDone() || !folderId) return
+  applyDoneLocally(dateKey, folderId, true)
   saveSnapshot()
   await flushPendingWrites()
 }
@@ -3767,6 +3827,13 @@ document.addEventListener('visibilitychange', () => {
     if (workoutMode && activeFolder && !timerEndAt) openFolder(activeFolder.id, { mode: 'workout' })
     else loadMotivationVideos().catch(() => {})
   }
+})
+
+// iPhone can still begin a text selection on long press; block it on the calendar and rest screen,
+// where holding / double-tapping is a control, not a way to copy text.
+document.addEventListener('selectstart', (event) => {
+  const node = event.target?.nodeType === Node.TEXT_NODE ? event.target.parentElement : event.target
+  if (node?.closest?.('.calendar-grid, .rest-lock-screen')) event.preventDefault()
 })
 
 window.addEventListener('online', () => {

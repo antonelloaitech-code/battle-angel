@@ -181,3 +181,15 @@ Photos need the storage bucket to accept images. This is included in `supabase/s
 - Undoing a done workout works offline and syncs when you reconnect, the same way marking it done already did.
 - Videos and photos are compressed on the phone before uploading (see iPhone uploads above).
 - Weight history: each exercise keeps the weight you used on each day. It's logged when you finish a set, and updated if you change the weight afterwards that day. Open **Weight history** under the set dots in Workout Mode. It works offline and is included in backups.
+
+## v1.10.1 — mark done from the calendar
+
+No database changes.
+
+- **Hold a day** on the Plan calendar to mark all of its workouts done. Hold it again to undo. On a day with nothing planned, it asks you to pick the muscles first.
+- Workout Mode always shows the weight history line, with a hint before the first entry, so it's clear where weights are saved.
+- **More** shows the app version at the bottom. If it doesn't say v1.10.1 after deploying, the phone or Netlify is still on the old version.
+
+## v1.10.2
+
+- Holding a day on the calendar no longer selects its text on iPhone, so hold-to-mark-done works. Double-tapping the rest screen can't select text either.

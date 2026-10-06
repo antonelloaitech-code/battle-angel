@@ -2247,3 +2247,48 @@ button.set-dot {
 }
 
 .weight-history-list li span { color: var(--muted); }
+
+/* v1.10.1: hold-to-mark-done, empty states, version */
+.calendar-day {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.calendar-day.is-pressing {
+  transform: scale(0.94);
+  transition: transform 450ms ease;
+}
+
+.calendar-hint,
+.app-version {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.plan-done-empty,
+.weight-history-empty {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-day.is-pressing { transform: none; transition: none; }
+}
+
+/* v1.10.2: iPhone long-press selects text unless every element inside opts out */
+.calendar-grid,
+.calendar-grid *,
+.rest-lock-screen,
+.rest-lock-screen * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.calendar-day { touch-action: manipulation; }
