@@ -11,7 +11,7 @@ The app is split into four simple tabs so the screen stays quiet:
 - **Today** — only today's workout, resume, and optional offline video prep.
 - **Workouts** — your muscle modules. Open one to train or edit it.
 - **Plan** — calendar, recurring weekly plan, and repeat-last-week.
-- **More** — motivation videos, theme, backup, and sign out.
+- **More** — motivation videos and photos, theme, backup, and sign out.
 
 ## exercise creation
 
@@ -33,7 +33,7 @@ You can pause and resume a workout or cancel only the in-progress session withou
 
 ## planning
 
-Planning is optional and cloud-synced.
+Planning is optional and cloud-synced. Weeks run Monday to Sunday everywhere in the app.
 
 ### one-off calendar plan
 
@@ -59,21 +59,15 @@ This offline copy is device-specific. Your master videos remain in private Supab
 
 ## motivation
 
-Motivation stays closed under **More -> Edit motivation** until you open it. Motivation videos are private, sync across devices, rotate during rest periods, loop for the 2:30 rest, and stop when rest ends.
+Motivation stays closed under **More -> Edit motivation** until you open it. Motivation videos and photos are private, sync across devices, play one after another in random order during the 2:30 rest, and stop when rest ends.
 
-## safe database upgrade
+## database
 
-If you already have battle angel with uploaded workouts/videos and already ran the planning setup, run only:
+`supabase/schema.sql` is the only database file. It builds a new project from scratch and upgrades an existing one. Every statement is safe to re-run; it never deletes workouts, exercises, videos, plans, history, or Storage files.
 
-`supabase/multi_workout_upgrade.sql`
+When an update says it has database changes, open **Supabase -> SQL Editor**, paste the whole `schema.sql`, and run it. The last query prints a row of checks that should all say `true`.
 
-in **Supabase -> SQL Editor** once before deploying this version.
-
-It is additive. It does **not** delete or replace existing folders, exercises, reference videos, motivation videos, weights, cues, or Storage objects.
-
-This upgrade only changes planner uniqueness rules so one date/weekday can contain multiple workout modules. It does not delete or rewrite your existing workouts, exercises, videos, planning rows, or storage files.
-
-For a brand-new installation, `supabase/schema.sql` contains the full schema including the same upgrade.
+Older one-off migration files were removed in v1.10. They live on in the GitHub history if you ever need them.
 
 ## deployment
 
@@ -105,7 +99,7 @@ Row Level Security limits data and Storage objects to the signed-in account. Vid
 
 Saved MP4, MOV, M4V, and WebM clips can be selected from Photos or Files. Larger clips use resumable uploads. Keep battle angel open until the upload completes.
 
-The app currently enforces a 50 MB per-video limit to match the configured Supabase Free-plan workflow.
+Videos over 12 MB are compressed on the phone before uploading (H.264 MP4, up to 1280px, sized to land under about 45 MB). Reference clips lose their audio since they always play muted; motivation clips keep it. Photos are resized to 1600px JPEG. Keep battle angel open while it compresses; the screen stays awake. Anything still over 50 MB after compressing (very long clips) has to be trimmed first.
 
 ## backup
 
@@ -152,3 +146,38 @@ No new database changes. If you haven't run `supabase/multi_workout_upgrade.sql`
 - Three reference videos fit on one tab row.
 - The old Arms → Biceps rename no longer runs on every launch (or in schema.sql).
 - Backup uses less memory while building the ZIP.
+
+## v1.9 — golden weeks, logging past days, skip, photo motivation
+
+Photos need the storage bucket to accept images. This is included in `supabase/schema.sql`.
+
+**Golden weeks**
+- When 4 or more workouts are marked done in a calendar week (Monday to Sunday, one row), that row turns gold.
+- Each module counts once, so Chest + Triceps on the same day counts as 2.
+- The selected day in Plan shows how close the week is: "2 of 4 done this week".
+- Days with a finished workout show a ✓ in the calendar.
+
+**Log past days**
+- In Plan, tap any past date (or today), tap the muscles you trained, then tap **Mark done** next to each one.
+- Tap **✓ Done** again to undo.
+- Workouts you finish from the Workouts tab without planning them also show on the calendar and count toward the golden week.
+
+**Rest screen**
+- Sound now toggles with a double tap only. A single touch, including swiping up to leave the app, does nothing.
+
+**Skip an exercise**
+- In Workout Mode, **Machine busy? Skip for now** moves to the next unfinished exercise. The skipped one comes back after the others, and the workout won't finish without it.
+
+**Motivation photos + shuffle**
+- **More -> Edit motivation** accepts photos as well as videos.
+- During each 2:30 rest, motivation plays one item after another in random order: videos play once through, photos stay on screen for 6 seconds. If everything has played before rest ends, it reshuffles and keeps going.
+
+## v1.10 — Monday weeks, compression, weight history, streaks
+
+**Database:** run the whole `supabase/schema.sql` once. Then delete these from the `supabase/` folder in GitHub: `calendar_migration.sql`, `planning_upgrade.sql`, `multi_workout_upgrade.sql`, `motivation_images_upgrade.sql`. `schema.sql` already contains everything they did, and it removes an old, looser calendar security rule.
+
+- The calendar, golden weeks, and Repeat last week all run Monday to Sunday.
+- Today shows this week's progress toward a golden week, plus your golden streak ("3 golden weeks in a row"). The current week never breaks a streak while it's still in progress.
+- Undoing a done workout works offline and syncs when you reconnect, the same way marking it done already did.
+- Videos and photos are compressed on the phone before uploading (see iPhone uploads above).
+- Weight history: each exercise keeps the weight you used on each day. It's logged when you finish a set, and updated if you change the weight afterwards that day. Open **Weight history** under the set dots in Workout Mode. It works offline and is included in backups.
