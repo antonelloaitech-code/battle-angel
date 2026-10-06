@@ -1,0 +1,19 @@
+{
+  "name": "battle-angel",
+  "private": true,
+  "version": "1.8.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0",
+    "tus-js-client": "^4.0.0",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}
