@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.14.2'
+const APP_VERSION = '1.15.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -37,6 +37,7 @@ const DAILY_STEP_TITLE_MAX = 120
 const DAILY_STEP_NOTE_MAX = 320
 const DAILY_SUBSTEP_TITLE_MAX = 120
 const DAILY_SUBSTEP_MAX = 20
+const DAILY_MED_NAME_MAX = 120
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   document.querySelector('#app').innerHTML = `
@@ -97,6 +98,10 @@ let weightLogRows = []
 let dailySteps = []
 let dailyProgress = null
 let dailySystemAvailable = true
+let dailyMeds = []
+let dailyMedTakenIds = []
+let dailyMedsDate = todayDateKey()
+let dailyMedsAvailable = true
 let dailyUndoSnapshot = null
 let dailyUndoLabel = ''
 let dailyUndoExpiresAt = 0
@@ -414,6 +419,11 @@ function isMissingDailySystemError(error) {
   return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_steps') || text.includes('daily_progress') || text.includes('substeps') || text.includes('skipped_step_ids') || text.includes('substep_positions') || text.includes('later_step_ids')
 }
 
+function isMissingDailyMedsError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_meds') || text.includes('daily_med_log')
+}
+
 function normalizeDailySubsteps(value) {
   if (!Array.isArray(value)) return []
   return value
@@ -508,6 +518,92 @@ async function loadDailySystem() {
   const cloudTime = Date.parse(cloud.updated_at || '') || 0
   const pendingTime = Date.parse(pending?.updated_at || '') || 0
   dailyProgress = pending && pendingTime >= cloudTime ? pending : cloud
+}
+
+function pendingDailyMedToggles(dateKey = todayDateKey()) {
+  const toggles = readPending().medToggles
+  return Object.values(toggles).filter((item) => item?.taken_date === dateKey && typeof item?.med_id === 'string')
+}
+
+function mergeDailyMedTakenIds(cloudIds = [], dateKey = todayDateKey()) {
+  const taken = new Set(cloudIds.filter((id) => typeof id === 'string'))
+  pendingDailyMedToggles(dateKey).forEach((item) => {
+    if (item.is_taken) taken.add(item.med_id)
+    else taken.delete(item.med_id)
+  })
+  const valid = new Set(dailyMeds.map((med) => med.id))
+  return [...taken].filter((id) => valid.has(id))
+}
+
+async function loadDailyMeds() {
+  const dateKey = todayDateKey()
+  if (!currentUser || !dailyMedsAvailable) {
+    dailyMeds = []
+    dailyMedTakenIds = []
+    dailyMedsDate = dateKey
+    return
+  }
+
+  const [medsResult, logResult] = await Promise.all([
+    supabase
+      .from('daily_meds')
+      .select('id,name,sort_order,created_at,updated_at')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('daily_med_log')
+      .select('med_id,taken_date,taken_at')
+      .eq('taken_date', dateKey)
+  ])
+
+  const firstError = medsResult.error || logResult.error
+  if (firstError) {
+    if (isMissingDailyMedsError(firstError)) {
+      dailyMedsAvailable = false
+      dailyMeds = []
+      dailyMedTakenIds = []
+      dailyMedsDate = dateKey
+      return
+    }
+    throw firstError
+  }
+
+  dailyMeds = medsResult.data || []
+  dailyMedsDate = dateKey
+  dailyMedTakenIds = mergeDailyMedTakenIds((logResult.data || []).map((row) => row.med_id), dateKey)
+}
+
+function currentDailyMedTakenSet() {
+  const dateKey = todayDateKey()
+  if (dailyMedsDate !== dateKey) {
+    dailyMedsDate = dateKey
+    dailyMedTakenIds = mergeDailyMedTakenIds([], dateKey)
+  }
+  return new Set(dailyMedTakenIds)
+}
+
+function toggleDailyMed(medId) {
+  const med = dailyMeds.find((item) => item.id === medId)
+  if (!med || !dailyMedsAvailable) return
+  const dateKey = todayDateKey()
+  const taken = currentDailyMedTakenSet()
+  const nextTaken = !taken.has(medId)
+  if (nextTaken) taken.add(medId)
+  else taken.delete(medId)
+  dailyMedsDate = dateKey
+  dailyMedTakenIds = [...taken]
+
+  const pending = readPending()
+  pending.medToggles[`${dateKey}|${medId}`] = {
+    med_id: medId,
+    taken_date: dateKey,
+    is_taken: nextTaken,
+    updated_at: new Date().toISOString()
+  }
+  writePending(pending)
+  saveSnapshot()
+  flushPendingWrites()
+  renderDay('', { forceOverview: true })
 }
 
 function currentDailyProgress() {
@@ -1026,6 +1122,8 @@ async function downloadFullBackup() {
     let weightLogBackupRows = []
     let dailyStepBackupRows = []
     let dailyProgressBackupRows = []
+    let dailyMedBackupRows = []
+    let dailyMedLogBackupRows = []
     if (weightLogAvailable) {
       const { data: weightData, error: weightError } = await supabase
         .from('exercise_weight_log')
@@ -1050,9 +1148,18 @@ async function downloadFullBackup() {
       if (!dailyProgressResult.error) dailyProgressBackupRows = dailyProgressResult.data || []
     }
 
+    if (dailyMedsAvailable) {
+      const [medsResult, medLogResult] = await Promise.all([
+        supabase.from('daily_meds').select('id,name,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
+        supabase.from('daily_med_log').select('med_id,taken_date,taken_at').order('taken_date', { ascending: true })
+      ])
+      if (!medsResult.error) dailyMedBackupRows = medsResult.data || []
+      if (!medLogResult.error) dailyMedLogBackupRows = medLogResult.data || []
+    }
+
     const manifest = {
       format: 'battle-angel-backup',
-      version: 8,
+      version: 9,
       exported_at: new Date().toISOString(),
       account_email: currentUser.email || '',
       folders: folderRows.filter((folder) => folder.name !== MOTIVATION_FOLDER_NAME),
@@ -1063,7 +1170,9 @@ async function downloadFullBackup() {
       history: historyRows,
       weight_log: weightLogBackupRows,
       daily_steps: dailyStepBackupRows,
-      daily_progress: dailyProgressBackupRows
+      daily_progress: dailyProgressBackupRows,
+      daily_meds: dailyMedBackupRows,
+      daily_med_log: dailyMedLogBackupRows
     }
 
     const parts = []
@@ -1265,7 +1374,8 @@ async function loadFolders() {
     supabase.from('exercises').select('folder_id,exercise_group'),
     loadMotivationVideos(),
     loadSchedule(),
-    loadDailySystem()
+    loadDailySystem(),
+    loadDailyMeds()
   ])
   if (countResult.error) throw countResult.error
 
@@ -1330,7 +1440,10 @@ function saveSnapshot() {
     weeklyPlanEntries,
     workoutHistory,
     dailySteps,
-    dailyProgress
+    dailyProgress,
+    dailyMeds,
+    dailyMedTakenIds,
+    dailyMedsDate
   })
 }
 
@@ -1346,6 +1459,10 @@ async function restoreSnapshot() {
   dailyProgress = normalizeDailyProgressValue(snapshot.dailyProgress, todayDateKey())
   const pendingDaily = pendingDailyProgressFor(todayDateKey())
   if (pendingDaily) dailyProgress = pendingDaily
+  dailyMeds = Array.isArray(snapshot.dailyMeds) ? snapshot.dailyMeds : []
+  dailyMedsDate = snapshot.dailyMedsDate === todayDateKey() ? snapshot.dailyMedsDate : todayDateKey()
+  dailyMedTakenIds = snapshot.dailyMedsDate === todayDateKey() && Array.isArray(snapshot.dailyMedTakenIds) ? snapshot.dailyMedTakenIds : []
+  dailyMedTakenIds = mergeDailyMedTakenIds(dailyMedTakenIds, todayDateKey())
   motivationVideos = await hydrateMotivationRows(snapshot.motivationRows || [])
   return true
 }
@@ -1444,7 +1561,8 @@ function readPending() {
     completions: Array.isArray(pending.completions) ? pending.completions : [],
     uncompletions: Array.isArray(pending.uncompletions) ? pending.uncompletions : [],
     weightLogs: pending.weightLogs && typeof pending.weightLogs === 'object' ? pending.weightLogs : {},
-    dailyProgress: pending.dailyProgress && typeof pending.dailyProgress === 'object' ? pending.dailyProgress : null
+    dailyProgress: pending.dailyProgress && typeof pending.dailyProgress === 'object' ? pending.dailyProgress : null,
+    medToggles: pending.medToggles && typeof pending.medToggles === 'object' ? pending.medToggles : {}
   }
 }
 
@@ -1469,7 +1587,7 @@ let flushingPending = false
 async function flushPendingWrites() {
   if (!currentUser || flushingPending || navigator.onLine === false) return
   const pending = readPending()
-  if (!Object.keys(pending.weights).length && !pending.completions.length && !pending.uncompletions.length && !Object.keys(pending.weightLogs).length && !pending.dailyProgress) return
+  if (!Object.keys(pending.weights).length && !pending.completions.length && !pending.uncompletions.length && !Object.keys(pending.weightLogs).length && !pending.dailyProgress && !Object.keys(pending.medToggles).length) return
   flushingPending = true
   try {
     for (const [groupId, value] of Object.entries(pending.weights)) {
@@ -1526,6 +1644,28 @@ async function flushPendingWrites() {
         writePending(next)
       }
     }
+    if (dailyMedsAvailable) {
+      for (const [key, item] of Object.entries(readPending().medToggles)) {
+        let error = null
+        if (item.is_taken) {
+          ;({ error } = await supabase.from('daily_med_log').upsert({
+            user_id: currentUser.id,
+            med_id: item.med_id,
+            taken_date: item.taken_date,
+            taken_at: item.updated_at || new Date().toISOString()
+          }, { onConflict: 'user_id,med_id,taken_date' }))
+        } else {
+          ;({ error } = await supabase.from('daily_med_log').delete().eq('med_id', item.med_id).eq('taken_date', item.taken_date))
+        }
+        if (error) {
+          if (isMissingDailyMedsError(error)) dailyMedsAvailable = false
+          break
+        }
+        const next = readPending()
+        if (next.medToggles[key]?.updated_at === item.updated_at) delete next.medToggles[key]
+        writePending(next)
+      }
+    }
     if (weightLogAvailable) {
       for (const [key, item] of Object.entries(pending.weightLogs)) {
         const { error } = await supabase.from('exercise_weight_log').upsert({
@@ -1560,7 +1700,10 @@ function dataSignature() {
     workoutHistory.map((entry) => [entry.workout_date, entry.folder_id]),
     motivationVideos.map((video) => video.id),
     dailySteps.map((step) => [step.id, step.title, step.note, step.substeps, step.sort_order]),
-    dailyProgress
+    dailyProgress,
+    dailyMeds.map((med) => [med.id, med.name, med.sort_order]),
+    dailyMedsDate,
+    dailyMedTakenIds
   ])
 }
 
@@ -2041,6 +2184,152 @@ function bindDailyEditor() {
   document.querySelector('#reset-day-progress')?.addEventListener('click', resetTodayDailyProgress)
 }
 
+function renderDailyMeds() {
+  if (!dailyMedsAvailable) {
+    return `
+      <details class="daily-meds-card daily-meds-setup">
+        <summary><span>Meds</span><span class="daily-meds-count">setup</span></summary>
+        <div class="daily-meds-editor-body">
+          <div class="daily-editor-empty">Run the v1.15 meds SQL once, then reopen battle angel.</div>
+        </div>
+      </details>`
+  }
+
+  const taken = currentDailyMedTakenSet()
+  const rows = dailyMeds.map((med) => {
+    const isTaken = taken.has(med.id)
+    return `
+      <button type="button" class="daily-med-row ${isTaken ? 'is-taken' : ''}" data-daily-med-toggle="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}">
+        <span class="daily-med-check" aria-hidden="true">${isTaken ? '✓' : ''}</span>
+        <span class="daily-med-name">${escapeHtml(med.name)}</span>
+      </button>`
+  }).join('')
+
+  const editRows = dailyMeds.map((med, index) => `
+    <form class="daily-med-edit-row" data-daily-med-edit="${med.id}">
+      <input name="name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required value="${escapeHtml(med.name)}" aria-label="Medication name" />
+      <div class="daily-med-edit-actions">
+        <button type="submit" class="small-button">Save</button>
+        <button type="button" class="small-button" data-daily-med-move="up" data-daily-med-id="${med.id}" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="small-button" data-daily-med-move="down" data-daily-med-id="${med.id}" ${index === dailyMeds.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" class="text-button danger-text" data-daily-med-delete="${med.id}">Delete</button>
+      </div>
+    </form>`).join('')
+
+  return `
+    <section class="daily-meds-card" aria-label="Daily medications">
+      <div class="daily-meds-head">
+        <span>Meds</span>
+        <span class="daily-meds-count">${taken.size}/${dailyMeds.length}</span>
+      </div>
+      ${rows ? `<div class="daily-meds-list">${rows}</div>` : '<div class="daily-meds-empty">No meds added.</div>'}
+      <details class="daily-meds-editor">
+        <summary>${dailyMeds.length ? 'Edit meds' : 'Add meds'}</summary>
+        <div class="daily-meds-editor-body">
+          <form id="add-daily-med" class="daily-med-add-form">
+            <input id="daily-med-name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required placeholder="Medication name" aria-label="Medication name" />
+            <button type="submit" class="primary-button">Add</button>
+          </form>
+          ${editRows ? `<div class="daily-med-edit-list">${editRows}</div>` : ''}
+          <div id="daily-meds-status" class="status-line" aria-live="polite"></div>
+        </div>
+      </details>
+    </section>`
+}
+
+function bindDailyMeds() {
+  document.querySelectorAll('[data-daily-med-toggle]').forEach((button) => {
+    button.addEventListener('click', () => toggleDailyMed(button.dataset.dailyMedToggle))
+  })
+  document.querySelector('#add-daily-med')?.addEventListener('submit', addDailyMed)
+  document.querySelectorAll('[data-daily-med-edit]').forEach((form) => form.addEventListener('submit', updateDailyMed))
+  document.querySelectorAll('[data-daily-med-move]').forEach((button) => {
+    button.addEventListener('click', () => moveDailyMed(button.dataset.dailyMedId, button.dataset.dailyMedMove))
+  })
+  document.querySelectorAll('[data-daily-med-delete]').forEach((button) => {
+    button.addEventListener('click', () => deleteDailyMed(button.dataset.dailyMedDelete))
+  })
+}
+
+async function addDailyMed(event) {
+  event.preventDefault()
+  if (!currentUser || !dailyMedsAvailable) return
+  const input = document.querySelector('#daily-med-name')
+  const status = document.querySelector('#daily-meds-status')
+  const name = input?.value.trim().slice(0, DAILY_MED_NAME_MAX)
+  if (!name) return
+  if (status) status.textContent = 'Saving...'
+  const nextOrder = Math.max(0, ...dailyMeds.map((med) => Number(med.sort_order) || 0)) + 1
+  const { error } = await supabase.from('daily_meds').insert({
+    user_id: currentUser.id,
+    name,
+    sort_order: nextOrder,
+    updated_at: new Date().toISOString()
+  })
+  if (error) {
+    if (status) status.textContent = isNetworkError(error) ? 'Connect to edit meds.' : error.message
+    return
+  }
+  await loadDailyMeds()
+  saveSnapshot()
+  renderDay('', { forceOverview: true })
+}
+
+async function updateDailyMed(event) {
+  event.preventDefault()
+  const form = event.currentTarget
+  const id = form.dataset.dailyMedEdit
+  const name = form.elements.name.value.trim().slice(0, DAILY_MED_NAME_MAX)
+  if (!name) return
+  const { error } = await supabase.from('daily_meds').update({ name, updated_at: new Date().toISOString() }).eq('id', id)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit meds.' : error.message)
+    return
+  }
+  await loadDailyMeds()
+  saveSnapshot()
+  renderDay('', { forceOverview: true })
+}
+
+async function moveDailyMed(medId, direction) {
+  const index = dailyMeds.findIndex((med) => med.id === medId)
+  if (index < 0) return
+  const target = direction === 'up' ? index - 1 : index + 1
+  if (target < 0 || target >= dailyMeds.length) return
+  const ordered = [...dailyMeds]
+  const [moved] = ordered.splice(index, 1)
+  ordered.splice(target, 0, moved)
+  for (let i = 0; i < ordered.length; i += 1) {
+    const { error } = await supabase.from('daily_meds').update({ sort_order: i + 1, updated_at: new Date().toISOString() }).eq('id', ordered[i].id)
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to reorder meds.' : error.message)
+      return
+    }
+  }
+  await loadDailyMeds()
+  saveSnapshot()
+  renderDay('', { forceOverview: true })
+}
+
+async function deleteDailyMed(medId) {
+  const med = dailyMeds.find((item) => item.id === medId)
+  if (!med || !confirm(`Delete "${med.name}"?`)) return
+  const { error } = await supabase.from('daily_meds').delete().eq('id', medId)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit meds.' : error.message)
+    return
+  }
+  dailyMedTakenIds = dailyMedTakenIds.filter((id) => id !== medId)
+  const pending = readPending()
+  Object.keys(pending.medToggles).forEach((key) => {
+    if (pending.medToggles[key]?.med_id === medId) delete pending.medToggles[key]
+  })
+  writePending(pending)
+  await loadDailyMeds()
+  saveSnapshot()
+  renderDay('', { forceOverview: true })
+}
+
 function renderDay(errorMessage = '', options = {}) {
   activeFolder = null
   activeExerciseGroups = []
@@ -2095,11 +2384,13 @@ function renderDay(errorMessage = '', options = {}) {
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${usingCachedData ? '<div class="offline-note">Offline · saved routine available</div>' : ''}
     ${mainCard}
-    ${renderDailyEditor()}`,
+    ${renderDailyEditor()}
+    ${renderDailyMeds()}`,
     { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
 
   document.querySelector('#start-day')?.addEventListener('click', startDailySystem)
   bindDailyEditor()
+  bindDailyMeds()
 }
 
 function renderDayRunner() {
@@ -2135,7 +2426,7 @@ function renderDayRunner() {
   const canLater = unresolvedCount > 1
 
   let cardBody = ''
-  let rightLabel = 'Done'
+  let rightLabel = 'DONE'
   if (gymState) {
     const plannedNames = gymState.planned.map((folder) => folder.name).join(' + ')
     const nextFolder = gymState.remaining[0] || null
@@ -2155,16 +2446,21 @@ function renderDayRunner() {
   renderShell(`
     <div class="day-runner-screen">
       <div class="day-runner-top">
-        <div class="day-runner-position">${actionNumber} / ${actionTotal}</div>
-        <button type="button" class="text-button day-exit" id="exit-day-runner">Exit</button>
+        <div class="day-runner-position">${actionNumber} of ${actionTotal}</div>
+        <details class="day-runner-menu">
+          <summary aria-label="Daily options">•••</summary>
+          <div class="day-runner-menu-popover">
+            <button type="button" class="text-button" id="exit-day-runner">Exit autopilot</button>
+          </div>
+        </details>
       </div>
       <section class="day-step-card ${gymState ? 'day-step-card-gym' : ''}" id="day-step-card" aria-label="Current action: ${escapeHtml(title)}">
         ${cardBody}
       </section>
       <div class="day-action-controls" aria-label="Daily action controls">
         <div class="day-secondary-actions">
-          ${canLater ? '<button type="button" class="day-option-button" id="later-daily-step">Later</button>' : ''}
-          <button type="button" class="day-option-button" id="skip-daily-step">Skip</button>
+          ${canLater ? '<button type="button" class="day-option-button" id="later-daily-step">Later today</button>' : ''}
+          <button type="button" class="day-option-button" id="skip-daily-step">Skip today</button>
         </div>
         <button type="button" class="day-primary-action" id="primary-daily-action">${escapeHtml(rightLabel)} <span aria-hidden="true">&rarr;</span></button>
       </div>
@@ -4553,6 +4849,14 @@ function releaseWakeLock() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return
   if (workoutMode || timerEndAt) keepAwake()
+  // A new local calendar day always starts with a clean routine/meds surface.
+  if (dailyMedsDate !== todayDateKey()) {
+    dailyMedsDate = todayDateKey()
+    dailyMedTakenIds = mergeDailyMedTakenIds([], dailyMedsDate)
+    loadDailyMeds().then(() => {
+      if (['day', 'day-overview'].includes(currentView)) renderDay('', { forceOverview: currentView === 'day-overview' })
+    }).catch(() => {})
+  }
   // Signed video links last 12 h; refresh them if the app sat in the background that long.
   if (currentUser && lastVideoSignAt && Date.now() - lastVideoSignAt > 11 * 60 * 60 * 1000) {
     lastVideoSignAt = Date.now()
@@ -4711,6 +5015,10 @@ async function handleSessionChange(session) {
   dailySteps = []
   dailyProgress = null
   dailySystemAvailable = true
+  dailyMeds = []
+  dailyMedTakenIds = []
+  dailyMedsDate = todayDateKey()
+  dailyMedsAvailable = true
   plannerSelectedDate = null
   signedUrlCache = new Map()
   usingCachedData = false

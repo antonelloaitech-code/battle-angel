@@ -2844,3 +2844,248 @@ body.day-runner-active .day-runner-screen {
   .day-option-button { min-height: 46px; }
   .day-primary-action { min-height: 70px; }
 }
+
+/* v1.14.3: autopilot polish — one decision surface, iPhone-like controls */
+body.day-runner-active {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.day-runner-top {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.day-runner-position {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+}
+
+.day-runner-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.day-runner-menu > summary {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  list-style: none;
+  border-radius: 50%;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.05rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.day-runner-menu > summary::-webkit-details-marker { display: none; }
+.day-runner-menu > summary:active { background: var(--surface-soft); }
+
+.day-runner-menu-popover {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 6px);
+  right: 0;
+  width: max-content;
+  min-width: 150px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-strong);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.26);
+}
+
+.day-runner-menu-popover .text-button {
+  width: 100%;
+  min-height: 42px;
+  border-radius: 10px;
+  text-align: left;
+  color: var(--muted);
+}
+
+.day-step-card {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.day-step-card::-webkit-scrollbar { display: none; }
+
+.day-secondary-actions {
+  opacity: 0.92;
+}
+
+.day-option-button {
+  font-size: 0.9rem;
+}
+
+.day-primary-action {
+  min-height: 78px;
+  font-size: 1.22rem;
+  letter-spacing: 0.01em;
+}
+
+@media (max-width: 430px) {
+  .day-primary-action { min-height: 76px; }
+}
+
+/* v1.15: compact daily meds tracker */
+.daily-meds-card {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.daily-meds-head,
+.daily-meds-setup > summary {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 13px;
+  font-weight: 850;
+}
+
+.daily-meds-setup > summary {
+  cursor: pointer;
+}
+
+.daily-meds-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.daily-meds-list {
+  display: grid;
+  padding: 0 8px 8px;
+}
+
+.daily-med-row {
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 8px;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.daily-med-row:active {
+  background: var(--surface-soft);
+}
+
+.daily-med-row.is-taken {
+  color: var(--muted);
+}
+
+.daily-med-check {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.daily-med-row.is-taken .daily-med-check {
+  border-color: transparent;
+  background: var(--accent);
+}
+
+.daily-med-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 780;
+}
+
+.daily-med-row.is-taken .daily-med-name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  opacity: 0.78;
+}
+
+.daily-meds-empty {
+  padding: 0 13px 11px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.daily-meds-editor {
+  border-top: 1px solid var(--border);
+}
+
+.daily-meds-editor > summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 9px 13px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.daily-meds-editor-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 10px 10px;
+}
+
+.daily-med-add-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.daily-med-edit-list {
+  display: grid;
+  gap: 8px;
+}
+
+.daily-med-edit-row {
+  display: grid;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.daily-med-edit-actions {
+  display: grid;
+  grid-template-columns: auto 44px 44px 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.daily-med-edit-actions .text-button {
+  justify-self: end;
+}
+
+@media (max-width: 430px) {
+  .daily-med-edit-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .daily-med-edit-actions .text-button {
+    justify-self: stretch;
+  }
+}

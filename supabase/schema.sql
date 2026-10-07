@@ -646,6 +646,99 @@ create policy "daily_progress_delete_own"
 on public.daily_progress for delete to authenticated
 using (auth.uid() = user_id);
 
+-- ---------------------------------------------------------------------------
+-- v1.15: compact daily meds tracker
+-- ---------------------------------------------------------------------------
+-- battle angel v1.15 - daily meds tracker
+-- Additive only. Safe to re-run.
+-- This does not delete or modify gym workouts, videos, plans, history, weights, or daily routine steps.
+
+create extension if not exists pgcrypto;
+
+create table if not exists public.daily_meds (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 120),
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists daily_meds_user_sort_idx
+  on public.daily_meds(user_id, sort_order, created_at);
+
+create table if not exists public.daily_med_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  med_id uuid not null references public.daily_meds(id) on delete cascade,
+  taken_date date not null,
+  taken_at timestamptz not null default now(),
+  unique (user_id, med_id, taken_date)
+);
+
+create index if not exists daily_med_log_user_date_idx
+  on public.daily_med_log(user_id, taken_date desc);
+
+alter table public.daily_meds enable row level security;
+alter table public.daily_med_log enable row level security;
+
+grant select, insert, update, delete on public.daily_meds to authenticated;
+grant select, insert, update, delete on public.daily_med_log to authenticated;
+
+drop policy if exists "daily_meds_select_own" on public.daily_meds;
+create policy "daily_meds_select_own"
+on public.daily_meds for select to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "daily_meds_insert_own" on public.daily_meds;
+create policy "daily_meds_insert_own"
+on public.daily_meds for insert to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "daily_meds_update_own" on public.daily_meds;
+create policy "daily_meds_update_own"
+on public.daily_meds for update to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "daily_meds_delete_own" on public.daily_meds;
+create policy "daily_meds_delete_own"
+on public.daily_meds for delete to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "daily_med_log_select_own" on public.daily_med_log;
+create policy "daily_med_log_select_own"
+on public.daily_med_log for select to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "daily_med_log_insert_own" on public.daily_med_log;
+create policy "daily_med_log_insert_own"
+on public.daily_med_log for insert to authenticated
+with check (
+  auth.uid() = user_id
+  and exists (
+    select 1 from public.daily_meds m
+    where m.id = med_id and m.user_id = auth.uid()
+  )
+);
+
+drop policy if exists "daily_med_log_update_own" on public.daily_med_log;
+create policy "daily_med_log_update_own"
+on public.daily_med_log for update to authenticated
+using (auth.uid() = user_id)
+with check (
+  auth.uid() = user_id
+  and exists (
+    select 1 from public.daily_meds m
+    where m.id = med_id and m.user_id = auth.uid()
+  )
+);
+
+drop policy if exists "daily_med_log_delete_own" on public.daily_med_log;
+create policy "daily_med_log_delete_own"
+on public.daily_med_log for delete to authenticated
+using (auth.uid() = user_id);
+
 notify pgrst, 'reload schema';
 
 -- Verification: every column should say true.
@@ -659,4 +752,6 @@ select
   exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_steps' and column_name = 'substeps') as daily_substeps_ready,
   exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'skipped_step_ids') as daily_skip_ready,
   exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'substep_positions') as daily_substep_progress_ready,
-  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'later_step_ids') as daily_later_ready;
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'later_step_ids') as daily_later_ready,
+  exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'daily_meds') as daily_meds_ready,
+  exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'daily_med_log') as daily_med_log_ready;

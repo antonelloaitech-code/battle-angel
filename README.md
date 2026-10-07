@@ -93,6 +93,8 @@ Your existing Netlify environment variables remain:
 - Completed-workout markers: `workout_history`
 - Daily routine steps: `daily_steps`
 - Daily routine progress by date: `daily_progress`
+- Daily medication list: `daily_meds`
+- Daily medication checkmarks by date: `daily_med_log`
 - Videos: private `gym-videos` Supabase Storage bucket
 
 Row Level Security limits data and Storage objects to the signed-in account. Video playback uses temporary signed URLs.
@@ -273,3 +275,29 @@ No database changes.
 - Undo remains a short-lived toast after Done, Later, or Skip.
 
 The default execution mode deliberately does not show the full routine. The routine list stays in the editor/overview so execution requires as little choosing and scanning as possible.
+
+
+## v1.14.3 — autopilot polish
+
+No database changes.
+
+- Daily execution remains strictly one action at a time; the full routine only appears in Edit routine.
+- The primary **DONE** action is visually dominant and stays in the bottom thumb zone.
+- Secondary choices are explicitly **Later today** and **Skip today** so their meaning is obvious without thinking.
+- **Later today** always moves the current parent step behind all other remaining steps for today, while preserving any substep progress already completed.
+- Exit is hidden behind a small ••• menu so leaving autopilot is available without competing with the current action.
+- The active card can still scroll if a note is unusually long, but its scrollbar is hidden so the runner feels like a native iPhone screen.
+- Text selection and accidental browser-style interaction are disabled inside the runner.
+
+
+## v1.15 — daily meds
+
+**Database:** run the whole `supabase/schema.sql` once, or run the small `battle-angel-v1.15-meds-upgrade.sql` supplied with this release. This is additive only.
+
+- A compact **Meds** section sits directly below **Edit routine** on the Day overview.
+- Tap a medication row once to mark it taken; tap again to undo.
+- The check state is tied to the local calendar date, so every new day starts unchecked automatically.
+- **Edit meds** stays collapsed by default and lets you add, rename, reorder, or delete medications without cluttering the normal Day view.
+- Medication checks work from the phone cache and sync to Supabase when online.
+- Backups now include the medication list and daily taken log.
+- The tracker records only what you enter and whether you marked it taken; it does not make dosing decisions or change your routine automatically.
