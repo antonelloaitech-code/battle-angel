@@ -236,3 +236,40 @@ No database changes.
 - A Daily step named **Gym**, **Workout**, or **Training** becomes a bridge to today's planned gym modules. It shows the planned muscles, launches the next workout, and returns to the next Daily action automatically after the gym work is complete.
 - If a Gym step has no planned workout, **Choose workout** opens the workout library; finishing that workout still returns to the Daily flow.
 - Daily backups now include deferred/Later state.
+
+
+## v1.14 — swipe autopilot
+
+No database changes.
+
+- Day stays one card at a time so you do not have to scan a list or choose what comes next.
+- Swipe **right** to finish the current action. On the special Gym card, right starts the next planned workout instead of falsely marking Gym complete.
+- Swipe **left** to send the current step to Later. Later is hidden when there is nothing else left to do.
+- Swipe **up** to skip the current step for today.
+- The card follows your finger and shows a clear Done/Start, Later, or Skip stamp before the swipe commits.
+- Three small tap controls remain as a fallback, but the full routine list stays out of the active runner. Exit is the deliberate escape hatch to edit the routine.
+
+
+## v1.14.1 — iPhone swipe fix
+
+No database changes.
+
+- Daily Autopilot now locks page scrolling while the one-card runner is open, so the iPhone page scrollbar cannot steal the gesture.
+- iPhone uses explicit non-passive touch handling for the card; the card follows your finger immediately.
+- Swipe right = Done/Start, left = Later, up = Skip.
+- Swipe distance is slightly shorter so the gesture feels more natural one-handed.
+- Leaving Daily Autopilot restores normal page scrolling everywhere else in battle angel.
+
+
+## v1.14.2 — buttons-only daily autopilot
+
+No database changes.
+
+- Removed Daily Autopilot swipe gestures. iPhone scrolling and browser gesture handling no longer compete with the routine controls.
+- Daily Autopilot is still one action at a time.
+- A large primary button at the bottom does the expected action: **Done** for normal steps or **Start** for the Gym step.
+- **Later** and **Skip** are smaller secondary buttons above it. **Later** only appears when another unresolved step exists.
+- The runner remains full-screen and automatically resumes the current action when battle angel is reopened.
+- Undo remains a short-lived toast after Done, Later, or Skip.
+
+The default execution mode deliberately does not show the full routine. The routine list stays in the editor/overview so execution requires as little choosing and scanning as possible.

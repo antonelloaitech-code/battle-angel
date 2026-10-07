@@ -2742,3 +2742,105 @@ textarea:focus-visible {
     bottom: 13px;
   }
 }
+
+/* v1.14.2: buttons-only daily autopilot */
+.day-step-card {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.day-action-controls {
+  display: grid;
+  gap: 8px;
+  padding: 0 0 2px;
+}
+
+.day-secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.day-secondary-actions:has(button:only-child) {
+  grid-template-columns: 1fr;
+}
+
+.day-option-button {
+  min-width: 0;
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 10px 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.day-primary-action {
+  width: 100%;
+  min-height: 72px;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background: var(--accent);
+  color: #fff;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 1.14rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.day-primary-action:active {
+  background: var(--accent-dark);
+  transform: scale(0.99);
+}
+
+.day-option-button:active {
+  background: var(--surface-strong);
+}
+
+/* Keep Daily Autopilot as a stable full-screen surface. The page itself does not scroll;
+   only an unusually long card can scroll internally. */
+html.day-runner-active,
+body.day-runner-active {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.day-runner-active {
+  position: fixed;
+  inset: 0;
+}
+
+body.day-runner-active #app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body.day-runner-active .shell-no-header {
+  width: min(780px, 100%);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+body.day-runner-active .shell-no-header #main-content,
+body.day-runner-active .day-runner-screen {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 430px) {
+  .day-option-button { min-height: 46px; }
+  .day-primary-action { min-height: 70px; }
+}

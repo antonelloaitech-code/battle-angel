@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.13.0'
+const APP_VERSION = '1.14.2'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -717,27 +717,15 @@ function deferDailyStep(stepId) {
   renderDayRunner()
 }
 
-function bindDailyLaterSwipe(stepId) {
-  const card = document.querySelector('#day-step-card')
-  if (!card) return
-  let startX = 0
-  let startY = 0
-  let startedAt = 0
-  card.addEventListener('touchstart', (event) => {
-    const touch = event.touches?.[0]
-    if (!touch) return
-    startX = touch.clientX
-    startY = touch.clientY
-    startedAt = Date.now()
-  }, { passive: true })
-  card.addEventListener('touchend', (event) => {
-    const touch = event.changedTouches?.[0]
-    if (!touch || !startedAt) return
-    const dx = touch.clientX - startX
-    const dy = touch.clientY - startY
-    startedAt = 0
-    if (dx < -72 && Math.abs(dx) > Math.abs(dy) * 1.35) deferDailyStep(stepId)
-  }, { passive: true })
+function triggerDailyPrimaryAction(step) {
+  const gymState = getDailyGymState(step)
+  if (gymState) {
+    const nextFolder = gymState.remaining?.[0] || null
+    if (nextFolder) openFolder(nextFolder.id, { mode: 'workout' })
+    else renderWorkouts()
+    return
+  }
+  completeDailyStep(step.id)
 }
 
 function dailyGymStepCanAutoComplete(step) {
@@ -1136,6 +1124,8 @@ async function downloadFullBackup() {
 }
 
 function renderLogin(message = '') {
+  document.documentElement.classList.remove('day-runner-active')
+  document.body.classList.remove('day-runner-active')
   workoutMode = false
   viewVersion += 1
   currentView = 'login'
@@ -1896,6 +1886,9 @@ function renderShell(content, options = {}) {
   const showHeader = options.showHeader !== false
   viewVersion += 1
   currentView = options.view || options.navTab || ''
+  const lockDayRunner = currentView === 'day-runner'
+  document.documentElement.classList.toggle('day-runner-active', lockDayRunner)
+  document.body.classList.toggle('day-runner-active', lockDayRunner)
   app.innerHTML = `
     <main class="shell ${workoutMode ? 'workout-shell' : ''} ${options.navTab ? 'has-bottom-nav' : ''} ${showHeader ? '' : 'shell-no-header'}">
       ${showHeader ? `<header class="topbar">
@@ -2142,24 +2135,21 @@ function renderDayRunner() {
   const canLater = unresolvedCount > 1
 
   let cardBody = ''
-  let primaryButton = ''
+  let rightLabel = 'Done'
   if (gymState) {
     const plannedNames = gymState.planned.map((folder) => folder.name).join(' + ')
     const nextFolder = gymState.remaining[0] || null
+    rightLabel = nextFolder ? 'Start' : 'Choose'
     cardBody = `
       <div class="day-step-parent">Gym${gymState.planned.length > 1 ? ` <span>${gymState.planned.length} modules</span>` : ''}</div>
       <h2>${escapeHtml(plannedNames || 'Gym')}</h2>
       ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
       ${gymState.planned.length ? '' : '<p class="day-gym-empty">No workout planned today.</p>'}`
-    primaryButton = nextFolder
-      ? `<button type="button" class="big-action day-done-button" id="start-daily-gym">Start workout <span aria-hidden="true">&rarr;</span></button>`
-      : `<button type="button" class="big-action day-done-button" id="choose-daily-gym">Choose workout <span aria-hidden="true">&rarr;</span></button>`
   } else {
     cardBody = `
       ${isSubstep ? `<div class="day-step-parent">${escapeHtml(step.title)} <span>${escapeHtml(substepMeta)}</span></div>` : ''}
       <h2>${escapeHtml(title)}</h2>
       ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}`
-    primaryButton = `<button type="button" class="big-action day-done-button" id="complete-daily-step">Done <span aria-hidden="true">&rarr;</span></button>`
   }
 
   renderShell(`
@@ -2168,31 +2158,24 @@ function renderDayRunner() {
         <div class="day-runner-position">${actionNumber} / ${actionTotal}</div>
         <button type="button" class="text-button day-exit" id="exit-day-runner">Exit</button>
       </div>
-      <section class="day-step-card ${gymState ? 'day-step-card-gym' : ''}" id="day-step-card">
+      <section class="day-step-card ${gymState ? 'day-step-card-gym' : ''}" id="day-step-card" aria-label="Current action: ${escapeHtml(title)}">
         ${cardBody}
-        ${canLater ? '<div class="day-later-hint" aria-hidden="true">swipe left for later</div>' : ''}
       </section>
-      <div class="day-runner-actions">
-        ${primaryButton}
-        <div class="day-runner-secondary">
-          ${canLater ? '<button type="button" class="quiet-action" id="later-daily-step">Later</button>' : ''}
-          <button type="button" class="quiet-action" id="skip-daily-step">Skip</button>
+      <div class="day-action-controls" aria-label="Daily action controls">
+        <div class="day-secondary-actions">
+          ${canLater ? '<button type="button" class="day-option-button" id="later-daily-step">Later</button>' : ''}
+          <button type="button" class="day-option-button" id="skip-daily-step">Skip</button>
         </div>
+        <button type="button" class="day-primary-action" id="primary-daily-action">${escapeHtml(rightLabel)} <span aria-hidden="true">&rarr;</span></button>
       </div>
       ${renderDailyUndoToast()}
     </div>`,
     { title: 'Day', showAccount: false, showTimer: false, showHeader: false, view: 'day-runner' })
 
-  document.querySelector('#complete-daily-step')?.addEventListener('click', () => completeDailyStep(step.id))
+  document.querySelector('#primary-daily-action')?.addEventListener('click', () => triggerDailyPrimaryAction(step))
   document.querySelector('#skip-daily-step')?.addEventListener('click', () => skipDailyStep(step.id))
   document.querySelector('#later-daily-step')?.addEventListener('click', () => deferDailyStep(step.id))
   document.querySelector('#exit-day-runner')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
-  document.querySelector('#start-daily-gym')?.addEventListener('click', () => {
-    const nextFolder = getDailyGymState(step)?.remaining?.[0]
-    if (nextFolder) openFolder(nextFolder.id, { mode: 'workout' })
-  })
-  document.querySelector('#choose-daily-gym')?.addEventListener('click', renderWorkouts)
-  bindDailyLaterSwipe(step.id)
   bindDailyUndoToast()
 }
 
