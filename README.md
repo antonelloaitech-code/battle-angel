@@ -2,14 +2,14 @@
 
 **a warrior's spirit needs a warrior's body**
 
-battle angel is a low-friction personal gym app: build workouts once, save the reference videos, plan the week if you want, then open the app and execute.
+battle angel is a low-friction daily-system + gym app: set your routine and workouts once, then open the app and execute the next thing without deciding what comes next.
 
 ## main tabs
 
 The app is split into four simple tabs so the screen stays quiet:
 
-- **Today** — only today's workout, resume, and optional offline video prep.
-- **Workouts** — your muscle modules. Open one to train or edit it.
+- **Day** — your daily system. Tap Start and battle angel shows one step at a time.
+- **Gym** — today's planned gym modules, resume, offline video prep, and access to all workouts.
 - **Plan** — calendar, recurring weekly plan, and repeat-last-week.
 - **More** — motivation videos and photos, theme, backup, and sign out.
 
@@ -71,7 +71,7 @@ Older one-off migration files were removed in v1.10. They live on in the GitHub 
 
 ## deployment
 
-After running the planning upgrade once:
+After running the latest `supabase/schema.sql` once:
 
 1. Upload the contents of this project to the existing GitHub repository.
 2. Commit the changes.
@@ -91,6 +91,8 @@ Your existing Netlify environment variables remain:
 - Calendar overrides: `workout_schedule`
 - Recurring weekly plan: `workout_weekly_plan`
 - Completed-workout markers: `workout_history`
+- Daily routine steps: `daily_steps`
+- Daily routine progress by date: `daily_progress`
 - Videos: private `gym-videos` Supabase Storage bucket
 
 Row Level Security limits data and Storage objects to the signed-in account. Video playback uses temporary signed URLs.
@@ -193,3 +195,44 @@ No database changes.
 ## v1.10.2
 
 - Holding a day on the calendar no longer selects its text on iPhone, so hold-to-mark-done works. Double-tapping the rest screen can't select text either.
+
+
+## v1.11 — daily system
+
+**Database:** run the whole `supabase/schema.sql` once. It only adds the daily-system tables and policies; it does not delete or change existing workout videos, exercises, plans, history, or weight logs.
+
+- New **Day** tab for a personal daily routine.
+- Set the routine up once under **Edit routine**: add a step, optional short note, reorder, edit, or delete.
+- Tap **Start my day** and the app switches to a focused one-card-at-a-time flow.
+- Each card shows only the current step and one large **Done** action; completing it immediately advances to the next step.
+- **Back one step** is available only while running the routine in case of an accidental tap.
+- Daily progress resets by date automatically, saves to Supabase, and is also cached locally so the routine keeps working offline.
+- The previous gym Today screen is now the **Gym** tab. **All workouts** opens the muscle library without adding another bottom tab.
+- Full backups now include daily-system steps and daily progress.
+
+
+## v1.12 — substeps + skip
+
+**Database:** run the whole `supabase/schema.sql` once. This is additive only: it adds substep/skip fields to the Daily System and does not delete gym data, videos, plans, history, or daily steps.
+
+- Daily steps can now have optional substeps. Add them as one line each under the collapsed **Substeps** editor.
+- Substeps stay friction-free during the day: battle angel still shows exactly one action at a time. The parent step is only a small context label.
+- **Done** advances immediately to the next action.
+- **Skip** advances immediately with no confirmation. A normal step is recorded as skipped; a substep simply advances within its parent.
+- **Undo** stays secondary and reverses the most recent daily action if you tapped too quickly.
+- Daily substep position and skipped steps sync to Supabase and are cached locally/offline with the rest of the Daily System.
+- Backups include substeps and skip/substep progress.
+
+
+## v1.13 — daily autopilot
+
+**Database:** run the whole `supabase/schema.sql` once, or run the small `battle-angel-v1.13-daily-flow-upgrade.sql` supplied with this release. This only adds the Daily System `later_step_ids` field and does not delete gym data, videos, plans, history, weights, or daily steps.
+
+- If today's Day routine is already in progress, opening battle angel returns directly to the exact current action. There is no Continue tap.
+- The Day runner is now a full-height iPhone-style focus screen with one dominant action button and no bottom navigation.
+- **Undo** is no longer a permanent button. After Done, Skip, or Later it appears briefly as a small transient toast, then disappears.
+- **Later** moves the current step to the end of today's unresolved routine without changing the routine itself. Swipe the card left for the same action.
+- **Skip** still advances immediately for things that do not need to happen today.
+- A Daily step named **Gym**, **Workout**, or **Training** becomes a bridge to today's planned gym modules. It shows the planned muscles, launches the next workout, and returns to the next Daily action automatically after the gym work is complete.
+- If a Gym step has no planned workout, **Choose workout** opens the workout library; finishing that workout still returns to the Daily flow.
+- Daily backups now include deferred/Later state.
