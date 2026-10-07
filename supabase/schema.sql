@@ -1,6 +1,7 @@
 -- battle angel database + private video storage
--- Run this whole file in Supabase Dashboard -> SQL Editor.
--- Safe to run again when upgrading from the first battle angel version.
+-- This is the ONLY database file. Run the whole thing in Supabase Dashboard -> SQL Editor
+-- for a new project, and run it again after every app update that mentions database changes.
+-- Every statement is safe to re-run: nothing deletes your workouts, videos, plans, or history.
 
 create extension if not exists pgcrypto;
 
@@ -248,9 +249,9 @@ create policy "workout_schedule_delete_own"
 on public.workout_schedule for delete to authenticated
 using (auth.uid() = user_id);
 
--- Private Storage bucket. The app uses signed URLs to play videos.
+-- Private Storage bucket. The app uses signed URLs to play videos and show motivation photos.
 insert into storage.buckets (id, name, public, allowed_mime_types)
-values ('gym-videos', 'gym-videos', false, array['video/*']::text[])
+values ('gym-videos', 'gym-videos', false, array['video/*', 'image/*']::text[])
 on conflict (id) do update
 set public = false,
     allowed_mime_types = excluded.allowed_mime_types;
@@ -489,3 +490,173 @@ drop policy if exists "workout_history_delete_own" on public.workout_history;
 create policy "workout_history_delete_own"
 on public.workout_history for delete to authenticated
 using (auth.uid() = user_id);
+
+
+-- ---------------------------------------------------------------------------
+-- v1.10: tidy-up + weight history
+-- ---------------------------------------------------------------------------
+
+-- An older calendar migration added one broad policy that allowed any workout_schedule row
+-- for your user. The stricter select/insert/update/delete policies above replace it.
+drop policy if exists "workout_schedule_all_own" on public.workout_schedule;
+
+-- Photos are allowed in the motivation library (v1.9). Repeated here so this file stays complete.
+update storage.buckets
+set allowed_mime_types = array['video/*', 'image/*']::text[]
+where id = 'gym-videos';
+
+-- Weight history: one row per exercise per day, holding the weight used that day.
+create table if not exists public.exercise_weight_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  folder_id uuid not null references public.folders(id) on delete cascade,
+  exercise_group uuid not null,
+  workout_date date not null,
+  weight text not null check (char_length(weight) between 1 and 40),
+  updated_at timestamptz not null default now(),
+  unique (user_id, exercise_group, workout_date)
+);
+
+create index if not exists exercise_weight_log_folder_date_idx
+  on public.exercise_weight_log(user_id, folder_id, workout_date desc);
+
+alter table public.exercise_weight_log enable row level security;
+grant select, insert, update, delete on public.exercise_weight_log to authenticated;
+
+drop policy if exists "exercise_weight_log_select_own" on public.exercise_weight_log;
+create policy "exercise_weight_log_select_own"
+on public.exercise_weight_log for select to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "exercise_weight_log_insert_own" on public.exercise_weight_log;
+create policy "exercise_weight_log_insert_own"
+on public.exercise_weight_log for insert to authenticated
+with check (
+  auth.uid() = user_id
+  and exists (select 1 from public.folders f where f.id = folder_id and f.user_id = auth.uid())
+);
+
+drop policy if exists "exercise_weight_log_update_own" on public.exercise_weight_log;
+create policy "exercise_weight_log_update_own"
+on public.exercise_weight_log for update to authenticated
+using (auth.uid() = user_id)
+with check (
+  auth.uid() = user_id
+  and exists (select 1 from public.folders f where f.id = folder_id and f.user_id = auth.uid())
+);
+
+drop policy if exists "exercise_weight_log_delete_own" on public.exercise_weight_log;
+create policy "exercise_weight_log_delete_own"
+on public.exercise_weight_log for delete to authenticated
+using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
+-- v1.11: daily system
+-- ---------------------------------------------------------------------------
+-- A simple ordered routine plus one progress row per day. Additive only.
+create table if not exists public.daily_steps (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null check (char_length(title) between 1 and 120),
+  note text not null default '' check (char_length(note) <= 320),
+  substeps jsonb not null default '[]'::jsonb check (jsonb_typeof(substeps) = 'array'),
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists daily_steps_user_sort_idx
+  on public.daily_steps(user_id, sort_order, created_at);
+
+-- v1.12: optional ordered substeps. Stored on the parent step so the runner can stay one-action-at-a-time.
+alter table public.daily_steps
+  add column if not exists substeps jsonb not null default '[]'::jsonb;
+
+create table if not exists public.daily_progress (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  progress_date date not null,
+  completed_step_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(completed_step_ids) = 'array'),
+  skipped_step_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(skipped_step_ids) = 'array'),
+  later_step_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(later_step_ids) = 'array'),
+  substep_positions jsonb not null default '{}'::jsonb check (jsonb_typeof(substep_positions) = 'object'),
+  is_complete boolean not null default false,
+  started_at timestamptz,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, progress_date)
+);
+
+create index if not exists daily_progress_user_date_idx
+  on public.daily_progress(user_id, progress_date desc);
+
+alter table public.daily_progress
+  add column if not exists skipped_step_ids jsonb not null default '[]'::jsonb;
+
+alter table public.daily_progress
+  add column if not exists substep_positions jsonb not null default '{}'::jsonb;
+
+-- v1.13: defer a step without forgetting it; deferred steps are replayed at the end of the day.
+alter table public.daily_progress
+  add column if not exists later_step_ids jsonb not null default '[]'::jsonb;
+
+alter table public.daily_steps enable row level security;
+alter table public.daily_progress enable row level security;
+
+grant select, insert, update, delete on public.daily_steps to authenticated;
+grant select, insert, update, delete on public.daily_progress to authenticated;
+
+drop policy if exists "daily_steps_select_own" on public.daily_steps;
+create policy "daily_steps_select_own"
+on public.daily_steps for select to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "daily_steps_insert_own" on public.daily_steps;
+create policy "daily_steps_insert_own"
+on public.daily_steps for insert to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "daily_steps_update_own" on public.daily_steps;
+create policy "daily_steps_update_own"
+on public.daily_steps for update to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "daily_steps_delete_own" on public.daily_steps;
+create policy "daily_steps_delete_own"
+on public.daily_steps for delete to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "daily_progress_select_own" on public.daily_progress;
+create policy "daily_progress_select_own"
+on public.daily_progress for select to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "daily_progress_insert_own" on public.daily_progress;
+create policy "daily_progress_insert_own"
+on public.daily_progress for insert to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "daily_progress_update_own" on public.daily_progress;
+create policy "daily_progress_update_own"
+on public.daily_progress for update to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "daily_progress_delete_own" on public.daily_progress;
+create policy "daily_progress_delete_own"
+on public.daily_progress for delete to authenticated
+using (auth.uid() = user_id);
+
+notify pgrst, 'reload schema';
+
+-- Verification: every column should say true.
+select
+  exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'exercise_weight_log') as weight_history_ready,
+  exists (select 1 from storage.buckets where id = 'gym-videos' and 'image/*' = any(allowed_mime_types)) as photos_allowed,
+  not exists (select 1 from pg_policies where tablename = 'workout_schedule' and policyname = 'workout_schedule_all_own') as old_policy_removed,
+  exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'workout_schedule_user_date_folder_unique') as multi_workouts_per_day,
+  exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'daily_steps') as daily_steps_ready,
+  exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'daily_progress') as daily_progress_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_steps' and column_name = 'substeps') as daily_substeps_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'skipped_step_ids') as daily_skip_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'substep_positions') as daily_substep_progress_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'later_step_ids') as daily_later_ready;

@@ -17,6 +17,10 @@
   --accent-soft: #17352a;
   --danger: #f08a8a;
   --danger-soft: #3a1f21;
+  --gold: #e2b84f;
+  --gold-text: #f1d58a;
+  --gold-soft: #3a2f12;
+  --gold-cell: #2b2412;
 }
 
 :root[data-theme="light"] {
@@ -35,6 +39,10 @@
   --accent-soft: #dcece6;
   --danger: #a13d3d;
   --danger-soft: #f6e6e6;
+  --gold: #b8871b;
+  --gold-text: #7a5a0e;
+  --gold-soft: #f6e7bd;
+  --gold-cell: #fbf1d6;
 }
 
 * { box-sizing: border-box; }
@@ -427,6 +435,7 @@ h2 {
   background: var(--surface-soft);
 }
 
+.motivation-item img,
 .motivation-item video {
   display: block;
   width: 100%;
@@ -1362,10 +1371,116 @@ input::placeholder { color: #97978f; }
 }
 
 .calendar-weekdays,
-.calendar-grid {
+.calendar-week {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 5px;
+}
+
+.calendar-weekdays { padding-inline: 4px; }
+
+.calendar-grid {
+  display: grid;
+  gap: 2px;
+}
+
+.calendar-week {
+  padding: 3px 4px;
+  border-radius: 14px;
+  transition: background-color 240ms ease, box-shadow 240ms ease;
+}
+
+.calendar-week.is-golden {
+  background: var(--gold-soft);
+  box-shadow: inset 0 0 0 1.5px var(--gold);
+}
+
+.calendar-week.is-golden .calendar-day {
+  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+  background: var(--gold-cell);
+}
+
+.calendar-week.is-golden .calendar-workout,
+.calendar-week.is-golden .calendar-done {
+  color: var(--gold-text);
+}
+
+.calendar-week.is-golden .calendar-day.is-selected {
+  box-shadow: inset 0 0 0 2px var(--gold);
+}
+
+.calendar-done {
+  margin-left: 3px;
+  color: var(--accent-dark);
+  font-size: 0.7rem;
+}
+
+.calendar-day.is-done .calendar-workout { opacity: 0.85; }
+
+.week-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.week-progress.is-golden {
+  color: var(--gold-text);
+  font-weight: 900;
+}
+
+.week-pips { display: inline-flex; gap: 4px; }
+
+.week-pip {
+  width: 14px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--surface-strong);
+}
+
+.week-pip.filled { background: var(--gold); }
+
+.plan-done-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.plan-done-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.plan-done-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.plan-done-toggle {
+  flex: none;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.plan-done-toggle.done {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
 .calendar-weekdays {
@@ -1524,7 +1639,9 @@ input::placeholder { color: #97978f; }
 
 @media (max-width: 390px) {
   .calendar-weekdays,
-  .calendar-grid { gap: 3px; }
+  .calendar-week { gap: 3px; }
+  .calendar-week { padding: 2px 3px; }
+  .calendar-weekdays { padding-inline: 3px; }
   .calendar-day { min-height: 52px; padding: 5px; border-radius: 9px; }
   .calendar-workout { font-size: 0.58rem; }
   .planner-toolbar { align-items: flex-start; }
@@ -1870,6 +1987,7 @@ input::placeholder { color: #97978f; }
 }
 
 .rest-lock-video,
+.rest-lock-image,
 .rest-lock-blank {
   grid-area: 1 / 1;
   width: 100%;
@@ -2029,4 +2147,598 @@ button.set-dot {
 @keyframes boot-pulse {
   from { opacity: 0.25; transform: scaleX(0.5); }
   to { opacity: 1; transform: scaleX(1); }
+}
+
+/* v1.9: skip exercise, rest slideshow */
+.skip-exercise {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  margin-top: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.skip-notice {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.rest-lock-video.hidden,
+.rest-lock-image.hidden { display: none; }
+
+.motivation-item img { object-fit: contain; }
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-week { transition: none; }
+}
+
+/* v1.10: today week card, streak, weight history */
+.week-card {
+  margin-top: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+}
+
+.week-card .week-progress { margin: 0; }
+
+.week-card:has(.week-progress.is-golden) {
+  border-color: var(--gold);
+  background: var(--gold-cell);
+}
+
+.golden-streak {
+  margin: 6px 0 0;
+  color: var(--gold-text);
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.plan-day-editor .golden-streak { margin: -6px 0 12px; }
+
+.weight-history {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.weight-history summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.weight-history-count {
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--surface-strong);
+  font-size: 0.72rem;
+}
+
+.weight-history-list {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.weight-history-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.weight-history-list li span { color: var(--muted); }
+
+/* v1.10.1: hold-to-mark-done, empty states, version */
+.calendar-day {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.calendar-day.is-pressing {
+  transform: scale(0.94);
+  transition: transform 450ms ease;
+}
+
+.calendar-hint,
+.app-version {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.plan-done-empty,
+.weight-history-empty {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-day.is-pressing { transform: none; transition: none; }
+}
+
+/* v1.10.2: iPhone long-press selects text unless every element inside opts out */
+.calendar-grid,
+.calendar-grid *,
+.rest-lock-screen,
+.rest-lock-screen * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.calendar-day { touch-action: manipulation; }
+
+/* v1.11: daily system — one decision at a time */
+textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+textarea::placeholder { color: #97978f; }
+textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline-offset: 2px;
+}
+
+.day-start-card,
+.day-complete-card {
+  padding: 22px 18px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface);
+}
+
+.day-start-card h2,
+.day-complete-card h2 {
+  margin-top: 8px;
+}
+
+.day-start-card p,
+.day-complete-card p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.day-start-button {
+  margin-top: 18px;
+  justify-content: space-between;
+}
+
+.day-complete-mark {
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.daily-editor {
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.daily-editor > summary {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  padding: 13px 15px;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.daily-editor-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 13px 13px;
+  border-top: 1px solid var(--border);
+}
+
+.daily-add-form,
+.daily-edit-form {
+  display: grid;
+  gap: 10px;
+}
+
+.daily-add-form {
+  padding-top: 13px;
+}
+
+.daily-add-form label,
+.daily-edit-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.daily-edit-list {
+  display: grid;
+  gap: 8px;
+}
+
+.daily-edit-item {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.daily-edit-item > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  cursor: pointer;
+  font-weight: 820;
+}
+
+.daily-edit-more {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.daily-edit-form {
+  padding: 0 11px 11px;
+}
+
+.daily-edit-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.daily-edit-actions > * {
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+.daily-editor-empty {
+  padding: 11px 2px 2px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.daily-reset {
+  justify-self: start;
+  padding-inline: 0;
+}
+
+.day-runner-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.day-runner-position {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.day-step-card {
+  min-height: 330px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 28px 22px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface);
+}
+
+.day-step-number {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-step-card h2 {
+  margin: 0;
+  font-size: clamp(2rem, 9vw, 3rem);
+  line-height: 1.02;
+}
+
+.day-step-card p {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.day-done-button {
+  width: 100%;
+  margin: 12px 0 0;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 1.12rem;
+}
+
+.day-back-step {
+  width: 100%;
+  margin-top: 4px;
+  text-align: center;
+}
+
+.gym-all-workouts {
+  width: 100%;
+  margin-top: 10px;
+  text-align: center;
+}
+
+@media (max-width: 430px) {
+  .daily-edit-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .day-step-card {
+    min-height: 300px;
+    padding: 24px 18px;
+  }
+}
+
+
+/* v1.12: daily system substeps + frictionless skip */
+.daily-substeps-editor {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.daily-substeps-editor > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 10px 11px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 820;
+}
+
+.daily-substeps-editor > label {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.day-step-parent {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 850;
+}
+
+.day-step-parent span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.day-runner-secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.day-runner-secondary:has(button:only-child) {
+  grid-template-columns: 1fr;
+}
+
+.day-runner-secondary .quiet-action {
+  width: 100%;
+  min-height: 46px;
+  text-align: center;
+}
+
+/* v1.13: daily autopilot — full-screen next action, Later, transient Undo */
+.shell-no-header {
+  min-height: 100dvh;
+  padding-top: max(10px, calc(env(safe-area-inset-top, 0px) + 8px));
+  padding-bottom: max(10px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+}
+
+.shell-no-header #main-content {
+  min-height: calc(100dvh - max(10px, calc(env(safe-area-inset-top, 0px) + 8px)) - max(10px, calc(env(safe-area-inset-bottom, 0px) + 8px)));
+}
+
+.day-runner-screen {
+  min-height: inherit;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.day-runner-top {
+  margin: 0;
+  padding: 2px 2px 0;
+}
+
+.day-exit {
+  min-height: 40px;
+  color: var(--muted);
+  padding-inline: 8px;
+}
+
+.day-step-card {
+  min-height: 0;
+  height: 100%;
+  position: relative;
+  justify-content: center;
+  border-radius: 28px;
+  padding: clamp(24px, 6vw, 38px) clamp(20px, 6vw, 34px);
+  animation: day-card-in 180ms ease-out;
+}
+
+.day-step-card-gym {
+  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--accent-soft) 28%, var(--surface)));
+}
+
+.day-step-card h2 {
+  max-width: 100%;
+  font-size: clamp(2.35rem, 11vw, 4rem);
+  letter-spacing: -0.045em;
+  overflow-wrap: anywhere;
+}
+
+.day-step-card p {
+  font-size: clamp(1rem, 4.4vw, 1.16rem);
+}
+
+.day-gym-empty {
+  max-width: 22rem;
+}
+
+.day-later-hint {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  opacity: 0.62;
+}
+
+.day-runner-actions {
+  padding-bottom: 2px;
+}
+
+.day-done-button {
+  min-height: 76px;
+  margin: 0;
+  border-radius: 20px;
+  padding-inline: 20px;
+  font-size: 1.16rem;
+}
+
+.day-runner-secondary {
+  margin-top: 5px;
+}
+
+.day-runner-secondary .quiet-action {
+  min-height: 42px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.day-undo-toast {
+  position: fixed;
+  z-index: 80;
+  left: 50%;
+  bottom: max(126px, calc(env(safe-area-inset-bottom, 0px) + 126px));
+  width: min(calc(100vw - 28px), 360px);
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  transform: translateX(-50%);
+  padding: 8px 9px 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--surface-strong);
+  color: var(--text);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.26);
+  font-size: 0.9rem;
+  font-weight: 800;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.day-undo-toast button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent-dark);
+  padding: 6px 8px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.day-undo-toast.is-hiding {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+
+@keyframes day-card-in {
+  from { opacity: 0.55; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 430px) {
+  .day-step-card {
+    min-height: 0;
+    padding: 24px 19px;
+  }
+
+  .day-later-hint {
+    right: 15px;
+    bottom: 13px;
+  }
 }

@@ -3,6 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
+const APP_VERSION = '1.13.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -13,11 +14,29 @@ const REST_SECONDS = 150
 const MAX_VIDEOS_PER_EXERCISE = 3
 const STANDARD_UPLOAD_MAX_BYTES = 6 * 1024 * 1024
 const SUPABASE_FREE_MAX_BYTES = 50 * 1024 * 1024
+// Upload compression. Videos over VIDEO_COMPRESS_OVER_BYTES are re-encoded on the phone to H.264 MP4,
+// at most 1280px on the long side, with the bitrate chosen so the result lands under ~45 MB.
+const VIDEO_COMPRESS_OVER_BYTES = 12 * 1024 * 1024
+const VIDEO_TARGET_BYTES = 45 * 1024 * 1024
+const VIDEO_MAX_EDGE = 1280
+const VIDEO_MAX_BITRATE = 2_500_000
+const VIDEO_MIN_BITRATE = 300_000
+const VIDEO_AUDIO_BITRATE = 128_000
+const IMAGE_MAX_EDGE = 1600
+const IMAGE_JPEG_QUALITY = 0.82
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm'])
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'])
+const MOTIVATION_IMAGE_SECONDS = 6
+const GOLDEN_WEEK_TARGET = 4
+const HISTORY_LOOKBACK_DAYS = 400
 const AUTO_RESUME_WINDOW_MS = 12 * 60 * 60 * 1000
 const STALE_WORKOUT_MS = 72 * 60 * 60 * 1000
 const OFFLINE_DB_NAME = 'battle-angel-offline'
 const OFFLINE_DB_STORE = 'videos'
+const DAILY_STEP_TITLE_MAX = 120
+const DAILY_STEP_NOTE_MAX = 320
+const DAILY_SUBSTEP_TITLE_MAX = 120
+const DAILY_SUBSTEP_MAX = 20
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   document.querySelector('#app').innerHTML = `
@@ -45,6 +64,10 @@ let timerEndAt = null
 let timerPausedSeconds = REST_SECONDS
 let timerInterval = null
 let restMotivationId = null
+let restQueue = []
+let restQueueIndex = 0
+let restImageTimer = null
+let restMediaErrors = 0
 let cloudProgressQueue = Promise.resolve()
 let cloudProgressAvailable = true
 let scheduleEntries = []
@@ -64,9 +87,20 @@ let viewVersion = 0
 let currentView = ''
 let usingCachedData = false
 let lastSetTapAt = 0
+let lastDailyTapAt = 0
 let audioCtx = null
 let wakeLock = null
 let lastVideoSignAt = 0
+let workoutNotice = ''
+let weightLogAvailable = true
+let weightLogRows = []
+let dailySteps = []
+let dailyProgress = null
+let dailySystemAvailable = true
+let dailyUndoSnapshot = null
+let dailyUndoLabel = ''
+let dailyUndoExpiresAt = 0
+let dailyUndoTimer = null
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 12
 const MOTIVATION_SOUND_KEY = 'battle-angel-motivation-sound'
@@ -162,6 +196,36 @@ function isVideoFile(file) {
   return VIDEO_EXTENSIONS.has(fileExtension(file.name))
 }
 
+function isImageFile(file) {
+  if (!file) return false
+  if (String(file.type || '').toLowerCase().startsWith('image/')) return true
+  return IMAGE_EXTENSIONS.has(fileExtension(file.name))
+}
+
+function isMotivationFile(file) {
+  return isVideoFile(file) || isImageFile(file)
+}
+
+function isImagePath(path = '') {
+  return IMAGE_EXTENSIONS.has(fileExtension(path))
+}
+
+function inferImageMime(file) {
+  const supplied = String(file?.type || '').toLowerCase()
+  if (supplied.startsWith('image/')) return supplied
+  const extension = fileExtension(file?.name)
+  if (extension === 'png') return 'image/png'
+  if (extension === 'webp') return 'image/webp'
+  if (extension === 'gif') return 'image/gif'
+  if (extension === 'heic') return 'image/heic'
+  if (extension === 'heif') return 'image/heif'
+  return 'image/jpeg'
+}
+
+function inferMediaMime(file) {
+  return isImageFile(file) && !isVideoFile(file) ? inferImageMime(file) : inferVideoMime(file)
+}
+
 function inferVideoMime(file) {
   const supplied = String(file?.type || '').toLowerCase()
   if (supplied.startsWith('video/')) return supplied
@@ -185,7 +249,15 @@ function getVideoFiles(fileList, limit = MAX_VIDEOS_PER_EXERCISE) {
 
 function safeObjectName(name) {
   const ext = fileExtension(name)
-  return `${crypto.randomUUID()}.${VIDEO_EXTENSIONS.has(ext) ? ext : 'mp4'}`
+  if (VIDEO_EXTENSIONS.has(ext) || IMAGE_EXTENSIONS.has(ext)) return `${crypto.randomUUID()}.${ext}`
+  return `${crypto.randomUUID()}.mp4`
+}
+
+function safeImageObjectName(file) {
+  const ext = fileExtension(file?.name)
+  if (IMAGE_EXTENSIONS.has(ext)) return `${crypto.randomUUID()}.${ext}`
+  const fromMime = inferImageMime(file).split('/')[1]
+  return `${crypto.randomUUID()}.${fromMime === 'jpeg' ? 'jpg' : fromMime}`
 }
 
 function normalizeMetadata(row = {}) {
@@ -258,6 +330,11 @@ function isMissingScheduleTableError(error) {
   return text.includes('42p01') || text.includes('pgrst205') || text.includes('workout_schedule') && text.includes('not') && text.includes('find')
 }
 
+function isMissingWeightLogError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('exercise_weight_log')
+}
+
 function isMissingPlanningUpgradeError(error) {
   const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
   return text.includes('workout_weekly_plan') || text.includes('workout_history') || text.includes('is_skipped') || text.includes('backup_group_ids')
@@ -305,7 +382,7 @@ async function loadSchedule() {
       ? supabase.from('workout_weekly_plan').select('id,weekday,folder_id,created_at,updated_at').order('weekday', { ascending: true }).order('created_at', { ascending: true })
       : null,
     wantsHistory
-      ? supabase.from('workout_history').select('id,workout_date,folder_id,completed_at').gte('workout_date', addDaysKey(todayDateKey(), -35)).order('workout_date', { ascending: false })
+      ? supabase.from('workout_history').select('id,workout_date,folder_id,completed_at').gte('workout_date', addDaysKey(todayDateKey(), -HISTORY_LOOKBACK_DAYS)).order('workout_date', { ascending: false })
       : null
   ])
 
@@ -330,6 +407,355 @@ async function loadSchedule() {
   scheduleEntries = nextSchedule
   weeklyPlanEntries = nextWeekly
   workoutHistory = mergePendingCompletions(nextHistory)
+}
+
+function isMissingDailySystemError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_steps') || text.includes('daily_progress') || text.includes('substeps') || text.includes('skipped_step_ids') || text.includes('substep_positions') || text.includes('later_step_ids')
+}
+
+function normalizeDailySubsteps(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item) => typeof item === 'string')
+    .map((item) => item.trim().slice(0, DAILY_SUBSTEP_TITLE_MAX))
+    .filter(Boolean)
+    .slice(0, DAILY_SUBSTEP_MAX)
+}
+
+function parseDailySubstepsText(value = '') {
+  return String(value)
+    .split(/\r?\n/)
+    .map((item) => item.trim().slice(0, DAILY_SUBSTEP_TITLE_MAX))
+    .filter(Boolean)
+    .slice(0, DAILY_SUBSTEP_MAX)
+}
+
+function dailySubstepsText(step) {
+  return normalizeDailySubsteps(step?.substeps).join('\n')
+}
+
+function emptyDailyProgress(dateKey = todayDateKey()) {
+  return {
+    progress_date: dateKey,
+    completed_step_ids: [],
+    skipped_step_ids: [],
+    later_step_ids: [],
+    substep_positions: {},
+    is_complete: false,
+    started_at: null,
+    updated_at: null
+  }
+}
+
+function normalizeDailyProgressValue(value, dateKey = todayDateKey()) {
+  if (!value || value.progress_date !== dateKey) return emptyDailyProgress(dateKey)
+  const positions = value.substep_positions && typeof value.substep_positions === 'object' && !Array.isArray(value.substep_positions)
+    ? Object.fromEntries(Object.entries(value.substep_positions).filter(([id, position]) => typeof id === 'string' && Number.isFinite(Number(position))).map(([id, position]) => [id, Math.max(0, Number.parseInt(position, 10) || 0)]))
+    : {}
+  return {
+    progress_date: dateKey,
+    completed_step_ids: Array.isArray(value.completed_step_ids) ? [...new Set(value.completed_step_ids.filter((id) => typeof id === 'string'))] : [],
+    skipped_step_ids: Array.isArray(value.skipped_step_ids) ? [...new Set(value.skipped_step_ids.filter((id) => typeof id === 'string'))] : [],
+    later_step_ids: Array.isArray(value.later_step_ids) ? [...new Set(value.later_step_ids.filter((id) => typeof id === 'string'))] : [],
+    substep_positions: positions,
+    is_complete: Boolean(value.is_complete),
+    started_at: value.started_at || null,
+    updated_at: value.updated_at || null
+  }
+}
+
+function pendingDailyProgressFor(dateKey = todayDateKey()) {
+  const value = readPending().dailyProgress
+  return value?.progress_date === dateKey ? normalizeDailyProgressValue(value, dateKey) : null
+}
+
+async function loadDailySystem() {
+  const dateKey = todayDateKey()
+  if (!currentUser || !dailySystemAvailable) {
+    dailySteps = []
+    dailyProgress = emptyDailyProgress(dateKey)
+    return
+  }
+
+  const [stepsResult, progressResult] = await Promise.all([
+    supabase
+      .from('daily_steps')
+      .select('id,title,note,substeps,sort_order,created_at,updated_at')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('daily_progress')
+      .select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,substep_positions,is_complete,started_at,updated_at')
+      .eq('progress_date', dateKey)
+      .maybeSingle()
+  ])
+
+  const firstError = stepsResult.error || progressResult.error
+  if (firstError) {
+    if (isMissingDailySystemError(firstError)) {
+      dailySystemAvailable = false
+      dailySteps = []
+      dailyProgress = emptyDailyProgress(dateKey)
+      return
+    }
+    throw firstError
+  }
+
+  dailySteps = (stepsResult.data || []).map((step) => ({ ...step, substeps: normalizeDailySubsteps(step.substeps) }))
+  const cloud = normalizeDailyProgressValue(progressResult.data, dateKey)
+  const pending = pendingDailyProgressFor(dateKey)
+  const cloudTime = Date.parse(cloud.updated_at || '') || 0
+  const pendingTime = Date.parse(pending?.updated_at || '') || 0
+  dailyProgress = pending && pendingTime >= cloudTime ? pending : cloud
+}
+
+function currentDailyProgress() {
+  const dateKey = todayDateKey()
+  if (!dailyProgress || dailyProgress.progress_date !== dateKey) dailyProgress = emptyDailyProgress(dateKey)
+  return dailyProgress
+}
+
+function saveDailyProgress(nextValue) {
+  const dateKey = todayDateKey()
+  const next = normalizeDailyProgressValue(nextValue, dateKey)
+  next.updated_at = new Date().toISOString()
+  dailyProgress = next
+  const pending = readPending()
+  pending.dailyProgress = next
+  writePending(pending)
+  saveSnapshot()
+  flushPendingWrites()
+}
+
+function dailyResolvedStepIds(progress = currentDailyProgress()) {
+  return new Set([...(progress.completed_step_ids || []), ...(progress.skipped_step_ids || [])])
+}
+
+function dailyLaterStepIds(progress = currentDailyProgress()) {
+  const resolved = dailyResolvedStepIds(progress)
+  const valid = new Set(dailySteps.map((step) => step.id))
+  return (progress.later_step_ids || []).filter((id) => valid.has(id) && !resolved.has(id))
+}
+
+function getOrderedUnresolvedDailySteps(progress = currentDailyProgress()) {
+  const resolved = dailyResolvedStepIds(progress)
+  const laterIds = dailyLaterStepIds(progress)
+  const laterSet = new Set(laterIds)
+  const immediate = dailySteps.filter((step) => !resolved.has(step.id) && !laterSet.has(step.id))
+  const byId = new Map(dailySteps.map((step) => [step.id, step]))
+  const deferred = laterIds.map((id) => byId.get(id)).filter(Boolean)
+  return [...immediate, ...deferred]
+}
+
+function getCurrentDailyStep() {
+  return getOrderedUnresolvedDailySteps()[0] || null
+}
+
+function getDailyStepPosition(stepId) {
+  const index = dailySteps.findIndex((step) => step.id === stepId)
+  return index >= 0 ? index + 1 : 1
+}
+
+function totalDailyActions() {
+  return dailySteps.reduce((total, step) => total + Math.max(1, normalizeDailySubsteps(step.substeps).length), 0)
+}
+
+function completedDailyActionsCount(progress = currentDailyProgress()) {
+  const resolved = dailyResolvedStepIds(progress)
+  return dailySteps.reduce((total, step) => {
+    const count = Math.max(1, normalizeDailySubsteps(step.substeps).length)
+    if (resolved.has(step.id)) return total + count
+    if (count === 1) return total
+    return total + clamp(Number.parseInt(progress.substep_positions?.[step.id], 10) || 0, 0, count)
+  }, 0)
+}
+
+function getCurrentDailyAction() {
+  const progress = currentDailyProgress()
+  const step = getCurrentDailyStep()
+  if (!step) return null
+  const substeps = normalizeDailySubsteps(step.substeps)
+  if (!substeps.length) return { step, substeps, substepIndex: -1, title: step.title, isSubstep: false }
+  const substepIndex = clamp(Number.parseInt(progress.substep_positions?.[step.id], 10) || 0, 0, Math.max(0, substeps.length - 1))
+  return { step, substeps, substepIndex, title: substeps[substepIndex], isSubstep: true }
+}
+
+function hasDailyActionHistory(progress = currentDailyProgress()) {
+  if ((progress.completed_step_ids || []).length || (progress.skipped_step_ids || []).length || (progress.later_step_ids || []).length) return true
+  return Object.values(progress.substep_positions || {}).some((value) => Number(value) > 0)
+}
+
+function cloneDailyProgress(progress = currentDailyProgress()) {
+  return normalizeDailyProgressValue(JSON.parse(JSON.stringify(progress)), todayDateKey())
+}
+
+function clearDailyUndo() {
+  if (dailyUndoTimer) window.clearTimeout(dailyUndoTimer)
+  dailyUndoTimer = null
+  dailyUndoSnapshot = null
+  dailyUndoLabel = ''
+  dailyUndoExpiresAt = 0
+}
+
+function rememberDailyUndo(progress, label) {
+  if (dailyUndoTimer) window.clearTimeout(dailyUndoTimer)
+  dailyUndoTimer = null
+  dailyUndoSnapshot = cloneDailyProgress(progress)
+  dailyUndoLabel = label
+  dailyUndoExpiresAt = Date.now() + 5000
+}
+
+function renderDailyUndoToast() {
+  if (!dailyUndoSnapshot || Date.now() >= dailyUndoExpiresAt) return ''
+  return `
+    <div class="day-undo-toast" id="day-undo-toast" role="status">
+      <span>${escapeHtml(dailyUndoLabel)}</span>
+      <button type="button" id="undo-daily-action">Undo</button>
+    </div>`
+}
+
+function bindDailyUndoToast() {
+  const toast = document.querySelector('#day-undo-toast')
+  const undo = document.querySelector('#undo-daily-action')
+  if (!toast || !undo || !dailyUndoSnapshot) return
+  undo.addEventListener('click', () => {
+    const snapshot = dailyUndoSnapshot
+    clearDailyUndo()
+    saveDailyProgress(snapshot)
+    renderDayRunner()
+  })
+  const delay = Math.max(0, dailyUndoExpiresAt - Date.now())
+  dailyUndoTimer = window.setTimeout(() => {
+    toast.classList.add('is-hiding')
+    window.setTimeout(() => {
+      toast.remove()
+      clearDailyUndo()
+    }, 180)
+  }, delay)
+}
+
+function isGymDailyStep(step) {
+  const title = String(step?.title || '').trim().toLowerCase()
+  return ['gym', 'workout', 'training'].includes(title) && normalizeDailySubsteps(step?.substeps).length === 0
+}
+
+function getDailyGymState(step = getCurrentDailyStep()) {
+  if (!isGymDailyStep(step)) return null
+  const planned = getScheduledFolders(todayDateKey())
+  const remaining = planned.filter((folder) => !wasWorkoutCompleted(todayDateKey(), folder.id))
+  return { planned, remaining }
+}
+
+function startDailySystem() {
+  if (!dailySteps.length) return
+  const progress = currentDailyProgress()
+  if (!progress.started_at) progress.started_at = new Date().toISOString()
+  progress.is_complete = false
+  saveDailyProgress(progress)
+  renderDayRunner()
+}
+
+function advanceDailyAction(stepId, skip = false, options = {}) {
+  const now = Date.now()
+  if (!options.bypassGuard && now - lastDailyTapAt < 900) return false
+  if (!options.bypassGuard) lastDailyTapAt = now
+  const progress = currentDailyProgress()
+  const step = dailySteps.find((item) => item.id === stepId)
+  if (!step) return false
+  if (options.rememberUndo !== false) rememberDailyUndo(progress, options.undoLabel || (skip ? 'Skipped' : 'Done'))
+
+  const substeps = normalizeDailySubsteps(step.substeps)
+  const completed = new Set(progress.completed_step_ids || [])
+  const skipped = new Set(progress.skipped_step_ids || [])
+  const later = (progress.later_step_ids || []).filter((id) => id !== stepId)
+  const positions = { ...(progress.substep_positions || {}) }
+
+  if (substeps.length) {
+    const current = clamp(Number.parseInt(positions[stepId], 10) || 0, 0, substeps.length - 1)
+    const next = current + 1
+    positions[stepId] = next
+    if (next >= substeps.length) completed.add(stepId)
+  } else if (skip) {
+    skipped.add(stepId)
+  } else {
+    completed.add(stepId)
+  }
+
+  progress.completed_step_ids = [...completed]
+  progress.skipped_step_ids = [...skipped]
+  progress.later_step_ids = later
+  progress.substep_positions = positions
+  progress.is_complete = dailySteps.length > 0 && dailySteps.every((item) => completed.has(item.id) || skipped.has(item.id))
+  if (!progress.started_at) progress.started_at = new Date().toISOString()
+  saveDailyProgress(progress)
+  if (options.render !== false) renderDayRunner()
+  return true
+}
+
+function completeDailyStep(stepId) {
+  advanceDailyAction(stepId, false, { undoLabel: 'Done' })
+}
+
+function skipDailyStep(stepId) {
+  advanceDailyAction(stepId, true, { undoLabel: 'Skipped' })
+}
+
+function deferDailyStep(stepId) {
+  const now = Date.now()
+  if (now - lastDailyTapAt < 900) return
+  lastDailyTapAt = now
+  const progress = currentDailyProgress()
+  const unresolved = getOrderedUnresolvedDailySteps(progress)
+  if (unresolved.length <= 1) return
+  const step = dailySteps.find((item) => item.id === stepId)
+  if (!step) return
+  rememberDailyUndo(progress, 'Moved to later')
+  progress.later_step_ids = [...(progress.later_step_ids || []).filter((id) => id !== stepId), stepId]
+  if (!progress.started_at) progress.started_at = new Date().toISOString()
+  saveDailyProgress(progress)
+  renderDayRunner()
+}
+
+function bindDailyLaterSwipe(stepId) {
+  const card = document.querySelector('#day-step-card')
+  if (!card) return
+  let startX = 0
+  let startY = 0
+  let startedAt = 0
+  card.addEventListener('touchstart', (event) => {
+    const touch = event.touches?.[0]
+    if (!touch) return
+    startX = touch.clientX
+    startY = touch.clientY
+    startedAt = Date.now()
+  }, { passive: true })
+  card.addEventListener('touchend', (event) => {
+    const touch = event.changedTouches?.[0]
+    if (!touch || !startedAt) return
+    const dx = touch.clientX - startX
+    const dy = touch.clientY - startY
+    startedAt = 0
+    if (dx < -72 && Math.abs(dx) > Math.abs(dy) * 1.35) deferDailyStep(stepId)
+  }, { passive: true })
+}
+
+function dailyGymStepCanAutoComplete(step) {
+  const gym = getDailyGymState(step)
+  return Boolean(gym && gym.planned.length && gym.remaining.length === 0)
+}
+
+function maybeCompleteDailyGymStepAfterWorkout() {
+  const progress = currentDailyProgress()
+  if (!progress.started_at || progress.is_complete) return false
+  const step = getCurrentDailyStep()
+  if (!isGymDailyStep(step)) return false
+  const gym = getDailyGymState(step)
+  if (!gym) return false
+  const shouldComplete = gym.planned.length ? gym.remaining.length === 0 : true
+  if (!shouldComplete) return true
+  advanceDailyAction(step.id, false, { bypassGuard: true, rememberUndo: false, render: false })
+  return true
 }
 
 function getScheduleEntries(dateKey) {
@@ -502,6 +928,8 @@ function restoreTimerState() {
     if (!raw) return
     const saved = JSON.parse(raw)
     restMotivationId = typeof saved.motivationId === 'string' ? saved.motivationId : null
+    restQueue = Array.isArray(saved.queue) ? saved.queue.filter((id) => typeof id === 'string') : []
+    restQueueIndex = clamp(Number.parseInt(saved.queueIndex, 10) || 0, 0, Math.max(0, restQueue.length - 1))
     if (saved.endAt && Number(saved.endAt) > Date.now()) {
       timerEndAt = Number(saved.endAt)
       timerPausedSeconds = Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000))
@@ -522,7 +950,9 @@ function persistTimerState() {
     window.localStorage.setItem(timerStorageKey(), JSON.stringify({
       endAt: timerEndAt,
       pausedSeconds: getRemainingSeconds(),
-      motivationId: restMotivationId
+      motivationId: restMotivationId,
+      queue: restQueue,
+      queueIndex: restQueueIndex
     }))
   } catch {
     // Ignore storage failures.
@@ -555,7 +985,8 @@ function addZipBytes(zip, filename, bytes) {
 function buildBackupVideoName(row, foldersById) {
   const folder = foldersById.get(row.folder_id)
   if (folder?.name === MOTIVATION_FOLDER_NAME) {
-    const extension = VIDEO_EXTENSIONS.has(fileExtension(row.video_path)) ? fileExtension(row.video_path) : 'mp4'
+    const pathExt = fileExtension(row.video_path)
+    const extension = VIDEO_EXTENSIONS.has(pathExt) || IMAGE_EXTENSIONS.has(pathExt) ? pathExt : 'mp4'
     return `videos/motivation/${padOrder(row.sort_order)}-${safeBackupSegment(row.name, 'motivation')}.${extension}`
   }
   const folderName = safeBackupSegment(folder?.name, 'folder')
@@ -604,6 +1035,16 @@ async function downloadFullBackup() {
 
     let weeklyPlanRows = []
     let historyRows = []
+    let weightLogBackupRows = []
+    let dailyStepBackupRows = []
+    let dailyProgressBackupRows = []
+    if (weightLogAvailable) {
+      const { data: weightData, error: weightError } = await supabase
+        .from('exercise_weight_log')
+        .select('exercise_group,folder_id,workout_date,weight,updated_at')
+        .order('workout_date', { ascending: true })
+      if (!weightError) weightLogBackupRows = weightData || []
+    }
     if (planningUpgradeAvailable) {
       const [weeklyResult, historyResult] = await Promise.all([
         supabase.from('workout_weekly_plan').select('id,weekday,folder_id,created_at,updated_at').order('weekday', { ascending: true }).order('created_at', { ascending: true }),
@@ -612,10 +1053,18 @@ async function downloadFullBackup() {
       if (!weeklyResult.error) weeklyPlanRows = weeklyResult.data || []
       if (!historyResult.error) historyRows = historyResult.data || []
     }
+    if (dailySystemAvailable) {
+      const [dailyStepsResult, dailyProgressResult] = await Promise.all([
+        supabase.from('daily_steps').select('id,title,note,substeps,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
+        supabase.from('daily_progress').select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,substep_positions,is_complete,started_at,updated_at').order('progress_date', { ascending: true })
+      ])
+      if (!dailyStepsResult.error) dailyStepBackupRows = dailyStepsResult.data || []
+      if (!dailyProgressResult.error) dailyProgressBackupRows = dailyProgressResult.data || []
+    }
 
     const manifest = {
       format: 'battle-angel-backup',
-      version: 4,
+      version: 8,
       exported_at: new Date().toISOString(),
       account_email: currentUser.email || '',
       folders: folderRows.filter((folder) => folder.name !== MOTIVATION_FOLDER_NAME),
@@ -623,7 +1072,10 @@ async function downloadFullBackup() {
       motivation_videos: motivationRows,
       schedule: scheduleRows,
       weekly_plan: weeklyPlanRows,
-      history: historyRows
+      history: historyRows,
+      weight_log: weightLogBackupRows,
+      daily_steps: dailyStepBackupRows,
+      daily_progress: dailyProgressBackupRows
     }
 
     const parts = []
@@ -822,7 +1274,8 @@ async function loadFolders() {
   const [countResult] = await Promise.all([
     supabase.from('exercises').select('folder_id,exercise_group'),
     loadMotivationVideos(),
-    loadSchedule()
+    loadSchedule(),
+    loadDailySystem()
   ])
   if (countResult.error) throw countResult.error
 
@@ -885,7 +1338,9 @@ function saveSnapshot() {
     motivationRows: stripVideoUrls(motivationVideos),
     scheduleEntries,
     weeklyPlanEntries,
-    workoutHistory
+    workoutHistory,
+    dailySteps,
+    dailyProgress
   })
 }
 
@@ -897,6 +1352,10 @@ async function restoreSnapshot() {
   scheduleEntries = snapshot.scheduleEntries || []
   weeklyPlanEntries = snapshot.weeklyPlanEntries || []
   workoutHistory = mergePendingCompletions(snapshot.workoutHistory || [])
+  dailySteps = Array.isArray(snapshot.dailySteps) ? snapshot.dailySteps : []
+  dailyProgress = normalizeDailyProgressValue(snapshot.dailyProgress, todayDateKey())
+  const pendingDaily = pendingDailyProgressFor(todayDateKey())
+  if (pendingDaily) dailyProgress = pendingDaily
   motivationVideos = await hydrateMotivationRows(snapshot.motivationRows || [])
   return true
 }
@@ -992,7 +1451,10 @@ function readPending() {
   const pending = readJson(pendingKey(), {})
   return {
     weights: pending.weights && typeof pending.weights === 'object' ? pending.weights : {},
-    completions: Array.isArray(pending.completions) ? pending.completions : []
+    completions: Array.isArray(pending.completions) ? pending.completions : [],
+    uncompletions: Array.isArray(pending.uncompletions) ? pending.uncompletions : [],
+    weightLogs: pending.weightLogs && typeof pending.weightLogs === 'object' ? pending.weightLogs : {},
+    dailyProgress: pending.dailyProgress && typeof pending.dailyProgress === 'object' ? pending.dailyProgress : null
   }
 }
 
@@ -1001,8 +1463,10 @@ function writePending(pending) {
 }
 
 function mergePendingCompletions(history) {
-  const pending = currentUser ? readPending().completions : []
-  const merged = [...history]
+  const all = currentUser ? readPending() : { completions: [], uncompletions: [] }
+  const pending = all.completions
+  const undone = new Set(all.uncompletions.map((item) => `${item.workout_date}|${item.folder_id}`))
+  const merged = history.filter((entry) => !undone.has(`${entry.workout_date}|${entry.folder_id}`))
   pending.forEach((item) => {
     if (!merged.some((entry) => entry.workout_date === item.workout_date && entry.folder_id === item.folder_id)) {
       merged.unshift({ id: `pending-${item.folder_id}-${item.workout_date}`, ...item })
@@ -1015,7 +1479,7 @@ let flushingPending = false
 async function flushPendingWrites() {
   if (!currentUser || flushingPending || navigator.onLine === false) return
   const pending = readPending()
-  if (!Object.keys(pending.weights).length && !pending.completions.length) return
+  if (!Object.keys(pending.weights).length && !pending.completions.length && !pending.uncompletions.length && !Object.keys(pending.weightLogs).length && !pending.dailyProgress) return
   flushingPending = true
   try {
     for (const [groupId, value] of Object.entries(pending.weights)) {
@@ -1027,6 +1491,8 @@ async function flushPendingWrites() {
       }
     }
     for (const item of pending.completions) {
+      const stillPending = readPending().completions.some((entry) => entry.workout_date === item.workout_date && entry.folder_id === item.folder_id)
+      if (!stillPending) continue
       const { error } = await supabase.from('workout_history').upsert({
         user_id: currentUser.id,
         workout_date: item.workout_date,
@@ -1039,13 +1505,73 @@ async function flushPendingWrites() {
         writePending(next)
       }
     }
+    for (const item of pending.uncompletions) {
+      const stillPending = readPending().uncompletions.some((entry) => entry.workout_date === item.workout_date && entry.folder_id === item.folder_id)
+      if (!stillPending) continue
+      const { error } = await supabase.from('workout_history').delete().eq('workout_date', item.workout_date).eq('folder_id', item.folder_id)
+      if (!error) {
+        const next = readPending()
+        next.uncompletions = next.uncompletions.filter((entry) => !(entry.workout_date === item.workout_date && entry.folder_id === item.folder_id))
+        writePending(next)
+      }
+    }
+    const dailyItem = readPending().dailyProgress
+    if (dailyItem && dailySystemAvailable) {
+      const { error } = await supabase.from('daily_progress').upsert({
+        user_id: currentUser.id,
+        progress_date: dailyItem.progress_date,
+        completed_step_ids: dailyItem.completed_step_ids || [],
+        skipped_step_ids: dailyItem.skipped_step_ids || [],
+        later_step_ids: dailyItem.later_step_ids || [],
+        substep_positions: dailyItem.substep_positions || {},
+        is_complete: Boolean(dailyItem.is_complete),
+        started_at: dailyItem.started_at || null,
+        updated_at: dailyItem.updated_at || new Date().toISOString()
+      }, { onConflict: 'user_id,progress_date' })
+      if (error) {
+        if (isMissingDailySystemError(error)) dailySystemAvailable = false
+      } else {
+        const next = readPending()
+        if (next.dailyProgress?.updated_at === dailyItem.updated_at) next.dailyProgress = null
+        writePending(next)
+      }
+    }
+    if (weightLogAvailable) {
+      for (const [key, item] of Object.entries(pending.weightLogs)) {
+        const { error } = await supabase.from('exercise_weight_log').upsert({
+          user_id: currentUser.id,
+          folder_id: item.folder_id,
+          exercise_group: item.exercise_group,
+          workout_date: item.workout_date,
+          weight: item.weight,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,exercise_group,workout_date' })
+        if (error && isMissingWeightLogError(error)) {
+          weightLogAvailable = false
+          break
+        }
+        if (!error) {
+          const next = readPending()
+          if (next.weightLogs[key]?.weight === item.weight) delete next.weightLogs[key]
+          writePending(next)
+        }
+      }
+    }
   } finally {
     flushingPending = false
   }
 }
 
 function dataSignature() {
-  return JSON.stringify([folders, scheduleEntries, weeklyPlanEntries, workoutHistory.map((entry) => [entry.workout_date, entry.folder_id]), motivationVideos.map((video) => video.id)])
+  return JSON.stringify([
+    folders,
+    scheduleEntries,
+    weeklyPlanEntries,
+    workoutHistory.map((entry) => [entry.workout_date, entry.folder_id]),
+    motivationVideos.map((video) => video.id),
+    dailySteps.map((step) => [step.id, step.title, step.note, step.substeps, step.sort_order]),
+    dailyProgress
+  ])
 }
 
 // Re-render the current tab with fresh data, but only if the user hasn't moved on and something actually changed.
@@ -1061,7 +1587,8 @@ async function refreshInBackground() {
     return
   }
   if (viewVersion !== version || (dataSignature() === before && !wasCached)) return
-  if (currentView === 'home') renderHome()
+  if (currentView === 'day') renderDay()
+  else if (currentView === 'home') renderHome()
   else if (currentView === 'workouts') renderWorkouts()
 }
 
@@ -1092,24 +1619,43 @@ async function deleteOfflineVideos(paths) {
   list.forEach((path) => signedUrlCache.delete(path))
 }
 
-function getRestMotivationVideo() {
-  if (!motivationVideos.length) return null
-  return motivationVideos.find((video) => video.id === restMotivationId) || motivationVideos[0]
+function shuffleIds(ids) {
+  const list = [...ids]
+  for (let i = list.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[list[i], list[j]] = [list[j], list[i]]
+  }
+  return list
+}
+
+// Every rest gets a fresh random order of all motivation clips and photos.
+// The first item never repeats the last one shown in the previous rest.
+function buildMotivationQueue(avoidFirstId = null) {
+  const ids = motivationVideos.filter((item) => item.signedUrl).map((item) => item.id)
+  const queue = shuffleIds(ids)
+  if (queue.length > 1 && queue[0] === avoidFirstId) queue.push(queue.shift())
+  return queue
 }
 
 function chooseMotivationForNewRest() {
-  if (!motivationVideos.length) {
-    restMotivationId = null
-    return null
-  }
+  restQueue = buildMotivationQueue(restMotivationId)
+  restQueueIndex = 0
+  restMotivationId = restQueue[0] || null
+  restMediaErrors = 0
+}
 
-  const currentIndex = motivationVideos.findIndex((video) => video.id === restMotivationId)
-  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % motivationVideos.length
-  restMotivationId = motivationVideos[nextIndex].id
-  return motivationVideos[nextIndex]
+function currentRestMedia() {
+  if (!restQueue.length) return null
+  return motivationVideos.find((item) => item.id === restQueue[restQueueIndex] && item.signedUrl) || null
+}
+
+function clearRestImageTimer() {
+  if (restImageTimer) window.clearTimeout(restImageTimer)
+  restImageTimer = null
 }
 
 function stopRestMotivationPlayback(resetToStart = false) {
+  clearRestImageTimer()
   const video = document.querySelector('#rest-motivation-video')
   if (!video) return
   video.pause()
@@ -1120,6 +1666,83 @@ function stopRestMotivationPlayback(resetToStart = false) {
       // Ignore browsers that do not allow seeking before metadata loads.
     }
   }
+}
+
+function advanceRestMedia() {
+  if (currentView !== 'rest' || !timerEndAt) return
+  restQueueIndex += 1
+  if (restQueueIndex >= restQueue.length) {
+    // Went through everything before the rest ended: reshuffle and keep going.
+    restQueue = buildMotivationQueue(restQueue[restQueue.length - 1])
+    restQueueIndex = 0
+  }
+  restMotivationId = restQueue[restQueueIndex] || null
+  persistTimerState()
+  playRestMedia()
+}
+
+function playRestMedia() {
+  clearRestImageTimer()
+  const videoEl = document.querySelector('#rest-motivation-video')
+  const imageEl = document.querySelector('#rest-motivation-image')
+  if (!videoEl || !imageEl) return
+  // Skip anything that was removed since the queue was built.
+  let item = currentRestMedia()
+  let guard = restQueue.length
+  while (!item && guard > 0 && restQueue.length) {
+    restQueueIndex = (restQueueIndex + 1) % restQueue.length
+    item = currentRestMedia()
+    guard -= 1
+  }
+  if (!item) {
+    videoEl.classList.add('hidden')
+    imageEl.classList.add('hidden')
+    return
+  }
+  restMotivationId = item.id
+
+  if (isImagePath(item.video_path)) {
+    videoEl.pause()
+    videoEl.classList.add('hidden')
+    imageEl.classList.remove('hidden')
+    imageEl.src = item.signedUrl
+    restImageTimer = window.setTimeout(advanceRestMedia, MOTIVATION_IMAGE_SECONDS * 1000)
+    preloadNextRestImage()
+    return
+  }
+
+  imageEl.classList.add('hidden')
+  imageEl.removeAttribute('src')
+  videoEl.classList.remove('hidden')
+  // One <video> element is reused for every clip so iPhone keeps the sound permission between clips.
+  if (videoEl.getAttribute('src') !== item.signedUrl) videoEl.src = item.signedUrl
+  videoEl.muted = !motivationSoundOn()
+  const result = videoEl.play()
+  if (result?.catch) {
+    result.catch((error) => {
+      if (error?.name === 'NotAllowedError' && !videoEl.muted) {
+        // Sound wasn't allowed without a fresh tap: keep the clip going muted.
+        videoEl.muted = true
+        updateRestSoundHint(false)
+        videoEl.play()?.catch?.(() => {})
+      }
+    })
+  }
+  preloadNextRestImage()
+}
+
+function preloadNextRestImage() {
+  const nextId = restQueue[restQueueIndex + 1]
+  const next = motivationVideos.find((item) => item.id === nextId)
+  if (next?.signedUrl && isImagePath(next.video_path)) {
+    const img = new Image()
+    img.src = next.signedUrl
+  }
+}
+
+function updateRestSoundHint(soundOn) {
+  const hint = document.querySelector('#rest-sound-hint')
+  if (hint) hint.textContent = soundOn ? 'sound on · double-tap to mute' : 'muted · double-tap for sound'
 }
 
 function motivationSoundOn() {
@@ -1138,42 +1761,92 @@ function setMotivationSound(on) {
   }
 }
 
+const DOUBLE_TAP_MS = 350
+const TAP_MOVE_PX = 12
+const TAP_MAX_MS = 300
+
 function showRestLockScreen() {
   if (!timerEndAt) return
   viewVersion += 1
   currentView = 'rest'
   keepAwake()
-  const video = getRestMotivationVideo()
+  if (!currentRestMedia() && motivationVideos.length) chooseMotivationForNewRest()
+  const hasMedia = motivationVideos.some((item) => item.signedUrl)
+  const hasVideo = motivationVideos.some((item) => item.signedUrl && !isImagePath(item.video_path))
   const remaining = getRemainingSeconds()
   const soundOn = motivationSoundOn()
   app.innerHTML = `
     <main class="rest-lock-screen" aria-label="Rest timer">
-      ${video?.signedUrl ? `<video id="rest-motivation-video" class="rest-lock-video" playsinline webkit-playsinline preload="auto" loop ${soundOn ? '' : 'muted'} src="${escapeHtml(video.signedUrl)}" aria-label="Motivation video"></video>` : '<div class="rest-lock-blank" aria-hidden="true"></div>'}
+      ${hasMedia ? `
+        <video id="rest-motivation-video" class="rest-lock-video hidden" playsinline webkit-playsinline preload="auto" ${soundOn ? '' : 'muted'} aria-label="Motivation video"></video>
+        <img id="rest-motivation-image" class="rest-lock-image hidden" alt="" />` : '<div class="rest-lock-blank" aria-hidden="true"></div>'}
       <div id="timer-value" class="rest-lock-timer" aria-live="off">${formatTime(remaining)}</div>
-      ${video?.signedUrl ? `<div id="rest-sound-hint" class="rest-sound-hint">${soundOn ? 'sound on · tap to mute' : 'muted · tap for sound'}</div>` : ''}
+      ${hasVideo ? '<div id="rest-sound-hint" class="rest-sound-hint"></div>' : ''}
     </main>`
 
-  const restVideo = document.querySelector('#rest-motivation-video')
-  if (restVideo) {
-    restVideo.loop = true
-    restVideo.muted = !soundOn
-    const tryPlay = () => {
-      const result = restVideo.play()
-      if (result?.catch) result.catch(() => {})
-    }
-    tryPlay()
-    const shownAt = Date.now()
-    document.querySelector('.rest-lock-screen')?.addEventListener('pointerdown', () => {
-      if (Date.now() - shownAt < 700) return
-      const nextSoundOn = restVideo.muted
-      restVideo.muted = !nextSoundOn
-      setMotivationSound(nextSoundOn)
-      const hint = document.querySelector('#rest-sound-hint')
-      if (hint) hint.textContent = nextSoundOn ? 'sound on · tap to mute' : 'muted · tap for sound'
-      tryPlay()
+  if (hasMedia) {
+    const videoEl = document.querySelector('#rest-motivation-video')
+    const imageEl = document.querySelector('#rest-motivation-image')
+    videoEl.loop = false
+    videoEl.addEventListener('ended', () => {
+      restMediaErrors = 0
+      advanceRestMedia()
     })
+    const onMediaError = () => {
+      restMediaErrors += 1
+      if (restMediaErrors >= Math.max(1, restQueue.length)) return
+      advanceRestMedia()
+    }
+    videoEl.addEventListener('error', onMediaError)
+    imageEl.addEventListener('error', onMediaError)
+    imageEl.addEventListener('load', () => { restMediaErrors = 0 })
+    updateRestSoundHint(soundOn)
+    playRestMedia()
+    bindRestDoubleTap(videoEl)
   }
   updateTimerUI()
+}
+
+// Sound only toggles on a deliberate double tap. A single touch (including the start of
+// the iPhone swipe-home gesture) does nothing.
+function bindRestDoubleTap(videoEl) {
+  const screen = document.querySelector('.rest-lock-screen')
+  if (!screen) return
+  const shownAt = Date.now()
+  let down = null
+  let lastTapAt = 0
+  screen.addEventListener('pointerdown', (event) => {
+    down = { x: event.clientX, y: event.clientY, at: Date.now(), id: event.pointerId }
+  })
+  screen.addEventListener('pointercancel', () => {
+    down = null
+    lastTapAt = 0
+  })
+  screen.addEventListener('pointerup', (event) => {
+    const start = down
+    down = null
+    if (!start || start.id !== event.pointerId) return
+    const now = Date.now()
+    const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y)
+    if (now - shownAt < 700 || moved > TAP_MOVE_PX || now - start.at > TAP_MAX_MS) {
+      lastTapAt = 0
+      return
+    }
+    if (now - lastTapAt > DOUBLE_TAP_MS) {
+      lastTapAt = now
+      return
+    }
+    lastTapAt = 0
+    // Follow what's actually audible: after reopening the app iPhone may have forced the clip muted.
+    const videoVisible = !videoEl.classList.contains('hidden')
+    const nextSoundOn = videoVisible ? videoEl.muted : !motivationSoundOn()
+    setMotivationSound(nextSoundOn)
+    updateRestSoundHint(nextSoundOn)
+    if (!videoEl.classList.contains('hidden')) {
+      videoEl.muted = !nextSoundOn
+      videoEl.play()?.catch?.(() => {})
+    }
+  })
 }
 
 function returnFromRestScreen() {
@@ -1191,8 +1864,8 @@ function returnFromRestScreen() {
 
 function renderBottomNav(activeTab) {
   const tabs = [
-    ['today', 'Today'],
-    ['workouts', 'Workouts'],
+    ['day', 'Day'],
+    ['gym', 'Gym'],
     ['plan', 'Plan'],
     ['more', 'More']
   ]
@@ -1204,8 +1877,8 @@ function bindBottomNav() {
   document.querySelectorAll('[data-nav-tab]').forEach((button) => {
     button.addEventListener('click', () => {
       const tab = button.dataset.navTab
-      if (tab === 'today') renderHome()
-      if (tab === 'workouts') renderWorkouts()
+      if (tab === 'day') renderDay()
+      if (tab === 'gym') renderHome()
       if (tab === 'plan') {
         plannerMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
         if (!plannerSelectedDate || plannerSelectedDate.slice(0, 7) !== todayDateKey().slice(0, 7)) plannerSelectedDate = todayDateKey()
@@ -1220,11 +1893,12 @@ function renderShell(content, options = {}) {
   const title = options.title || (activeFolder ? activeFolder.name : 'Today')
   const showAccount = options.showAccount !== false
   const showTimer = options.showTimer !== false
+  const showHeader = options.showHeader !== false
   viewVersion += 1
   currentView = options.view || options.navTab || ''
   app.innerHTML = `
-    <main class="shell ${workoutMode ? 'workout-shell' : ''} ${options.navTab ? 'has-bottom-nav' : ''}">
-      <header class="topbar">
+    <main class="shell ${workoutMode ? 'workout-shell' : ''} ${options.navTab ? 'has-bottom-nav' : ''} ${showHeader ? '' : 'shell-no-header'}">
+      ${showHeader ? `<header class="topbar">
         <div class="topbar-title">
           <div class="brand-name brand-name-compact">battle angel</div>
           <h1 id="page-title">${escapeHtml(title)}</h1>
@@ -1232,7 +1906,7 @@ function renderShell(content, options = {}) {
         ${showTimer ? `<div class="topbar-actions">
           <button type="button" id="timer-toggle" class="timer-chip">rest <span id="timer-mini">2:30</span></button>
         </div>` : ''}
-      </header>
+      </header>` : ''}
       <div id="main-content">${content}</div>
       ${showAccount ? `<details class="account-menu">
         <summary>More</summary>
@@ -1270,7 +1944,9 @@ function getSavedWorkoutForFolder(folderId) {
 function renderMotivationLibrary() {
   const items = motivationVideos.map((video) => `
     <article class="motivation-item">
-      <video controls playsinline webkit-playsinline preload="metadata" src="${escapeHtml(video.signedUrl)}" aria-label="${escapeHtml(video.name)}"></video>
+      ${isImagePath(video.video_path)
+        ? `<img src="${escapeHtml(video.signedUrl)}" alt="${escapeHtml(video.name)}" loading="lazy" />`
+        : `<video controls playsinline webkit-playsinline preload="metadata" src="${escapeHtml(video.signedUrl)}" aria-label="${escapeHtml(video.name)}"></video>`}
       <div class="motivation-item-row">
         <div class="motivation-item-name">${escapeHtml(video.name)}</div>
         <button type="button" class="text-button danger-text motivation-remove" data-remove-motivation="${video.id}" data-motivation-path="${escapeHtml(video.video_path)}">Remove</button>
@@ -1285,14 +1961,337 @@ function renderMotivationLibrary() {
       </summary>
       <div class="motivation-editor-body">
         <label class="file-picker motivation-picker">
-          <span class="file-picker-button">Add videos</span>
-          <span class="picked-files">Photos or Files</span>
-          <input id="motivation-videos" type="file" accept="video/*,.mp4,.mov,.m4v,.webm" multiple aria-label="Choose motivation videos" />
+          <span class="file-picker-button">Add videos or photos</span>
+          <span class="picked-files">Shuffled during rest · photos show ${MOTIVATION_IMAGE_SECONDS}s each</span>
+          <input id="motivation-videos" type="file" accept="video/*,image/*,.mp4,.mov,.m4v,.webm,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif" multiple aria-label="Choose motivation videos or photos" />
         </label>
         <div id="motivation-status" class="status-line motivation-status" aria-live="polite"></div>
         ${items ? `<div class="motivation-list">${items}</div>` : ''}
       </div>
     </details>`
+}
+
+function renderDailyEditor() {
+  const progress = currentDailyProgress()
+  const rows = dailySteps.map((step, index) => {
+    const substeps = normalizeDailySubsteps(step.substeps)
+    return `
+    <details class="daily-edit-item">
+      <summary>
+        <span>${index + 1}. ${escapeHtml(step.title)}</span>
+        <span class="daily-edit-more">${substeps.length ? `${substeps.length} substeps · ` : ''}Edit</span>
+      </summary>
+      <form class="daily-edit-form" data-daily-edit="${step.id}">
+        <label>
+          <span class="eyebrow">STEP</span>
+          <input name="title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required value="${escapeHtml(step.title)}" />
+        </label>
+        <label>
+          <span class="eyebrow">SHORT NOTE · OPTIONAL</span>
+          <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only what you need to remember">${escapeHtml(step.note || '')}</textarea>
+        </label>
+        <details class="daily-substeps-editor" ${substeps.length ? 'open' : ''}>
+          <summary>Substeps${substeps.length ? ` · ${substeps.length}` : ' · optional'}</summary>
+          <label>
+            <span class="eyebrow">ONE PER LINE</span>
+            <textarea name="substeps" rows="${Math.min(6, Math.max(3, substeps.length + 1))}" placeholder="Brush teeth\nSkincare\nGet dressed">${escapeHtml(dailySubstepsText(step))}</textarea>
+          </label>
+        </details>
+        <div class="daily-edit-actions">
+          <button type="submit" class="primary-button">Save</button>
+          <button type="button" class="secondary-button" data-daily-move="up" data-daily-step-id="${step.id}" ${index === 0 ? 'disabled' : ''}>Up</button>
+          <button type="button" class="secondary-button" data-daily-move="down" data-daily-step-id="${step.id}" ${index === dailySteps.length - 1 ? 'disabled' : ''}>Down</button>
+          <button type="button" class="ghost-danger" data-daily-delete="${step.id}">Delete</button>
+        </div>
+      </form>
+    </details>`
+  }).join('')
+
+  return `
+    <details class="daily-editor" ${dailySteps.length ? '' : 'open'}>
+      <summary>Edit routine</summary>
+      <div class="daily-editor-body">
+        <form id="add-daily-step" class="daily-add-form">
+          <label>
+            <span class="eyebrow">NEW STEP</span>
+            <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="e.g. Get ready" />
+          </label>
+          <label>
+            <span class="eyebrow">SHORT NOTE · OPTIONAL</span>
+            <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only if it helps"></textarea>
+          </label>
+          <details class="daily-substeps-editor">
+            <summary>Add substeps · optional</summary>
+            <label>
+              <span class="eyebrow">ONE PER LINE</span>
+              <textarea id="daily-step-substeps" rows="4" placeholder="Brush teeth\nSkincare\nGet dressed"></textarea>
+            </label>
+          </details>
+          <button type="submit" class="primary-button">Add step</button>
+        </form>
+        ${rows ? `<div class="daily-edit-list">${rows}</div>` : '<div class="daily-editor-empty">Add your routine once. During the day you only see the next action.</div>'}
+        ${progress.started_at ? '<button type="button" class="text-button danger-text daily-reset" id="reset-day-progress">Restart today</button>' : ''}
+        <div id="daily-editor-status" class="status-line" aria-live="polite"></div>
+      </div>
+    </details>`
+}
+
+function bindDailyEditor() {
+  document.querySelector('#add-daily-step')?.addEventListener('submit', addDailyStep)
+  document.querySelectorAll('[data-daily-edit]').forEach((form) => form.addEventListener('submit', updateDailyStep))
+  document.querySelectorAll('[data-daily-move]').forEach((button) => {
+    button.addEventListener('click', () => moveDailyStep(button.dataset.dailyStepId, button.dataset.dailyMove))
+  })
+  document.querySelectorAll('[data-daily-delete]').forEach((button) => {
+    button.addEventListener('click', () => deleteDailyStep(button.dataset.dailyDelete))
+  })
+  document.querySelector('#reset-day-progress')?.addEventListener('click', resetTodayDailyProgress)
+}
+
+function renderDay(errorMessage = '', options = {}) {
+  activeFolder = null
+  activeExerciseGroups = []
+  workoutMode = false
+  folderEditMode = false
+
+  if (!dailySystemAvailable) {
+    renderShell(`
+      <div class="notice error">Daily system needs the latest Supabase schema once. Your gym data is untouched.</div>`,
+      { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: 'day' })
+    return
+  }
+
+  const progress = currentDailyProgress()
+  const resolved = dailyResolvedStepIds(progress)
+  const completedCount = dailySteps.filter((step) => resolved.has(step.id)).length
+  const allComplete = dailySteps.length > 0 && completedCount >= dailySteps.length
+  const inProgress = Boolean(progress.started_at) && !allComplete
+
+  // Once the day has started, opening battle angel goes straight back to the next action.
+  // Exit is the deliberate escape hatch to edit or inspect the routine.
+  if (inProgress && !options.forceOverview && !errorMessage) {
+    renderDayRunner()
+    return
+  }
+
+  let mainCard = ''
+  if (!dailySteps.length) {
+    mainCard = `
+      <section class="day-start-card">
+        <div class="today-label">Daily system</div>
+        <h2>Build your sequence.</h2>
+        <p>Add it once. battle angel will serve one next action at a time.</p>
+      </section>`
+  } else if (allComplete) {
+    mainCard = `
+      <section class="day-complete-card">
+        <div class="day-complete-mark">Done</div>
+        <h2>Day complete.</h2>
+      </section>`
+  } else {
+    mainCard = `
+      <section class="day-start-card">
+        <div class="today-label">${inProgress ? 'In progress' : 'Today'}</div>
+        <h2>${inProgress ? 'Continue.' : 'Start.'}</h2>
+        <p>${inProgress ? `${completedDailyActionsCount(progress)} of ${totalDailyActions()} actions passed.` : `${totalDailyActions()} actions. One at a time.`}</p>
+        <button type="button" class="start-workout-button day-start-button" id="start-day">${inProgress ? 'Continue' : 'Start my day'} <span aria-hidden="true">&rarr;</span></button>
+      </section>`
+  }
+
+  renderShell(`
+    ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
+    ${usingCachedData ? '<div class="offline-note">Offline · saved routine available</div>' : ''}
+    ${mainCard}
+    ${renderDailyEditor()}`,
+    { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
+
+  document.querySelector('#start-day')?.addEventListener('click', startDailySystem)
+  bindDailyEditor()
+}
+
+function renderDayRunner() {
+  if (!dailySteps.length) {
+    renderDay()
+    return
+  }
+  const progress = currentDailyProgress()
+  const action = getCurrentDailyAction()
+  if (!action) {
+    progress.is_complete = true
+    progress.later_step_ids = []
+    saveDailyProgress(progress)
+    clearDailyUndo()
+    renderDay()
+    return
+  }
+
+  const { step, substeps, substepIndex, title, isSubstep } = action
+  const gymState = !isSubstep ? getDailyGymState(step) : null
+
+  // If today's planned gym work is already finished, the Gym routine step disappears automatically.
+  if (gymState?.planned.length && gymState.remaining.length === 0) {
+    advanceDailyAction(step.id, false, { bypassGuard: true, rememberUndo: false, render: false })
+    renderDayRunner()
+    return
+  }
+
+  const actionNumber = completedDailyActionsCount(progress) + 1
+  const actionTotal = totalDailyActions()
+  const substepMeta = isSubstep ? `${substepIndex + 1} of ${substeps.length}` : ''
+  const unresolvedCount = getOrderedUnresolvedDailySteps(progress).length
+  const canLater = unresolvedCount > 1
+
+  let cardBody = ''
+  let primaryButton = ''
+  if (gymState) {
+    const plannedNames = gymState.planned.map((folder) => folder.name).join(' + ')
+    const nextFolder = gymState.remaining[0] || null
+    cardBody = `
+      <div class="day-step-parent">Gym${gymState.planned.length > 1 ? ` <span>${gymState.planned.length} modules</span>` : ''}</div>
+      <h2>${escapeHtml(plannedNames || 'Gym')}</h2>
+      ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
+      ${gymState.planned.length ? '' : '<p class="day-gym-empty">No workout planned today.</p>'}`
+    primaryButton = nextFolder
+      ? `<button type="button" class="big-action day-done-button" id="start-daily-gym">Start workout <span aria-hidden="true">&rarr;</span></button>`
+      : `<button type="button" class="big-action day-done-button" id="choose-daily-gym">Choose workout <span aria-hidden="true">&rarr;</span></button>`
+  } else {
+    cardBody = `
+      ${isSubstep ? `<div class="day-step-parent">${escapeHtml(step.title)} <span>${escapeHtml(substepMeta)}</span></div>` : ''}
+      <h2>${escapeHtml(title)}</h2>
+      ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}`
+    primaryButton = `<button type="button" class="big-action day-done-button" id="complete-daily-step">Done <span aria-hidden="true">&rarr;</span></button>`
+  }
+
+  renderShell(`
+    <div class="day-runner-screen">
+      <div class="day-runner-top">
+        <div class="day-runner-position">${actionNumber} / ${actionTotal}</div>
+        <button type="button" class="text-button day-exit" id="exit-day-runner">Exit</button>
+      </div>
+      <section class="day-step-card ${gymState ? 'day-step-card-gym' : ''}" id="day-step-card">
+        ${cardBody}
+        ${canLater ? '<div class="day-later-hint" aria-hidden="true">swipe left for later</div>' : ''}
+      </section>
+      <div class="day-runner-actions">
+        ${primaryButton}
+        <div class="day-runner-secondary">
+          ${canLater ? '<button type="button" class="quiet-action" id="later-daily-step">Later</button>' : ''}
+          <button type="button" class="quiet-action" id="skip-daily-step">Skip</button>
+        </div>
+      </div>
+      ${renderDailyUndoToast()}
+    </div>`,
+    { title: 'Day', showAccount: false, showTimer: false, showHeader: false, view: 'day-runner' })
+
+  document.querySelector('#complete-daily-step')?.addEventListener('click', () => completeDailyStep(step.id))
+  document.querySelector('#skip-daily-step')?.addEventListener('click', () => skipDailyStep(step.id))
+  document.querySelector('#later-daily-step')?.addEventListener('click', () => deferDailyStep(step.id))
+  document.querySelector('#exit-day-runner')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
+  document.querySelector('#start-daily-gym')?.addEventListener('click', () => {
+    const nextFolder = getDailyGymState(step)?.remaining?.[0]
+    if (nextFolder) openFolder(nextFolder.id, { mode: 'workout' })
+  })
+  document.querySelector('#choose-daily-gym')?.addEventListener('click', renderWorkouts)
+  bindDailyLaterSwipe(step.id)
+  bindDailyUndoToast()
+}
+
+async function addDailyStep(event) {
+  event.preventDefault()
+  if (!currentUser || !dailySystemAvailable) return
+  const title = document.querySelector('#daily-step-title')?.value.trim().slice(0, DAILY_STEP_TITLE_MAX)
+  const note = document.querySelector('#daily-step-note')?.value.trim().slice(0, DAILY_STEP_NOTE_MAX) || ''
+  const substeps = parseDailySubstepsText(document.querySelector('#daily-step-substeps')?.value || '')
+  const status = document.querySelector('#daily-editor-status')
+  if (!title) return
+  if (status) status.textContent = 'Saving...'
+  const nextOrder = Math.max(0, ...dailySteps.map((step) => Number(step.sort_order) || 0)) + 1
+  const { error } = await supabase.from('daily_steps').insert({
+    user_id: currentUser.id,
+    title,
+    note,
+    substeps,
+    sort_order: nextOrder,
+    updated_at: new Date().toISOString()
+  })
+  if (error) {
+    if (status) status.textContent = isNetworkError(error) ? 'Connect to edit your routine.' : error.message
+    return
+  }
+  await loadDailySystem()
+  saveSnapshot()
+  renderDay()
+}
+
+async function updateDailyStep(event) {
+  event.preventDefault()
+  const form = event.currentTarget
+  const id = form.dataset.dailyEdit
+  const title = form.elements.title.value.trim().slice(0, DAILY_STEP_TITLE_MAX)
+  const note = form.elements.note.value.trim().slice(0, DAILY_STEP_NOTE_MAX)
+  const substeps = parseDailySubstepsText(form.elements.substeps?.value || '')
+  if (!title) return
+  const { error } = await supabase.from('daily_steps').update({
+    title,
+    note,
+    substeps,
+    updated_at: new Date().toISOString()
+  }).eq('id', id)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit your routine.' : error.message)
+    return
+  }
+  await loadDailySystem()
+  saveSnapshot()
+  renderDay()
+}
+
+async function moveDailyStep(stepId, direction) {
+  const index = dailySteps.findIndex((step) => step.id === stepId)
+  if (index < 0) return
+  const target = direction === 'up' ? index - 1 : index + 1
+  if (target < 0 || target >= dailySteps.length) return
+  const ordered = [...dailySteps]
+  const [moved] = ordered.splice(index, 1)
+  ordered.splice(target, 0, moved)
+  for (let i = 0; i < ordered.length; i += 1) {
+    const { error } = await supabase.from('daily_steps').update({ sort_order: i + 1, updated_at: new Date().toISOString() }).eq('id', ordered[i].id)
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to reorder your routine.' : error.message)
+      return
+    }
+  }
+  await loadDailySystem()
+  saveSnapshot()
+  renderDay()
+}
+
+async function deleteDailyStep(stepId) {
+  const step = dailySteps.find((item) => item.id === stepId)
+  if (!step || !confirm(`Delete "${step.title}"?`)) return
+  const { error } = await supabase.from('daily_steps').delete().eq('id', stepId)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit your routine.' : error.message)
+    return
+  }
+  const progress = currentDailyProgress()
+  progress.completed_step_ids = progress.completed_step_ids.filter((id) => id !== stepId)
+  progress.skipped_step_ids = (progress.skipped_step_ids || []).filter((id) => id !== stepId)
+  progress.later_step_ids = (progress.later_step_ids || []).filter((id) => id !== stepId)
+  const positions = { ...(progress.substep_positions || {}) }
+  delete positions[stepId]
+  progress.substep_positions = positions
+  progress.is_complete = false
+  saveDailyProgress(progress)
+  await loadDailySystem()
+  saveSnapshot()
+  renderDay()
+}
+
+function resetTodayDailyProgress() {
+  if (!confirm('Restart today from step 1?')) return
+  saveDailyProgress(emptyDailyProgress(todayDateKey()))
+  renderDay()
 }
 
 function renderHome(errorMessage = '') {
@@ -1347,13 +2346,16 @@ function renderHome(errorMessage = '') {
     ${usingCachedData ? '<div class="offline-note">Offline · showing your saved plan</div>' : ''}
     ${resumeCard}
     ${todayCard}
-    ${missedCard}`, { title: 'Today', showAccount: false, showTimer: false, navTab: 'today', view: 'home' })
+    ${missedCard}
+    ${historyAvailable && planningUpgradeAvailable ? `<section class="week-card">${renderWeekProgress(todayKey, { streak: true })}</section>` : ''}
+    <button type="button" class="quiet-action gym-all-workouts" id="open-all-workouts">All workouts</button>`, { title: 'Gym', showAccount: false, showTimer: false, navTab: 'gym', view: 'home' })
 
   document.querySelectorAll('[data-start-today]').forEach((button) => {
     button.addEventListener('click', () => openFolder(button.dataset.startToday, { mode: 'workout' }))
   })
   document.querySelector('#resume-home')?.addEventListener('click', () => openFolder(savedFolder.id, { mode: 'workout' }))
   document.querySelector('#choose-workout')?.addEventListener('click', renderWorkouts)
+  document.querySelector('#open-all-workouts')?.addEventListener('click', renderWorkouts)
   document.querySelector('#move-missed-today')?.addEventListener('click', moveMissedToToday)
   document.querySelector('#preload-today')?.addEventListener('click', () => preloadScheduledVideos(todayFolders))
 }
@@ -1380,7 +2382,7 @@ function renderWorkouts(errorMessage = '') {
         <button class="primary-button" type="submit">Add</button>
       </form>
       <div id="folder-status" class="status-line inline-status" aria-live="polite"></div>
-    </details>`, { title: 'Workouts', showAccount: false, showTimer: false, navTab: 'workouts', view: 'workouts' })
+    </details>`, { title: 'Workouts', showAccount: false, showTimer: false, navTab: 'gym', view: 'workouts' })
 
   document.querySelectorAll('[data-folder-id]').forEach((button) => {
     button.addEventListener('click', () => openFolder(button.dataset.folderId))
@@ -1401,6 +2403,7 @@ function renderMore(errorMessage = '') {
       <button type="button" class="secondary-button full-button" id="backup-library">Backup library</button>
       <button type="button" class="secondary-button full-button" id="sign-out">Sign out</button>
       <div id="backup-status" class="status-line backup-status" aria-live="polite"></div>
+      <div class="app-version">battle angel v${APP_VERSION}</div>
     </section>`, { title: 'More', showAccount: false, showTimer: false, navTab: 'more' })
 
   document.querySelector('#theme-toggle')?.addEventListener('click', () => { toggleTheme(); renderMore() })
@@ -1418,27 +2421,112 @@ function calendarWorkoutLabel(folderList) {
   return `${names.join(' · ')}${folderList.length > 2 ? ` +${folderList.length - 2}` : ''}`
 }
 
+function getCompletedFolders(dateKey) {
+  const ids = new Set(workoutHistory.filter((entry) => entry.workout_date === dateKey).map((entry) => entry.folder_id))
+  return folders.filter((folder) => ids.has(folder.id))
+}
+
+// Planned modules first, then anything done that day that wasn't on the plan.
+function getDayFolders(dateKey) {
+  const planned = getScheduledFolders(dateKey)
+  const plannedIds = new Set(planned.map((folder) => folder.id))
+  return [...planned, ...getCompletedFolders(dateKey).filter((folder) => !plannedIds.has(folder.id))]
+}
+
+// Each workout module marked done counts once (Chest + Triceps on one day = 2).
+function weekDoneCount(weekStartKey) {
+  let count = 0
+  for (let i = 0; i < 7; i += 1) count += getCompletedFolders(addDaysKey(weekStartKey, i)).length
+  return count
+}
+
+function isGoldenWeek(weekStartKey) {
+  return weekDoneCount(weekStartKey) >= GOLDEN_WEEK_TARGET
+}
+
+function calendarDayCell(key, dayNumber) {
+  const dayFolders = getDayFolders(key)
+  const doneCount = getCompletedFolders(key).length
+  const allDone = dayFolders.length > 0 && doneCount === dayFolders.length
+  const isToday = key === todayDateKey()
+  const selected = key === plannerSelectedDate
+  return `
+    <button type="button" class="calendar-day ${isToday ? 'is-today' : ''} ${dayFolders.length ? 'is-planned' : ''} ${allDone ? 'is-done' : ''} ${selected ? 'is-selected' : ''}" data-plan-date="${key}" aria-label="${escapeHtml(formatPlanDate(key))}${dayFolders.length ? `: ${escapeHtml(dayFolders.map((folder) => folder.name).join(', '))}` : ''}${doneCount ? `, ${doneCount} done` : ''}">
+      <span class="calendar-number">${dayNumber}${doneCount ? '<span class="calendar-done" aria-hidden="true">&#10003;</span>' : ''}</span>
+      ${dayFolders.length ? `<span class="calendar-workout">${escapeHtml(calendarWorkoutLabel(dayFolders))}</span>` : ''}
+    </button>`
+}
+
 function calendarCells(monthStart) {
   const year = monthStart.getFullYear()
   const month = monthStart.getMonth()
-  const firstDay = new Date(year, month, 1).getDay()
+  // Weeks run Monday -> Sunday everywhere: calendar rows, golden weeks, and Repeat last week.
+  const firstDay = (new Date(year, month, 1).getDay() + 6) % 7
   const days = new Date(year, month + 1, 0).getDate()
-  const cells = []
-  for (let i = 0; i < firstDay; i += 1) cells.push('<div class="calendar-blank" aria-hidden="true"></div>')
+  const slots = []
+  for (let i = 0; i < firstDay; i += 1) slots.push(null)
+  for (let day = 1; day <= days; day += 1) slots.push(day)
+  while (slots.length % 7) slots.push(null)
 
-  for (let day = 1; day <= days; day += 1) {
-    const date = new Date(year, month, day)
-    const key = formatLocalDateKey(date)
-    const scheduled = getScheduledFolders(key)
-    const isToday = key === todayDateKey()
-    const selected = key === plannerSelectedDate
-    cells.push(`
-      <button type="button" class="calendar-day ${isToday ? 'is-today' : ''} ${scheduled.length ? 'is-planned' : ''} ${selected ? 'is-selected' : ''}" data-plan-date="${key}">
-        <span class="calendar-number">${day}</span>
-        ${scheduled.length ? `<span class="calendar-workout">${escapeHtml(calendarWorkoutLabel(scheduled))}</span>` : ''}
-      </button>`)
+  const weeks = []
+  for (let row = 0; row < slots.length; row += 7) {
+    const rowSlots = slots.slice(row, row + 7)
+    const firstDayInRow = rowSlots.find((day) => day !== null)
+    const weekStart = startOfWeekKey(formatLocalDateKey(new Date(year, month, firstDayInRow)))
+    const golden = isGoldenWeek(weekStart)
+    const cells = rowSlots.map((day) => day === null
+      ? '<div class="calendar-blank" aria-hidden="true"></div>'
+      : calendarDayCell(formatLocalDateKey(new Date(year, month, day)), day)).join('')
+    weeks.push(`<div class="calendar-week ${golden ? 'is-golden' : ''}"${golden ? ' aria-label="Golden week"' : ''}>${cells}</div>`)
   }
-  return cells.join('')
+  return weeks.join('')
+}
+
+// Consecutive golden weeks up to now. The current week only counts once it's golden,
+// so an unfinished week never breaks the streak.
+function goldenStreak() {
+  let week = startOfWeekKey(todayDateKey())
+  if (!isGoldenWeek(week)) week = addDaysKey(week, -7)
+  let count = 0
+  while (count < 60 && isGoldenWeek(week)) {
+    count += 1
+    week = addDaysKey(week, -7)
+  }
+  return count
+}
+
+function renderStreakLine() {
+  const streak = goldenStreak()
+  if (!streak) return ''
+  const thisWeekGolden = isGoldenWeek(startOfWeekKey(todayDateKey()))
+  if (streak === 1) return thisWeekGolden ? '' : '<div class="golden-streak">Last week was golden. Keep it going.</div>'
+  return `<div class="golden-streak">${streak} golden weeks in a row</div>`
+}
+
+function renderWeekProgress(dateKey, options = {}) {
+  const done = weekDoneCount(startOfWeekKey(dateKey))
+  const streak = options.streak ? renderStreakLine() : ''
+  if (done >= GOLDEN_WEEK_TARGET) {
+    return `<div class="week-progress is-golden">Golden week · ${done} workouts done</div>${streak}`
+  }
+  const pips = Array.from({ length: GOLDEN_WEEK_TARGET }, (_, i) => `<span class="week-pip ${i < done ? 'filled' : ''}"></span>`).join('')
+  return `<div class="week-progress"><span class="week-pips" aria-hidden="true">${pips}</span>${done} of ${GOLDEN_WEEK_TARGET} done this week</div>${streak}`
+}
+
+function renderDoneControls(dateKey) {
+  if (dateKey > todayDateKey()) return ''
+  const dayFolders = getDayFolders(dateKey)
+  if (!dayFolders.length) return '<div class="plan-done-empty">Tap the muscles you trained to mark them done.</div>'
+  if (!canMarkDone()) return '<div class="plan-done-empty">Run schema.sql in Supabase to turn on marking days done.</div>'
+  const rows = dayFolders.map((folder) => {
+    const done = wasWorkoutCompleted(dateKey, folder.id)
+    return `
+      <div class="plan-done-row">
+        <span class="plan-done-name">${escapeHtml(folder.name)}</span>
+        <button type="button" class="plan-done-toggle ${done ? 'done' : ''}" data-done-folder="${folder.id}" aria-pressed="${done}">${done ? '&#10003; Done' : 'Mark done'}</button>
+      </div>`
+  }).join('')
+  return `<div class="plan-done-list">${rows}</div>`
 }
 
 function renderPlanner(errorMessage = '') {
@@ -1471,12 +2559,15 @@ function renderPlanner(errorMessage = '') {
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${plannerStatusMessage ? `<div class="status-line planner-status">${escapeHtml(plannerStatusMessage)}</div>` : ''}
     <div class="calendar-weekdays" aria-hidden="true">
-      <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+      <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
     </div>
     <div class="calendar-grid" aria-label="Workout calendar">${calendarCells(plannerMonthStart)}</div>
+    ${canMarkDone() ? '<div class="calendar-hint">Hold a day to mark it done</div>' : ''}
     <section class="plan-day-editor">
       <div class="plan-day-title">${escapeHtml(formatPlanDate(plannerSelectedDate))}</div>
+      ${renderWeekProgress(plannerSelectedDate, { streak: startOfWeekKey(plannerSelectedDate) === startOfWeekKey(todayDateKey()) })}
       <div class="plan-muscle-grid">${folderButtons}</div>
+      ${renderDoneControls(plannerSelectedDate)}
       ${selectedFolders.length ? `<div class="plan-day-actions">
         <details class="move-plan">
           <summary>Move</summary>
@@ -1505,8 +2596,39 @@ function renderPlanner(errorMessage = '') {
   })
   document.querySelector('#weekly-plan')?.addEventListener('click', renderWeeklyPlan)
   document.querySelector('#repeat-last-week')?.addEventListener('click', repeatLastWeek)
+  const LONG_PRESS_MS = 450
   document.querySelectorAll('[data-plan-date]').forEach((button) => {
+    let pressTimer = null
+    let start = null
+    let longPressed = false
+    const cancelPress = () => {
+      if (pressTimer) window.clearTimeout(pressTimer)
+      pressTimer = null
+      button.classList.remove('is-pressing')
+    }
+    button.addEventListener('pointerdown', (event) => {
+      longPressed = false
+      start = { x: event.clientX, y: event.clientY }
+      button.classList.add('is-pressing')
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null
+        longPressed = true
+        button.classList.remove('is-pressing')
+        quickToggleDayDone(button.dataset.planDate)
+      }, LONG_PRESS_MS)
+    })
+    button.addEventListener('pointermove', (event) => {
+      if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) cancelPress()
+    })
+    button.addEventListener('pointerup', cancelPress)
+    button.addEventListener('pointercancel', cancelPress)
+    button.addEventListener('pointerleave', cancelPress)
+    button.addEventListener('contextmenu', (event) => event.preventDefault())
     button.addEventListener('click', () => {
+      if (longPressed) {
+        longPressed = false
+        return
+      }
       plannerSelectedDate = button.dataset.planDate
       plannerStatusMessage = ''
       renderPlanner()
@@ -1514,6 +2636,12 @@ function renderPlanner(errorMessage = '') {
   })
   document.querySelectorAll('[data-schedule-folder]').forEach((button) => {
     button.addEventListener('click', () => toggleScheduledWorkout(plannerSelectedDate, button.dataset.scheduleFolder))
+  })
+  document.querySelectorAll('[data-done-folder]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const folderId = button.dataset.doneFolder
+      setWorkoutDone(plannerSelectedDate, folderId, !wasWorkoutCompleted(plannerSelectedDate, folderId))
+    })
   })
   document.querySelector('#clear-plan')?.addEventListener('click', () => clearScheduledWorkout(plannerSelectedDate))
   document.querySelector('#reset-weekly')?.addEventListener('click', () => resetScheduledWorkoutToWeekly(plannerSelectedDate))
@@ -1705,6 +2833,65 @@ async function moveMissedToToday() {
   }
 }
 
+// Updates this phone right away and queues the cloud write, so it works offline too.
+function applyDoneLocally(dateKey, folderId, done) {
+  const match = (entry) => entry.workout_date === dateKey && entry.folder_id === folderId
+  const pending = readPending()
+  pending.completions = pending.completions.filter((entry) => !match(entry))
+  pending.uncompletions = pending.uncompletions.filter((entry) => !match(entry))
+  if (done) {
+    const completedAt = new Date().toISOString()
+    if (!wasWorkoutCompleted(dateKey, folderId)) {
+      workoutHistory = [{ id: `local-${folderId}-${dateKey}`, workout_date: dateKey, folder_id: folderId, completed_at: completedAt }, ...workoutHistory]
+    }
+    pending.completions.push({ workout_date: dateKey, folder_id: folderId, completed_at: completedAt })
+  } else {
+    workoutHistory = workoutHistory.filter((entry) => !match(entry))
+    pending.uncompletions.push({ workout_date: dateKey, folder_id: folderId })
+  }
+  writePending(pending)
+}
+
+function canMarkDone() {
+  return historyAvailable && planningUpgradeAvailable
+}
+
+async function setWorkoutDone(dateKey, folderId, done) {
+  if (!currentUser || !dateKey || !folderId || dateKey > todayDateKey() || !canMarkDone()) return
+  applyDoneLocally(dateKey, folderId, done)
+  saveSnapshot()
+  renderPlanner()
+  await flushPendingWrites()
+}
+
+// Long-press a day on the calendar: marks every workout on that day done, or undoes them if all are done.
+async function quickToggleDayDone(dateKey) {
+  plannerSelectedDate = dateKey
+  if (dateKey > todayDateKey()) {
+    plannerStatusMessage = "Future days can't be marked done yet."
+    renderPlanner()
+    return
+  }
+  if (!canMarkDone()) {
+    plannerStatusMessage = 'Run schema.sql in Supabase to turn on marking days done.'
+    renderPlanner()
+    return
+  }
+  const dayFolders = getDayFolders(dateKey)
+  if (!dayFolders.length) {
+    plannerStatusMessage = 'Pick the muscles you trained below, then hold the day again.'
+    renderPlanner()
+    return
+  }
+  const allDone = dayFolders.every((folder) => wasWorkoutCompleted(dateKey, folder.id))
+  dayFolders.forEach((folder) => applyDoneLocally(dateKey, folder.id, !allDone))
+  saveSnapshot()
+  const names = dayFolders.map((folder) => folder.name).join(' + ')
+  plannerStatusMessage = allDone ? `${names} on ${formatPlanDate(dateKey, { short: true })}: undone.` : `${names} on ${formatPlanDate(dateKey, { short: true })}: done.`
+  renderPlanner()
+  await flushPendingWrites()
+}
+
 async function addFolder(event) {
   event.preventDefault()
   const input = document.querySelector('#folder-name')
@@ -1842,6 +3029,74 @@ async function preloadFolderVideos(folderId, options = {}) {
   }
 }
 
+// ---------- weight history ----------
+// One entry per exercise per day (the last weight you used that day).
+
+function weightLogKey(folderId) {
+  return `battle-angel-weightlog-${currentUser?.id || 'anon'}-${folderId}`
+}
+
+function mergePendingWeightLogs(rows, folderId) {
+  const pending = Object.values(readPending().weightLogs).filter((item) => item.folder_id === folderId)
+  const byKey = new Map(rows.map((row) => [`${row.exercise_group}|${row.workout_date}`, row]))
+  pending.forEach((item) => byKey.set(`${item.exercise_group}|${item.workout_date}`, item))
+  return [...byKey.values()].sort((a, b) => String(b.workout_date).localeCompare(String(a.workout_date)))
+}
+
+async function loadWeightLog(folderId) {
+  const cached = readJson(weightLogKey(folderId), [])
+  weightLogRows = mergePendingWeightLogs(Array.isArray(cached) ? cached : [], folderId)
+  if (!weightLogAvailable || navigator.onLine === false) return
+  try {
+    const { data, error } = await raceTimeout(supabase
+      .from('exercise_weight_log')
+      .select('exercise_group,folder_id,workout_date,weight')
+      .eq('folder_id', folderId)
+      .order('workout_date', { ascending: false })
+      .limit(400), NETWORK_FALLBACK_MS)
+    if (error) {
+      if (isMissingWeightLogError(error)) weightLogAvailable = false
+      return
+    }
+    writeJson(weightLogKey(folderId), data || [])
+    if (activeFolder?.id === folderId) weightLogRows = mergePendingWeightLogs(data || [], folderId)
+  } catch {
+    // Offline: the cached copy is enough.
+  }
+}
+
+function getWeightHistory(groupId) {
+  return weightLogRows.filter((row) => row.exercise_group === groupId)
+}
+
+function logWeight(group, dateKey = todayDateKey()) {
+  const weight = String(group?.last_weight || '').trim().slice(0, 40)
+  if (!currentUser || !activeFolder || !group || !weight || !weightLogAvailable) return
+  const entry = { exercise_group: group.id, folder_id: activeFolder.id, workout_date: dateKey, weight }
+  const existing = weightLogRows.find((row) => row.exercise_group === group.id && row.workout_date === dateKey)
+  if (existing?.weight === weight) return
+  weightLogRows = mergePendingWeightLogs(weightLogRows.filter((row) => !(row.exercise_group === group.id && row.workout_date === dateKey)).concat(entry), activeFolder.id)
+  const pending = readPending()
+  pending.weightLogs[`${group.id}|${dateKey}`] = entry
+  writePending(pending)
+  const cached = readJson(weightLogKey(activeFolder.id), [])
+  writeJson(weightLogKey(activeFolder.id), [entry, ...(Array.isArray(cached) ? cached : []).filter((row) => !(row.exercise_group === group.id && row.workout_date === dateKey))])
+  flushPendingWrites()
+}
+
+function renderWeightHistory(group) {
+  if (!weightLogAvailable) return '<div class="weight-history-empty">Weight history is off. Run schema.sql in Supabase to turn it on.</div>'
+  const history = getWeightHistory(group.id)
+  if (!history.length) return '<div class="weight-history-empty">Weight history: enter a weight and finish a set to start it.</div>'
+  const rows = history.slice(0, 8).map((row) => `
+    <li><span>${escapeHtml(formatPlanDate(row.workout_date, { short: true }))}</span><strong>${escapeHtml(row.weight)}</strong></li>`).join('')
+  return `
+    <details class="weight-history">
+      <summary>Weight history <span class="weight-history-count">${history.length}</span></summary>
+      <ol class="weight-history-list">${rows}</ol>
+    </details>`
+}
+
 function groupExerciseRows(rows) {
   const map = new Map()
 
@@ -1891,7 +3146,7 @@ async function openFolder(folderId, options = {}) {
   if (viewVersion !== version) return
 
   revokeOfflineObjectUrls()
-  const hydratedRows = await hydrateVideoRows(result.rows)
+  const [hydratedRows] = await Promise.all([hydrateVideoRows(result.rows), loadWeightLog(folder.id)])
   if (viewVersion !== version) return
   activeExerciseGroups = groupExerciseRows(hydratedRows)
 
@@ -2113,8 +3368,8 @@ function updatePickedFileSlot(event, slot) {
     return
   }
   picked.textContent = `${cleanFileName(file.name)} · ${formatFileSize(file.size)}`
-  if (file.size > SUPABASE_FREE_MAX_BYTES && status) {
-    status.textContent = `${cleanFileName(file.name)} is over 50 MB. Trim/export it smaller first.`
+  if (file.size > VIDEO_COMPRESS_OVER_BYTES && status) {
+    status.textContent = `${cleanFileName(file.name)} will be compressed before uploading.`
   } else if (status) {
     const selected = [1, 2, 3].map((index) => document.querySelector(`#exercise-video-${index}`)?.files?.[0]).filter(isVideoFile)
     status.textContent = `${selected.length} video${selected.length === 1 ? '' : 's'} ready.`
@@ -2124,17 +3379,11 @@ function updatePickedFileSlot(event, slot) {
 async function uploadMotivationVideos(event) {
   const input = event.currentTarget
   const status = document.querySelector('#motivation-status')
-  const files = [...(input.files || [])].filter(isVideoFile)
+  const files = [...(input.files || [])].filter(isMotivationFile)
   input.value = ''
 
   if (!files.length) {
-    if (status) status.textContent = 'Choose a saved MP4, MOV, M4V, or WebM video.'
-    return
-  }
-
-  const oversized = files.find((file) => file.size > SUPABASE_FREE_MAX_BYTES)
-  if (oversized) {
-    if (status) status.textContent = `${cleanFileName(oversized.name)} is ${formatFileSize(oversized.size)}. Keep each clip under 50 MB.`
+    if (status) status.textContent = 'Choose a video (MP4, MOV, M4V, WebM) or a photo (JPG, PNG, WebP, GIF, HEIC).'
     return
   }
 
@@ -2151,13 +3400,18 @@ async function uploadMotivationVideos(event) {
 
   try {
     for (let index = 0; index < files.length; index += 1) {
-      const file = files[index]
-      const objectPath = `${currentUser.id}/${motivationFolder.id}/${safeObjectName(file.name)}`
+      const original = files[index]
+      if (status) status.textContent = `Preparing ${index + 1} of ${files.length}: ${cleanFileName(original.name)}...`
+      const file = await prepareUploadFile(original, (percent) => {
+        if (status) status.textContent = `Compressing ${index + 1} of ${files.length}: ${cleanFileName(original.name)} · ${Math.round(percent)}%`
+      })
+      const objectName = isVideoFile(file) ? safeObjectName(file.name) : safeImageObjectName(file)
+      const objectPath = `${currentUser.id}/${motivationFolder.id}/${objectName}`
       if (status) status.textContent = `Uploading ${index + 1} of ${files.length}: ${cleanFileName(file.name)}...`
 
       await uploadVideoFile(file, objectPath, (percent) => {
         if (status) status.textContent = `Uploading ${index + 1} of ${files.length}: ${cleanFileName(file.name)} · ${Math.round(percent)}%`
-      })
+      }, { allowImages: true })
       uploadedPaths.push(objectPath)
 
       const { data, error } = await supabase.from('exercises').insert({
@@ -2177,7 +3431,7 @@ async function uploadMotivationVideos(event) {
     await loadMotivationVideos()
     renderMore()
     const nextStatus = document.querySelector('#motivation-status')
-    if (nextStatus) nextStatus.textContent = `${uploaded} motivation clip${uploaded === 1 ? '' : 's'} saved. They will play automatically during rest.`
+    if (nextStatus) nextStatus.textContent = `${uploaded} item${uploaded === 1 ? '' : 's'} saved. They play in random order during rest.`
   } catch (error) {
     for (let index = insertedIds.length; index < uploadedPaths.length; index += 1) {
       await supabase.storage.from(VIDEO_BUCKET).remove([uploadedPaths[index]])
@@ -2185,13 +3439,13 @@ async function uploadMotivationVideos(event) {
     await loadMotivationVideos().catch(() => {})
     renderMore()
     const nextStatus = document.querySelector('#motivation-status')
-    if (nextStatus) nextStatus.textContent = fileUploadErrorMessage(error, files.find((file) => file.size > SUPABASE_FREE_MAX_BYTES))
+    if (nextStatus) nextStatus.textContent = fileUploadErrorMessage(error)
   }
 }
 
 async function removeMotivationVideo(rowId, videoPath) {
   if (!rowId || !videoPath) return
-  if (!confirm('Remove this motivation video?')) return
+  if (!confirm('Remove this from motivation?')) return
 
   const { error: storageError } = await supabase.storage.from(VIDEO_BUCKET).remove([videoPath])
   if (storageError) {
@@ -2207,6 +3461,8 @@ async function removeMotivationVideo(rowId, videoPath) {
 
   deleteOfflineVideos([videoPath])
   if (restMotivationId === rowId) restMotivationId = null
+  restQueue = restQueue.filter((id) => id !== rowId)
+  restQueueIndex = clamp(restQueueIndex, 0, Math.max(0, restQueue.length - 1))
   await loadMotivationVideos()
   saveSnapshot()
   renderMore()
@@ -2222,7 +3478,145 @@ function setUploadStatus(labelText, percent = 0, visible = true) {
   bar.style.width = `${clamp(percent, 0, 100)}%`
 }
 
+// ---------- upload compression ----------
+
+class UploadPrepError extends Error {}
+
+function evenSize(value) {
+  return Math.max(2, Math.round(value / 2) * 2)
+}
+
+function renameWithExtension(name, extension) {
+  return `${String(name || 'upload').replace(/\.[^/.]+$/, '') || 'upload'}.${extension}`
+}
+
+async function decodeImage(file) {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(file, { imageOrientation: 'from-image' })
+    } catch {
+      // Fall back to <img> below (older Safari, HEIC on some versions).
+    }
+  }
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    return img
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+async function compressImageFile(file) {
+  // Animated GIFs would lose their animation; keep them as they are.
+  if (fileExtension(file.name) === 'gif' || String(file.type).toLowerCase() === 'image/gif') return file
+  const source = await decodeImage(file)
+  const width = source.width || source.naturalWidth
+  const height = source.height || source.naturalHeight
+  if (!width || !height) return file
+  const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(width, height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(width * scale)
+  canvas.height = Math.round(height * scale)
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height)
+  source.close?.()
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', IMAGE_JPEG_QUALITY))
+  canvas.width = 0
+  canvas.height = 0
+  if (!blob || blob.size >= file.size) return file
+  return new File([blob], renameWithExtension(file.name, 'jpg'), { type: 'image/jpeg' })
+}
+
+async function compressVideoFile(file, onProgress, { keepAudio = true } = {}) {
+  if (typeof VideoEncoder === 'undefined' || typeof VideoDecoder === 'undefined') {
+    throw new UploadPrepError('This browser cannot compress video. Update iOS, or export the clip smaller than 50 MB.')
+  }
+  // Loaded only when needed so the app itself stays small.
+  const { Input, Output, Conversion, BlobSource, BufferTarget, Mp4OutputFormat, ALL_FORMATS, Quality, canEncodeVideo } = await import('mediabunny')
+  if (!(await canEncodeVideo('avc'))) {
+    throw new UploadPrepError('This phone cannot compress video in the browser. Export the clip smaller than 50 MB.')
+  }
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS })
+  try {
+    const track = await input.getPrimaryVideoTrack()
+    if (!track) throw new UploadPrepError(`${cleanFileName(file.name)} has no video track.`)
+    const duration = await input.computeDuration()
+    const audioBits = keepAudio ? VIDEO_AUDIO_BITRATE : 0
+    const budget = duration > 0 ? Math.floor((VIDEO_TARGET_BYTES * 8) / duration) - audioBits : VIDEO_MAX_BITRATE
+    const bitrate = clamp(budget, VIDEO_MIN_BITRATE, VIDEO_MAX_BITRATE)
+    const displayWidth = track.displayWidth || 1280
+    const displayHeight = track.displayHeight || 720
+    const scale = Math.min(1, VIDEO_MAX_EDGE / Math.max(displayWidth, displayHeight))
+
+    const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() })
+    const conversion = await Conversion.init({
+      input,
+      output,
+      video: {
+        width: evenSize(displayWidth * scale),
+        height: evenSize(displayHeight * scale),
+        fit: 'contain',
+        codec: 'avc',
+        quality: new Quality(bitrate),
+        forceTranscode: true
+      },
+      audio: keepAudio ? {} : { discard: true },
+      showWarnings: false
+    })
+    if (!conversion.isValid) throw new UploadPrepError(`${cleanFileName(file.name)} could not be compressed on this phone.`)
+    conversion.onProgress = (progress) => onProgress?.(clamp(progress * 100, 0, 100))
+    await conversion.execute()
+    const buffer = output.target.buffer
+    if (!buffer) throw new UploadPrepError(`${cleanFileName(file.name)} could not be compressed.`)
+    return new File([buffer], renameWithExtension(file.name, 'mp4'), { type: 'video/mp4' })
+  } finally {
+    input.dispose?.()
+  }
+}
+
+// Returns a file that is ready to upload: photos are resized, big videos are re-encoded.
+// Throws an UploadPrepError with a clear message if the result still can't fit the 50 MB limit.
+async function prepareUploadFile(file, onProgress, { keepAudio = true } = {}) {
+  if (isImageFile(file) && !isVideoFile(file)) {
+    let result = file
+    try {
+      result = await compressImageFile(file)
+    } catch (error) {
+      console.warn('Photo compression skipped:', error)
+    }
+    if (result.size > SUPABASE_FREE_MAX_BYTES) throw new UploadPrepError(`${cleanFileName(file.name)} is too large (${formatFileSize(result.size)}).`)
+    return result
+  }
+
+  if (file.size <= VIDEO_COMPRESS_OVER_BYTES) return file
+
+  let compressed = null
+  // Compressing takes a while on a phone; keep the screen on so iOS doesn't suspend it.
+  keepAwake()
+  try {
+    compressed = await compressVideoFile(file, onProgress, { keepAudio })
+  } catch (error) {
+    console.warn('Video compression failed:', error)
+    if (!workoutMode && !timerEndAt) releaseWakeLock()
+    if (file.size <= SUPABASE_FREE_MAX_BYTES) return file
+    if (error instanceof UploadPrepError) throw error
+    throw new UploadPrepError(`${cleanFileName(file.name)} (${formatFileSize(file.size)}) could not be compressed on this phone. Trim it or export it smaller than 50 MB.`)
+  }
+  if (!workoutMode && !timerEndAt) releaseWakeLock()
+  const best = compressed.size < file.size ? compressed : file
+  if (best.size > SUPABASE_FREE_MAX_BYTES) {
+    throw new UploadPrepError(`${cleanFileName(file.name)} is still ${formatFileSize(best.size)} after compressing. Trim it shorter and try again.`)
+  }
+  return best
+}
+
 function fileUploadErrorMessage(error, file = null) {
+  if (error instanceof UploadPrepError) return error.message
   const raw = String(error?.message || error || 'Upload failed')
   const lower = raw.toLowerCase()
 
@@ -2284,7 +3678,11 @@ async function addExercise(event) {
     const sortOrder = await getNextExerciseOrder()
 
     for (let i = 0; i < files.length; i += 1) {
-      const file = files[i]
+      const original = files[i]
+      setUploadStatus(`Preparing reference ${i + 1} of ${files.length}: ${cleanFileName(original.name)}`, 0)
+      const file = await prepareUploadFile(original, (percent) => {
+        setUploadStatus(`Compressing reference ${i + 1} of ${files.length}: ${cleanFileName(original.name)} · ${Math.round(percent)}%`, percent)
+      }, { keepAudio: false })
       const objectPath = `${currentUser.id}/${activeFolder.id}/${safeObjectName(file.name)}`
       setUploadStatus(`Uploading reference ${i + 1} of ${files.length}: ${cleanFileName(file.name)}`, 0)
 
@@ -2314,7 +3712,7 @@ async function addExercise(event) {
       await supabase.storage.from(VIDEO_BUCKET).remove(uploadedPaths)
       await supabase.from('exercises').delete().eq('exercise_group', groupId)
     }
-    setUploadStatus(fileUploadErrorMessage(error, files.find((file) => file.size > SUPABASE_FREE_MAX_BYTES)), 0)
+    setUploadStatus(fileUploadErrorMessage(error), 0)
     submit.disabled = false
     submit.textContent = 'Add to workout'
   }
@@ -2359,18 +3757,23 @@ async function updateExerciseDetails(event) {
 }
 
 async function addVideoToExercise(groupId, input) {
-  const file = getVideoFiles(input.files, 1)[0]
+  const original = getVideoFiles(input.files, 1)[0]
   input.value = ''
-  if (!file || !activeFolder) return
+  if (!original || !activeFolder) return
 
   const group = activeExerciseGroups.find((item) => item.id === groupId)
   if (!group || group.videos.length >= MAX_VIDEOS_PER_EXERCISE) return
 
-  const objectPath = `${currentUser.id}/${activeFolder.id}/${safeObjectName(file.name)}`
   const videoOrder = group.videos.length + 1
   const metadata = normalizeMetadata(group)
+  let file = original
 
   try {
+    setUploadStatus(`Preparing reference ${videoOrder}: ${cleanFileName(original.name)}`, 0)
+    file = await prepareUploadFile(original, (percent) => {
+      setUploadStatus(`Compressing reference ${videoOrder}: ${cleanFileName(original.name)} · ${Math.round(percent)}%`, percent)
+    }, { keepAudio: false })
+    const objectPath = `${currentUser.id}/${activeFolder.id}/${safeObjectName(file.name)}`
     setUploadStatus(`Adding reference ${videoOrder}: ${cleanFileName(file.name)}`, 0)
     await uploadVideoFile(file, objectPath, (percent) => {
       setUploadStatus(`Adding reference ${videoOrder}: ${cleanFileName(file.name)} · ${Math.round(percent)}%`, percent)
@@ -2398,8 +3801,9 @@ async function addVideoToExercise(groupId, input) {
   }
 }
 
-async function uploadVideoFile(file, objectPath, onProgress) {
-  if (!isVideoFile(file)) throw new Error('Choose an MP4, MOV, M4V, or WebM video.')
+async function uploadVideoFile(file, objectPath, onProgress, { allowImages = false } = {}) {
+  if (!(allowImages ? isMotivationFile(file) : isVideoFile(file))) throw new Error('Choose an MP4, MOV, M4V, or WebM video.')
+  const contentType = inferMediaMime(file)
 
   // Supabase recommends normal uploads for small files and TUS resumable uploads
   // for files over 6 MB. This keeps quick clips simple while making larger
@@ -2408,20 +3812,20 @@ async function uploadVideoFile(file, objectPath, onProgress) {
     onProgress(5)
     const { error } = await supabase.storage.from(VIDEO_BUCKET).upload(objectPath, file, {
       cacheControl: '31536000',
-      contentType: inferVideoMime(file),
+      contentType,
       upsert: false
     })
     if (error) throw error
     onProgress(100)
   } else {
-    await uploadResumable(file, objectPath, onProgress)
+    await uploadResumable(file, objectPath, onProgress, contentType)
   }
 
   // The phone that uploads a clip never needs to download it again.
   putOfflineVideo(objectPath, file, cleanFileName(file.name)).then(requestPersistentStorage).catch(() => {})
 }
 
-async function uploadResumable(file, objectPath, onProgress) {
+async function uploadResumable(file, objectPath, onProgress, contentType = inferVideoMime(file)) {
   const { data: { session }, error } = await supabase.auth.getSession()
   if (error || !session) throw error || new Error('Your session expired. Please sign in again.')
 
@@ -2442,7 +3846,7 @@ async function uploadResumable(file, objectPath, onProgress) {
       metadata: {
         bucketName: VIDEO_BUCKET,
         objectName: objectPath,
-        contentType: inferVideoMime(file),
+        contentType,
         cacheControl: '31536000'
       },
       chunkSize: 6 * 1024 * 1024,
@@ -2542,6 +3946,7 @@ async function deleteExerciseGroup(groupId) {
     return
   }
   deleteOfflineVideos(paths)
+  if (weightLogAvailable) supabase.from('exercise_weight_log').delete().eq('exercise_group', groupId).then(() => {}, () => {})
 
   const saved = workoutState || readWorkoutState()
   if (saved?.folderId === activeFolder.id) {
@@ -2733,6 +4138,9 @@ function renderWorkout() {
   const actionDisabled = completed && !allDone
 
   const cues = [group.cue_1, group.cue_2, group.cue_3].filter(Boolean)
+  const canSkip = !completed && nextUnfinishedIndex(workoutState.currentIndex) !== -1
+  const notice = workoutNotice
+  workoutNotice = ''
   const usingBackup = workoutState.backupGroupIds?.includes(group.id)
   const displayName = usingBackup && group.backup_exercise ? group.backup_exercise : group.name
 
@@ -2757,7 +4165,10 @@ function renderWorkout() {
 
       ${renderWorkoutVideoSwitcher(group)}
 
+      ${notice ? `<div class="skip-notice" role="status">${escapeHtml(notice)}</div>` : ''}
+
       ${group.backup_exercise ? `<button type="button" class="backup-toggle ${usingBackup ? 'active' : ''}" id="toggle-backup">${usingBackup ? `Using backup · ${escapeHtml(group.backup_exercise)}` : `Use backup · ${escapeHtml(group.backup_exercise)}`}</button>` : ''}
+      ${canSkip ? '<button type="button" class="skip-exercise" id="skip-exercise">Machine busy? Skip for now</button>' : ''}
 
       <div class="set-section">
         <div class="set-topline">
@@ -2772,6 +4183,7 @@ function renderWorkout() {
         </div>
         <div class="set-dots">${renderSetDots(group, setsDone, completed)}</div>
         <div id="weight-status" class="micro-status" aria-live="polite"></div>
+        ${renderWeightHistory(group)}
       </div>
 
       <button type="button" id="complete-set" class="big-action" ${actionDisabled ? 'disabled' : ''}>${escapeHtml(actionLabel)}</button>
@@ -2786,6 +4198,7 @@ function renderWorkout() {
   document.querySelector('#exit-workout').addEventListener('click', pauseAndExitWorkout)
   document.querySelector('#cancel-workout').addEventListener('click', cancelWorkout)
   document.querySelector('#toggle-backup')?.addEventListener('click', () => toggleWorkoutBackup(group.id))
+  document.querySelector('#skip-exercise')?.addEventListener('click', skipCurrentExercise)
   document.querySelector('#complete-set').addEventListener('click', () => {
     if (allDone) {
       unlockAudio()
@@ -2860,6 +4273,7 @@ async function saveWorkoutWeight(groupId, value) {
   const pending = readPending()
   pending.weights[groupId] = nextValue
   writePending(pending)
+  if (group && workoutMode && Number(workoutState?.setsDone?.[groupId] || 0) > 0) logWeight(group)
 
   if (navigator.onLine === false) {
     if (status) status.textContent = 'Saved on this phone · syncs later'
@@ -2895,6 +4309,7 @@ function completeCurrentSet() {
   const previousDone = clamp(Number(workoutState.setsDone[group.id] || 0), 0, group.sets_target)
   const nextDone = Math.min(group.sets_target, previousDone + 1)
   workoutState.setsDone[group.id] = nextDone
+  logWeight(group)
 
   if (nextDone >= group.sets_target) {
     if (!isGroupComplete(group.id)) workoutState.completedGroupIds.push(group.id)
@@ -2914,6 +4329,21 @@ function completeCurrentSet() {
 
   saveWorkoutState()
   startTimer(true)
+}
+
+// Leave the current exercise unfinished and go to the next unfinished one. Because
+// "finish exercise" always moves to the next unfinished exercise (wrapping around), the
+// skipped one comes back after the others are done, and the workout can't end without it.
+function skipCurrentExercise() {
+  const group = getCurrentWorkoutGroup()
+  if (!group || isGroupComplete(group.id)) return
+  const nextIndex = nextUnfinishedIndex(workoutState.currentIndex)
+  if (nextIndex === -1) return
+  const skippedName = workoutState.backupGroupIds?.includes(group.id) && group.backup_exercise ? group.backup_exercise : group.name
+  setWorkoutIndex(nextIndex)
+  saveWorkoutState()
+  workoutNotice = `${skippedName} skipped. It comes back before the workout ends.`
+  renderWorkout()
 }
 
 function jumpWorkout(delta) {
@@ -2955,17 +4385,8 @@ function pauseAndExitWorkout() {
 }
 
 async function recordWorkoutCompletion(folderId, dateKey) {
-  if (!currentUser || !historyAvailable || !planningUpgradeAvailable || !folderId) return
-  const completedAt = new Date().toISOString()
-  if (!wasWorkoutCompleted(dateKey, folderId)) {
-    workoutHistory = [{ id: `local-${folderId}-${dateKey}`, workout_date: dateKey, folder_id: folderId, completed_at: completedAt }, ...workoutHistory]
-  }
-  const pending = readPending()
-  pending.completions = [
-    ...pending.completions.filter((entry) => !(entry.workout_date === dateKey && entry.folder_id === folderId)),
-    { workout_date: dateKey, folder_id: folderId, completed_at: completedAt }
-  ]
-  writePending(pending)
+  if (!currentUser || !canMarkDone() || !folderId) return
+  applyDoneLocally(dateKey, folderId, true)
   saveSnapshot()
   await flushPendingWrites()
 }
@@ -2973,10 +4394,22 @@ async function recordWorkoutCompletion(folderId, dateKey) {
 function finishWorkout() {
   const completedFolderId = activeFolder?.id
   if (completedFolderId) recordWorkoutCompletion(completedFolderId, todayDateKey())
+  const returnToDailyFlow = maybeCompleteDailyGymStepAfterWorkout()
   clearWorkoutState()
   resetTimer()
   workoutMode = false
   releaseWakeLock()
+
+  // A Gym step inside the daily system is a bridge, not a dead end: finish the workout
+  // and battle angel immediately serves the next gym module or the next daily action.
+  if (returnToDailyFlow) {
+    activeFolder = null
+    activeExerciseGroups = []
+    renderDayRunner()
+    refreshInBackground()
+    return
+  }
+
   renderShell(`
     <section class="finish-card">
       <div class="finish-check">&#10003;</div>
@@ -3015,8 +4448,7 @@ function startTimer(forceRestart = false) {
     timerEndAt = null
   }
 
-  if (startingNewRest) chooseMotivationForNewRest()
-  else if (!restMotivationId && motivationVideos.length) restMotivationId = motivationVideos[0].id
+  if (startingNewRest || !restQueue.length) chooseMotivationForNewRest()
 
   if (timerPausedSeconds <= 0) timerPausedSeconds = REST_SECONDS
   timerEndAt = Date.now() + timerPausedSeconds * 1000
@@ -3146,6 +4578,13 @@ document.addEventListener('visibilitychange', () => {
   }
 })
 
+// iPhone can still begin a text selection on long press; block it on the calendar and rest screen,
+// where holding / double-tapping is a control, not a way to copy text.
+document.addEventListener('selectstart', (event) => {
+  const node = event.target?.nodeType === Node.TEXT_NODE ? event.target.parentElement : event.target
+  if (node?.closest?.('.calendar-grid, .rest-lock-screen')) event.preventDefault()
+})
+
 window.addEventListener('online', () => {
   flushPendingWrites()
   if (usingCachedData) refreshInBackground()
@@ -3176,7 +4615,7 @@ async function routeAfterLoad(saved) {
     saved.status = 'paused'
     saveWorkoutState(saved)
   }
-  renderHome()
+  renderDay()
 }
 
 function readStoredAuthUser() {
@@ -3215,7 +4654,7 @@ async function boot() {
       try {
         await routeAfterLoad(workoutState)
       } catch (error) {
-        renderHome(error.message)
+        renderDay(error.message)
       }
       const version = viewVersion
       const before = dataSignature()
@@ -3237,14 +4676,16 @@ async function boot() {
         await loadFolders()
         const saved = await syncWorkoutStateFromCloud()
         const cloudChangedWorkout = (saved?.updatedAt || 0) > localUpdatedAt
-        if (viewVersion === version && currentView === 'home' && (dataSignature() !== before || cloudChangedWorkout)) {
+        if (viewVersion === version && ['day', 'home'].includes(currentView) && (dataSignature() !== before || cloudChangedWorkout)) {
           if (cloudChangedWorkout && shouldAutoResume(saved)) await routeAfterLoad(saved)
+          else if (currentView === 'day') renderDay()
           else renderHome()
         }
       } catch (error) {
         console.warn('Working offline:', error)
         usingCachedData = true
-        if (viewVersion === version && currentView === 'home') renderHome()
+        if (viewVersion === version && currentView === 'day') renderDay()
+        else if (viewVersion === version && currentView === 'home') renderHome()
       }
     } else {
       renderBootLoading()
@@ -3253,7 +4694,7 @@ async function boot() {
         const saved = await syncWorkoutStateFromCloud()
         await routeAfterLoad(saved)
       } catch (error) {
-        renderHome(error.message)
+        renderDay(error.message)
       }
     }
   }
@@ -3282,6 +4723,11 @@ async function handleSessionChange(session) {
   weeklyPlanAvailable = true
   historyAvailable = true
   planningUpgradeAvailable = true
+  weightLogAvailable = true
+  weightLogRows = []
+  dailySteps = []
+  dailyProgress = null
+  dailySystemAvailable = true
   plannerSelectedDate = null
   signedUrlCache = new Map()
   usingCachedData = false
@@ -3298,9 +4744,9 @@ async function handleSessionChange(session) {
     restoreTimerState()
     await loadFolders()
     await syncWorkoutStateFromCloud()
-    renderHome()
+    renderDay()
   } catch (error) {
-    renderHome(error.message)
+    renderDay(error.message)
   }
 }
 
