@@ -318,3 +318,25 @@ No database changes.
 - If Power Actions were started and the app closes, battle angel resumes the current Power Action automatically when the fixed Daily routine is not actively running.
 - Power Action execution is cached locally and queued for Supabase sync, matching the app's low-friction/offline-first behavior.
 - Backups include the master todo list and dated Power Action plan/history.
+
+## v1.17 — Day Stack
+
+The Day tab is now one system instead of a separate routine runner and Power Actions runner.
+
+**Capture first, decide later.** The Day overview has one small **Dump a todo...** field. Anything you type there goes to **Inbox** only. It does not interrupt the current day or force you to prioritize it immediately. While Autopilot is running, the small **+** button opens the same quick capture without leaving the current action.
+
+**Plan today only when you want to plan.** Open **Plan today** to see one ordered stack containing the repeating routine plus the todos selected for today. Choose items from Inbox with **+ Today** and use the compact up/down controls to put those todos anywhere between routine actions. This changes only today's order; it never rearranges the permanent routine.
+
+**Execute one thing at a time.** **Start day** runs that combined stack as a single Autopilot. Routine actions, routine substeps, Gym, and selected todos all arrive through the same one-card screen. The only normal decisions are **Done**, **Later today**, or **Skip today**.
+
+- **Done** on a todo completes it and removes it from Inbox.
+- **Later today** moves the current routine block or todo behind the remaining stack.
+- **Skip today** removes it from today's execution. A skipped todo stays in Inbox.
+- A todo that simply never gets finished also stays in Inbox and is available to choose on any future day.
+- A new calendar day starts with a fresh routine and no todos selected. Med checkmarks also reset for the new date.
+
+The visual hierarchy is intentionally quiet: **Start day** first, quick capture second, then collapsed planning/editing sections. The full Inbox is hidden unless you deliberately open it.
+
+### v1.17 database upgrade
+
+Existing installs should run `supabase/day_stack_upgrade.sql` once. It adds the ordered Day Stack field and also creates/repairs the Todo Inbox tables if the earlier v1.16 SQL did not finish. The migration is additive only and does not delete workouts, uploads, routines, meds, calendar data, history, or existing todos.

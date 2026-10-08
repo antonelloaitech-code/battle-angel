@@ -3288,3 +3288,313 @@ body.day-runner-active {
     justify-content: flex-end;
   }
 }
+
+/* v1.17 — one Day Stack: capture -> plan -> execute */
+.day-stack-start-card {
+  margin-bottom: 10px;
+}
+
+.day-capture-card {
+  margin: 10px 0;
+}
+
+.day-capture-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  gap: 8px;
+}
+
+.day-capture-form input {
+  min-height: 50px;
+  border-radius: 15px;
+  background: var(--surface);
+}
+
+.day-capture-button {
+  min-height: 50px;
+  border: 0;
+  border-radius: 15px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font-size: 1.5rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.day-capture-button:active { background: var(--accent-soft); }
+.day-capture-status { min-height: 0; margin: 4px 4px 0; text-align: left; }
+
+.today-stack-planner,
+.todo-inbox-card {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.today-stack-planner > summary,
+.todo-inbox-card > summary {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.today-stack-planner > summary span:last-child,
+.todo-inbox-card > summary span:last-child {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.today-stack-body,
+.todo-inbox-body {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.today-stack-heading {
+  padding: 11px 2px 8px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.today-stack-list {
+  display: grid;
+  gap: 7px;
+}
+
+.today-stack-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border-radius: 13px;
+  background: var(--surface-soft);
+}
+
+.today-stack-row.is-todo {
+  background: var(--accent-soft);
+}
+
+.today-stack-number {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.today-stack-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.today-stack-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+
+.today-stack-copy small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.today-stack-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stack-icon-button,
+.stack-remove-button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  padding: 0;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.stack-remove-button { color: var(--danger); }
+.stack-icon-button:disabled { opacity: 0.25; }
+
+.today-inbox-picker {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+}
+
+.today-inbox-picker > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.today-inbox-picker > summary span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.today-inbox-choice-list {
+  display: grid;
+  gap: 1px;
+  border-top: 1px solid var(--border);
+  background: var(--border);
+}
+
+.today-inbox-choice {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.today-inbox-choice span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.today-inbox-choice strong {
+  flex: 0 0 auto;
+  color: var(--accent-dark);
+  font-size: 0.78rem;
+}
+
+.today-stack-empty-inbox {
+  padding: 10px 2px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.todo-inbox-list {
+  display: grid;
+  gap: 8px;
+  padding-top: 11px;
+}
+
+.todo-inbox-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.todo-inbox-row input { min-height: 42px; }
+.todo-inbox-row .small-button,
+.todo-inbox-row .text-button { min-height: 42px; padding-inline: 9px; }
+
+.day-step-card-todo {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.day-runner-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.day-runner-capture {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+.runner-capture-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  align-items: end;
+  background: color-mix(in srgb, #000 45%, transparent);
+  padding: 14px max(14px, env(safe-area-inset-right, 0px)) max(14px, calc(env(safe-area-inset-bottom, 0px) + 10px)) max(14px, env(safe-area-inset-left, 0px));
+}
+
+.runner-capture-form {
+  width: min(560px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 18px 60px rgba(0,0,0,.3);
+}
+
+.runner-capture-title {
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.runner-capture-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 520px) {
+  .today-stack-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    padding: 8px;
+    gap: 7px;
+  }
+  .stack-icon-button,
+  .stack-remove-button {
+    width: 32px;
+    height: 32px;
+  }
+  .todo-inbox-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .todo-inbox-row .text-button {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}

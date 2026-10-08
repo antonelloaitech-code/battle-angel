@@ -578,6 +578,7 @@ create table if not exists public.daily_progress (
   completed_step_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(completed_step_ids) = 'array'),
   skipped_step_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(skipped_step_ids) = 'array'),
   later_step_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(later_step_ids) = 'array'),
+  stack_order jsonb not null default '[]'::jsonb check (jsonb_typeof(stack_order) = 'array'),
   substep_positions jsonb not null default '{}'::jsonb check (jsonb_typeof(substep_positions) = 'object'),
   is_complete boolean not null default false,
   started_at timestamptz,
@@ -597,6 +598,10 @@ alter table public.daily_progress
 -- v1.13: defer a step without forgetting it; deferred steps are replayed at the end of the day.
 alter table public.daily_progress
   add column if not exists later_step_ids jsonb not null default '[]'::jsonb;
+
+-- v1.17: one ordered stack interleaves routine steps and selected todos for today.
+alter table public.daily_progress
+  add column if not exists stack_order jsonb not null default '[]'::jsonb;
 
 alter table public.daily_steps enable row level security;
 alter table public.daily_progress enable row level security;
@@ -850,4 +855,5 @@ select
   exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'daily_meds') as daily_meds_ready,
   exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'daily_med_log') as daily_med_log_ready,
   exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'power_todos') as power_todos_ready,
-  exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'power_action_plan') as power_action_plan_ready;
+  exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'power_action_plan') as power_action_plan_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'stack_order') as day_stack_ready;

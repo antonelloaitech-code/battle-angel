@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.16.0'
+const APP_VERSION = '1.17.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -448,7 +448,7 @@ async function loadSchedule() {
 
 function isMissingDailySystemError(error) {
   const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
-  return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_steps') || text.includes('daily_progress') || text.includes('substeps') || text.includes('skipped_step_ids') || text.includes('substep_positions') || text.includes('later_step_ids')
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_steps') || text.includes('daily_progress') || text.includes('substeps') || text.includes('skipped_step_ids') || text.includes('substep_positions') || text.includes('later_step_ids') || text.includes('stack_order')
 }
 
 function isMissingDailyMedsError(error) {
@@ -488,6 +488,7 @@ function emptyDailyProgress(dateKey = todayDateKey()) {
     completed_step_ids: [],
     skipped_step_ids: [],
     later_step_ids: [],
+    stack_order: [],
     substep_positions: {},
     is_complete: false,
     started_at: null,
@@ -505,6 +506,7 @@ function normalizeDailyProgressValue(value, dateKey = todayDateKey()) {
     completed_step_ids: Array.isArray(value.completed_step_ids) ? [...new Set(value.completed_step_ids.filter((id) => typeof id === 'string'))] : [],
     skipped_step_ids: Array.isArray(value.skipped_step_ids) ? [...new Set(value.skipped_step_ids.filter((id) => typeof id === 'string'))] : [],
     later_step_ids: Array.isArray(value.later_step_ids) ? [...new Set(value.later_step_ids.filter((id) => typeof id === 'string'))] : [],
+    stack_order: Array.isArray(value.stack_order) ? [...new Set(value.stack_order.filter((key) => typeof key === 'string' && /^(routine|todo):/.test(key)))] : [],
     substep_positions: positions,
     is_complete: Boolean(value.is_complete),
     started_at: value.started_at || null,
@@ -533,7 +535,7 @@ async function loadDailySystem() {
       .order('created_at', { ascending: true }),
     supabase
       .from('daily_progress')
-      .select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,substep_positions,is_complete,started_at,updated_at')
+      .select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,substep_positions,is_complete,started_at,updated_at')
       .eq('progress_date', dateKey)
       .maybeSingle()
   ])
@@ -753,7 +755,8 @@ function rememberPowerUndo(plan, todo, label, todoCompletionChanged = false) {
   powerUndoSnapshot = {
     plan: JSON.parse(JSON.stringify(plan)),
     todo: todo ? JSON.parse(JSON.stringify(todo)) : null,
-    todoCompletionChanged
+    todoCompletionChanged,
+    dailyProgress: cloneDailyProgress()
   }
   powerUndoLabel = label
   powerUndoExpiresAt = Date.now() + 5000
@@ -782,7 +785,8 @@ function bindPowerUndoToast() {
     }
     if (restoredPlan) queuePowerPlanWrite(restoredPlan, snapshot.todo, snapshot.todoCompletionChanged ? null : 'unchanged')
     saveSnapshot()
-    renderPowerActionsRunner()
+    if (snapshot.dailyProgress) saveDailyProgress(snapshot.dailyProgress)
+    renderDayRunner()
   })
   const delay = Math.max(0, powerUndoExpiresAt - Date.now())
   powerUndoTimer = window.setTimeout(() => {
@@ -804,7 +808,7 @@ function startPowerActions() {
     const next = setLocalPowerPlan(plan.id, { started_at: startedAt, updated_at: new Date().toISOString() })
     if (next) queuePowerPlanWrite(next, getPowerTodo(next.todo_id))
   })
-  renderPowerActionsRunner()
+  renderDayRunner()
 }
 
 function completePowerAction(planId) {
@@ -820,7 +824,7 @@ function completePowerAction(planId) {
   powerTodos = powerTodos.filter((item) => item.id !== todo.id)
   if (next) queuePowerPlanWrite(next, todo, completedAt)
   saveSnapshot()
-  renderPowerActionsRunner()
+  renderDayRunner()
 }
 
 function skipPowerAction(planId) {
@@ -833,23 +837,26 @@ function skipPowerAction(planId) {
   rememberPowerUndo(plan, todo, 'Skipped today', false)
   const next = setLocalPowerPlan(plan.id, { status: 'skipped', updated_at: new Date().toISOString() })
   if (next) queuePowerPlanWrite(next, todo)
-  renderPowerActionsRunner()
+  renderDayRunner()
 }
 
 function deferPowerAction(planId) {
   const now = Date.now()
   if (now - lastPowerTapAt < 900) return
   lastPowerTapAt = now
-  const pendingPlans = getPendingPowerPlans()
-  if (pendingPlans.length <= 1) return
   const plan = powerPlans.find((item) => item.id === planId)
   const todo = plan ? getPowerTodo(plan.todo_id) : null
   if (!plan || !todo) return
+  const key = todoStackKey(todo.id)
+  const order = normalizeTodayStackOrder(currentDailyProgress())
+  if (order.filter((item) => item !== key).length === 0) return
   rememberPowerUndo(plan, todo, 'Moved to later', false)
+  if (!moveStackKeyToEnd(key)) return
+  const pendingPlans = getPendingPowerPlans()
   const nextOrder = Math.max(0, ...pendingPlans.map((item) => Number(item.sort_order) || 0)) + 1
   const next = setLocalPowerPlan(plan.id, { sort_order: nextOrder, updated_at: new Date().toISOString() })
   if (next) queuePowerPlanWrite(next, todo)
-  renderPowerActionsRunner()
+  renderDayRunner()
 }
 
 function currentDailyMedTakenSet() {
@@ -1023,9 +1030,11 @@ function getDailyGymState(step = getCurrentDailyStep()) {
 }
 
 function startDailySystem() {
-  if (!dailySteps.length) return
+  const order = normalizeTodayStackOrder(currentDailyProgress())
+  if (!order.length || remainingTodayActionCount() <= 0) return
   setActiveDayMode('daily')
   const progress = currentDailyProgress()
+  progress.stack_order = order
   if (!progress.started_at) progress.started_at = new Date().toISOString()
   progress.is_complete = false
   saveDailyProgress(progress)
@@ -1081,15 +1090,13 @@ function deferDailyStep(stepId) {
   const now = Date.now()
   if (now - lastDailyTapAt < 900) return
   lastDailyTapAt = now
-  const progress = currentDailyProgress()
-  const unresolved = getOrderedUnresolvedDailySteps(progress)
-  if (unresolved.length <= 1) return
   const step = dailySteps.find((item) => item.id === stepId)
   if (!step) return
-  rememberDailyUndo(progress, 'Moved to later')
-  progress.later_step_ids = [...(progress.later_step_ids || []).filter((id) => id !== stepId), stepId]
-  if (!progress.started_at) progress.started_at = new Date().toISOString()
-  saveDailyProgress(progress)
+  const key = routineStackKey(stepId)
+  const order = normalizeTodayStackOrder(currentDailyProgress())
+  if (order.filter((item) => item !== key).length === 0) return
+  rememberDailyUndo(currentDailyProgress(), 'Moved to later')
+  if (!moveStackKeyToEnd(key)) return
   renderDayRunner()
 }
 
@@ -1112,13 +1119,13 @@ function dailyGymStepCanAutoComplete(step) {
 function maybeCompleteDailyGymStepAfterWorkout() {
   const progress = currentDailyProgress()
   if (!progress.started_at || progress.is_complete) return false
-  const step = getCurrentDailyStep()
-  if (!isGymDailyStep(step)) return false
-  const gym = getDailyGymState(step)
+  const action = getCurrentStackAction()
+  if (!action || action.type !== 'routine' || action.isSubstep || !isGymDailyStep(action.step)) return false
+  const gym = getDailyGymState(action.step)
   if (!gym) return false
   const shouldComplete = gym.planned.length ? gym.remaining.length === 0 : true
   if (!shouldComplete) return true
-  advanceDailyAction(step.id, false, { bypassGuard: true, rememberUndo: false, render: false })
+  advanceDailyAction(action.step.id, false, { bypassGuard: true, rememberUndo: false, render: false })
   return true
 }
 
@@ -1424,7 +1431,7 @@ async function downloadFullBackup() {
     if (dailySystemAvailable) {
       const [dailyStepsResult, dailyProgressResult] = await Promise.all([
         supabase.from('daily_steps').select('id,title,note,substeps,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
-        supabase.from('daily_progress').select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,substep_positions,is_complete,started_at,updated_at').order('progress_date', { ascending: true })
+        supabase.from('daily_progress').select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,substep_positions,is_complete,started_at,updated_at').order('progress_date', { ascending: true })
       ])
       if (!dailyStepsResult.error) dailyStepBackupRows = dailyStepsResult.data || []
       if (!dailyProgressResult.error) dailyProgressBackupRows = dailyProgressResult.data || []
@@ -1935,6 +1942,7 @@ async function flushPendingWrites() {
         completed_step_ids: dailyItem.completed_step_ids || [],
         skipped_step_ids: dailyItem.skipped_step_ids || [],
         later_step_ids: dailyItem.later_step_ids || [],
+        stack_order: dailyItem.stack_order || [],
         substep_positions: dailyItem.substep_positions || {},
         is_complete: Boolean(dailyItem.is_complete),
         started_at: dailyItem.started_at || null,
@@ -2664,6 +2672,135 @@ async function deleteDailyMed(medId) {
 }
 
 
+function renderQuickCapture() {
+  if (!powerActionsAvailable) return ''
+  return `
+    <section class="day-capture-card" aria-label="Quick todo capture">
+      <form id="add-power-todo" class="day-capture-form">
+        <input id="power-todo-title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Dump a todo..." aria-label="Dump a todo into Inbox" autocomplete="off" />
+        <button type="submit" class="day-capture-button" aria-label="Add to Inbox">+</button>
+      </form>
+      <div id="power-todos-status" class="micro-status day-capture-status" aria-live="polite"></div>
+    </section>`
+}
+
+function renderTodayPlanner(open = false) {
+  if (!powerActionsAvailable) {
+    return `<details class="today-stack-planner" ${open ? 'open' : ''}><summary><span>Plan today</span><span>setup</span></summary><div class="today-stack-body"><div class="daily-editor-empty">Run the v1.17 Day Stack SQL once.</div></div></details>`
+  }
+  const entries = getTodayStackEntries()
+  const selectedTodoIds = new Set(entries.filter((entry) => entry.type === 'todo').map((entry) => entry.id))
+  const inboxChoices = powerTodos.filter((todo) => !selectedTodoIds.has(todo.id))
+  const rows = entries.map((entry, index) => `
+    <div class="today-stack-row ${entry.type === 'todo' ? 'is-todo' : 'is-routine'}">
+      <span class="today-stack-number">${index + 1}</span>
+      <span class="today-stack-copy"><strong>${escapeHtml(entry.title)}</strong><small>${entry.type === 'todo' ? 'todo' : 'routine'}</small></span>
+      <span class="today-stack-actions">
+        <button type="button" class="stack-icon-button" data-stack-move="up" data-stack-key="${escapeHtml(entry.key)}" ${index === 0 ? 'disabled' : ''} aria-label="Move earlier">↑</button>
+        <button type="button" class="stack-icon-button" data-stack-move="down" data-stack-key="${escapeHtml(entry.key)}" ${index === entries.length - 1 ? 'disabled' : ''} aria-label="Move later">↓</button>
+        ${entry.type === 'todo' ? `<button type="button" class="stack-remove-button" data-power-today="${entry.id}" aria-label="Remove from today">×</button>` : ''}
+      </span>
+    </div>`).join('')
+  const choices = inboxChoices.map((todo) => `
+    <button type="button" class="today-inbox-choice" data-power-today="${todo.id}">
+      <span>${escapeHtml(todo.title)}</span><strong>+ Today</strong>
+    </button>`).join('')
+  const todoCount = entries.filter((entry) => entry.type === 'todo').length
+  return `
+    <details class="today-stack-planner" id="today-stack-planner" ${open ? 'open' : ''}>
+      <summary><span>Plan today</span><span>${todoCount ? `${todoCount} todo${todoCount === 1 ? '' : 's'}` : 'routine only'}</span></summary>
+      <div class="today-stack-body">
+        <div class="today-stack-heading">Today stack</div>
+        ${rows ? `<div class="today-stack-list">${rows}</div>` : '<div class="daily-editor-empty">Add a routine or choose a todo for today.</div>'}
+        ${inboxChoices.length ? `
+          <details class="today-inbox-picker">
+            <summary>Add from Inbox <span>${inboxChoices.length}</span></summary>
+            <div class="today-inbox-choice-list">${choices}</div>
+          </details>` : '<div class="today-stack-empty-inbox">Inbox clear.</div>'}
+      </div>
+    </details>`
+}
+
+function renderTodoInbox(open = false) {
+  if (!powerActionsAvailable) return ''
+  const rows = powerTodos.map((todo) => `
+    <form class="todo-inbox-row" data-power-todo-edit="${todo.id}">
+      <input name="title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required value="${escapeHtml(todo.title)}" aria-label="Todo title" />
+      <button type="submit" class="small-button">Save</button>
+      <button type="button" class="text-button danger-text" data-power-todo-delete="${todo.id}">Delete</button>
+    </form>`).join('')
+  return `
+    <details class="todo-inbox-card" id="todo-inbox-card" ${open ? 'open' : ''}>
+      <summary><span>Inbox</span><span>${powerTodos.length}</span></summary>
+      <div class="todo-inbox-body">
+        ${rows ? `<div class="todo-inbox-list">${rows}</div>` : '<div class="daily-editor-empty">Nothing waiting.</div>'}
+      </div>
+    </details>`
+}
+
+function bindTodayPlanner() {
+  document.querySelectorAll('[data-stack-move]').forEach((button) => {
+    button.addEventListener('click', () => moveTodayStackItem(button.dataset.stackKey, button.dataset.stackMove))
+  })
+}
+
+async function createPowerTodo(title) {
+  if (!currentUser || !powerActionsAvailable) return { error: new Error('Todo Inbox is not ready.') }
+  const clean = String(title || '').trim().slice(0, POWER_TODO_TITLE_MAX)
+  if (!clean) return { error: new Error('Add a todo first.') }
+  const nextOrder = Math.max(0, ...powerTodos.map((todo) => Number(todo.sort_order) || 0)) + 1
+  const { data, error } = await supabase.from('power_todos').insert({
+    user_id: currentUser.id,
+    title: clean,
+    sort_order: nextOrder,
+    updated_at: new Date().toISOString()
+  }).select('id,title,sort_order,completed_at,created_at,updated_at').single()
+  if (error) return { error }
+  powerTodos.push(data)
+  powerTodos.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  saveSnapshot()
+  return { data }
+}
+
+function showRunnerCapture() {
+  if (document.querySelector('#runner-capture-sheet')) return
+  const screen = document.querySelector('.day-runner-screen')
+  if (!screen) return
+  const sheet = document.createElement('div')
+  sheet.id = 'runner-capture-sheet'
+  sheet.className = 'runner-capture-sheet'
+  sheet.innerHTML = `
+    <form id="runner-capture-form" class="runner-capture-form">
+      <div class="runner-capture-title">Dump it. Keep moving.</div>
+      <input id="runner-capture-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Todo" autocomplete="off" />
+      <div class="runner-capture-actions">
+        <button type="button" class="secondary-button" id="runner-capture-cancel">Cancel</button>
+        <button type="submit" class="primary-button" id="runner-capture-save">Inbox</button>
+      </div>
+      <div id="runner-capture-status" class="micro-status"></div>
+    </form>`
+  screen.appendChild(sheet)
+  const input = sheet.querySelector('#runner-capture-input')
+  window.setTimeout(() => input?.focus(), 40)
+  sheet.querySelector('#runner-capture-cancel')?.addEventListener('click', () => sheet.remove())
+  sheet.querySelector('#runner-capture-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const status = sheet.querySelector('#runner-capture-status')
+    const button = sheet.querySelector('#runner-capture-save')
+    const title = input?.value || ''
+    button.disabled = true
+    if (status) status.textContent = 'Saving...'
+    const result = await createPowerTodo(title)
+    if (result.error) {
+      button.disabled = false
+      if (status) status.textContent = isNetworkError(result.error) ? 'Connect to save this todo.' : result.error.message
+      return
+    }
+    if (status) status.textContent = 'Saved to Inbox.'
+    window.setTimeout(() => sheet.remove(), 450)
+  })
+}
+
 function renderPowerActionsLaunch() {
   if (!powerActionsAvailable) {
     return `
@@ -2739,28 +2876,19 @@ function bindPowerTodos() {
 
 async function addPowerTodo(event) {
   event.preventDefault()
-  if (!currentUser || !powerActionsAvailable) return
   const input = document.querySelector('#power-todo-title')
   const status = document.querySelector('#power-todos-status')
-  const title = input?.value.trim().slice(0, POWER_TODO_TITLE_MAX)
-  if (!title) return
+  const title = input?.value || ''
+  if (!title.trim()) return
   if (status) status.textContent = 'Saving...'
-  const nextOrder = Math.max(0, ...powerTodos.map((todo) => Number(todo.sort_order) || 0)) + 1
-  const { error } = await supabase.from('power_todos').insert({
-    user_id: currentUser.id,
-    title,
-    sort_order: nextOrder,
-    updated_at: new Date().toISOString()
-  })
-  if (error) {
-    if (status) status.textContent = isNetworkError(error) ? 'Connect to add todos.' : error.message
+  const result = await createPowerTodo(title)
+  if (result.error) {
+    if (status) status.textContent = isNetworkError(result.error) ? 'Connect to save this todo.' : result.error.message
     return
   }
-  await loadPowerActions()
-  saveSnapshot()
   renderDay('', { forceOverview: true })
-  const details = document.querySelector('#power-todos-card')
-  if (details) details.open = true
+  const nextStatus = document.querySelector('#power-todos-status')
+  if (nextStatus) nextStatus.textContent = 'Captured.'
 }
 
 async function togglePowerTodoToday(todoId) {
@@ -2772,41 +2900,39 @@ async function togglePowerTodoToday(todoId) {
   if (existing?.status === 'pending') {
     const { error } = await supabase.from('power_action_plan').delete().eq('id', existing.id)
     if (error) {
-      alert(isNetworkError(error) ? 'Connect to change today\'s Power Actions.' : error.message)
+      alert(isNetworkError(error) ? 'Connect to change today\'s plan.' : error.message)
       return
     }
     clearPendingPowerWrite(existing.id)
   } else if (existing) {
     const nextOrder = Math.max(0, ...getPendingPowerPlans().map((plan) => Number(plan.sort_order) || 0)) + 1
-    const startedAt = powerActionsInProgress() ? (getPendingPowerPlans().find((plan) => plan.started_at)?.started_at || new Date().toISOString()) : null
-    const { error } = await supabase.from('power_action_plan').update({ status: 'pending', sort_order: nextOrder, started_at: startedAt, updated_at: new Date().toISOString() }).eq('id', existing.id)
+    const { error } = await supabase.from('power_action_plan').update({ status: 'pending', sort_order: nextOrder, started_at: null, updated_at: new Date().toISOString() }).eq('id', existing.id)
     if (error) {
-      alert(isNetworkError(error) ? 'Connect to change today\'s Power Actions.' : error.message)
+      alert(isNetworkError(error) ? 'Connect to change today\'s plan.' : error.message)
       return
     }
     clearPendingPowerWrite(existing.id)
   } else {
     const nextOrder = Math.max(0, ...getTodayPowerPlans().map((plan) => Number(plan.sort_order) || 0)) + 1
-    const startedAt = powerActionsInProgress() ? (getPendingPowerPlans().find((plan) => plan.started_at)?.started_at || new Date().toISOString()) : null
     const { error } = await supabase.from('power_action_plan').insert({
       user_id: currentUser.id,
       todo_id: todoId,
       action_date: dateKey,
       status: 'pending',
       sort_order: nextOrder,
-      started_at: startedAt,
+      started_at: null,
       updated_at: new Date().toISOString()
     })
     if (error) {
-      alert(isNetworkError(error) ? 'Connect to choose today\'s Power Actions.' : error.message)
+      alert(isNetworkError(error) ? 'Connect to choose today\'s todos.' : error.message)
       return
     }
   }
   await loadPowerActions()
-  saveSnapshot()
-  renderDay('', { forceOverview: true })
-  const details = document.querySelector('#power-todos-card')
-  if (details) details.open = true
+  const progress = currentDailyProgress()
+  progress.stack_order = normalizeTodayStackOrder(progress)
+  saveDailyProgress(progress)
+  renderDay('', { forceOverview: true, openPlanner: true })
 }
 
 async function updatePowerTodo(event) {
@@ -2822,9 +2948,7 @@ async function updatePowerTodo(event) {
   }
   await loadPowerActions()
   saveSnapshot()
-  renderDay('', { forceOverview: true })
-  const details = document.querySelector('#power-todos-card')
-  if (details) details.open = true
+  renderDay('', { forceOverview: true, openInbox: true })
 }
 
 async function deletePowerTodo(todoId) {
@@ -2844,9 +2968,7 @@ async function deletePowerTodo(todoId) {
   writePending(pending)
   await loadPowerActions()
   saveSnapshot()
-  renderDay('', { forceOverview: true })
-  const details = document.querySelector('#power-todos-card')
-  if (details) details.open = true
+  renderDay('', { forceOverview: true, openInbox: true })
 }
 
 function renderPowerActionsRunner() {
@@ -2911,49 +3033,34 @@ function renderDay(errorMessage = '', options = {}) {
 
   if (!dailySystemAvailable) {
     renderShell(`
-      <div class="notice error">Daily system needs the latest Supabase schema once. Your gym data is untouched.</div>`,
+      <div class="notice error">Day Stack needs the latest Supabase schema once. Your gym data is untouched.</div>`,
       { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: 'day' })
     return
   }
 
   const progress = currentDailyProgress()
-  const resolved = dailyResolvedStepIds(progress)
-  const completedCount = dailySteps.filter((step) => resolved.has(step.id)).length
-  const allComplete = dailySteps.length > 0 && completedCount >= dailySteps.length
-  const inProgress = Boolean(progress.started_at) && !allComplete
+  progress.stack_order = normalizeTodayStackOrder(progress)
+  const remaining = remainingTodayActionCount()
+  const started = Boolean(progress.started_at)
+  const complete = started && remaining === 0
 
-  // Once the day has started, opening battle angel goes straight back to the next action.
-  // Exit is the deliberate escape hatch to edit or inspect the routine.
-  const powerInProgress = powerActionsInProgress()
-  const activeDayMode = getActiveDayMode()
-  if (!options.forceOverview && !errorMessage) {
-    if (activeDayMode === 'power' && powerInProgress) {
-      renderPowerActionsRunner()
-      return
-    }
-    if (activeDayMode === 'daily' && inProgress) {
-      renderDayRunner()
-      return
-    }
-    if (inProgress) {
-      renderDayRunner()
-      return
-    }
-    if (powerInProgress) {
-      renderPowerActionsRunner()
-      return
-    }
+  // Once execution starts, reopening the app serves the next action immediately.
+  if (!options.forceOverview && !errorMessage && started && !complete) {
+    renderDayRunner()
+    return
   }
 
+  const stackEntries = getTodayStackEntries()
+  const todoCount = stackEntries.filter((entry) => entry.type === 'todo').length
   let mainCard = ''
-  if (!dailySteps.length) {
+  if (!stackEntries.length) {
     mainCard = `
       <section class="day-start-card">
-        <div class="today-label">Daily system</div>
-        <h2>Build your sequence.</h2>
-        <p>Add it once. battle angel will serve one next action at a time.</p>
+        <div class="today-label">Today</div>
+        <h2>Nothing queued.</h2>
+        <p>Add your routine once or choose a todo in Plan today.</p>
       </section>`
-  } else if (allComplete) {
+  } else if (complete) {
     mainCard = `
       <section class="day-complete-card">
         <div class="day-complete-mark">Done</div>
@@ -2961,26 +3068,27 @@ function renderDay(errorMessage = '', options = {}) {
       </section>`
   } else {
     mainCard = `
-      <section class="day-start-card">
-        <div class="today-label">${inProgress ? 'In progress' : 'Today'}</div>
-        <h2>${inProgress ? 'Continue.' : 'Start.'}</h2>
-        <p>${inProgress ? `${completedDailyActionsCount(progress)} of ${totalDailyActions()} actions passed.` : `${totalDailyActions()} actions. One at a time.`}</p>
-        <button type="button" class="start-workout-button day-start-button" id="start-day">${inProgress ? 'Continue' : 'Start my day'} <span aria-hidden="true">&rarr;</span></button>
+      <section class="day-start-card day-stack-start-card">
+        <div class="today-label">${started ? 'In progress' : 'Today'}</div>
+        <h2>${started ? 'Keep moving.' : 'Ready.'}</h2>
+        <p>${remaining} action${remaining === 1 ? '' : 's'} left${todoCount ? ` · ${todoCount} todo${todoCount === 1 ? '' : 's'} in the stack` : ''}</p>
+        <button type="button" class="start-workout-button day-start-button" id="start-day">${started ? 'Continue' : 'Start day'} <span aria-hidden="true">&rarr;</span></button>
       </section>`
   }
 
   renderShell(`
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
-    ${usingCachedData ? '<div class="offline-note">Offline · saved routine available</div>' : ''}
+    ${usingCachedData ? '<div class="offline-note">Offline · saved day available</div>' : ''}
     ${mainCard}
-    ${renderPowerActionsLaunch()}
+    ${renderQuickCapture()}
+    ${renderTodayPlanner(Boolean(options.openPlanner))}
     ${renderDailyEditor()}
     ${renderDailyMeds()}
-    ${renderPowerTodos()}`,
+    ${renderTodoInbox(Boolean(options.openInbox))}`,
     { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
 
   document.querySelector('#start-day')?.addEventListener('click', startDailySystem)
-  document.querySelector('#start-power-actions')?.addEventListener('click', startPowerActions)
+  bindTodayPlanner()
   bindDailyEditor()
   bindDailyMeds()
   bindPowerTodos()
@@ -2988,85 +3096,102 @@ function renderDay(errorMessage = '', options = {}) {
 
 function renderDayRunner() {
   setActiveDayMode('daily')
-  if (!dailySteps.length) {
-    renderDay()
-    return
-  }
   const progress = currentDailyProgress()
-  const action = getCurrentDailyAction()
+  progress.stack_order = normalizeTodayStackOrder(progress)
+  const action = getCurrentStackAction()
   if (!action) {
     progress.is_complete = true
-    progress.later_step_ids = []
     saveDailyProgress(progress)
     clearDailyUndo()
-    renderDay()
+    clearPowerUndo()
+    setActiveDayMode(null)
+    renderDay('', { forceOverview: true })
     return
   }
 
-  const { step, substeps, substepIndex, title, isSubstep } = action
-  const gymState = !isSubstep ? getDailyGymState(step) : null
-
-  // If today's planned gym work is already finished, the Gym routine step disappears automatically.
-  if (gymState?.planned.length && gymState.remaining.length === 0) {
-    advanceDailyAction(step.id, false, { bypassGuard: true, rememberUndo: false, render: false })
-    renderDayRunner()
-    return
-  }
-
-  const actionNumber = completedDailyActionsCount(progress) + 1
-  const actionTotal = totalDailyActions()
-  const substepMeta = isSubstep ? `${substepIndex + 1} of ${substeps.length}` : ''
-  const unresolvedCount = getOrderedUnresolvedDailySteps(progress).length
-  const canLater = unresolvedCount > 1
-
+  const remaining = remainingTodayActionCount()
   let cardBody = ''
-  let rightLabel = 'DONE'
-  if (gymState) {
-    const plannedNames = gymState.planned.map((folder) => folder.name).join(' + ')
-    const nextFolder = gymState.remaining[0] || null
-    rightLabel = nextFolder ? 'Start' : 'Choose'
+  let primaryLabel = 'DONE'
+  let gymState = null
+
+  if (action.type === 'todo') {
     cardBody = `
-      <div class="day-step-parent">Gym${gymState.planned.length > 1 ? ` <span>${gymState.planned.length} modules</span>` : ''}</div>
-      <h2>${escapeHtml(plannedNames || 'Gym')}</h2>
-      ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
-      ${gymState.planned.length ? '' : '<p class="day-gym-empty">No workout planned today.</p>'}`
+      <div class="day-step-parent">Todo</div>
+      <h2>${escapeHtml(action.title)}</h2>`
   } else {
-    cardBody = `
-      ${isSubstep ? `<div class="day-step-parent">${escapeHtml(step.title)} <span>${escapeHtml(substepMeta)}</span></div>` : ''}
-      <h2>${escapeHtml(title)}</h2>
-      ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}`
+    const { step, substeps, substepIndex, title, isSubstep } = action
+    gymState = !isSubstep ? getDailyGymState(step) : null
+    if (gymState?.planned.length && gymState.remaining.length === 0) {
+      advanceDailyAction(step.id, false, { bypassGuard: true, rememberUndo: false, render: false })
+      renderDayRunner()
+      return
+    }
+    if (gymState) {
+      const plannedNames = gymState.planned.map((folder) => folder.name).join(' + ')
+      const nextFolder = gymState.remaining[0] || null
+      primaryLabel = nextFolder ? 'START WORKOUT' : 'CHOOSE WORKOUT'
+      cardBody = `
+        <div class="day-step-parent">Routine · Gym</div>
+        <h2>${escapeHtml(plannedNames || 'Gym')}</h2>
+        ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
+        ${gymState.planned.length ? '' : '<p class="day-gym-empty">No workout planned today.</p>'}`
+    } else {
+      const substepMeta = isSubstep ? `${substepIndex + 1} of ${substeps.length}` : ''
+      cardBody = `
+        <div class="day-step-parent">${isSubstep ? `${escapeHtml(step.title)} <span>${escapeHtml(substepMeta)}</span>` : 'Routine'}</div>
+        <h2>${escapeHtml(title)}</h2>
+        ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}`
+    }
   }
+
+  const resolvedRoutine = dailyResolvedStepIds(progress)
+  const canLater = getTodayStackEntries().some((entry) => entry.key !== action.key && (
+    entry.type === 'todo' ? entry.plan?.status === 'pending' : !resolvedRoutine.has(entry.id)
+  ))
+  const undoHtml = renderDailyUndoToast() || renderPowerUndoToast()
 
   renderShell(`
     <div class="day-runner-screen">
       <div class="day-runner-top">
-        <div class="day-runner-position">${actionNumber} of ${actionTotal}</div>
-        <details class="day-runner-menu">
-          <summary aria-label="Daily options">•••</summary>
-          <div class="day-runner-menu-popover">
-            <button type="button" class="text-button" id="exit-day-runner">Exit autopilot</button>
-          </div>
-        </details>
+        <div class="day-runner-position">${remaining} left</div>
+        <div class="day-runner-tools">
+          <button type="button" class="day-runner-capture" id="runner-capture" aria-label="Capture a todo">+</button>
+          <details class="day-runner-menu">
+            <summary aria-label="Daily options">•••</summary>
+            <div class="day-runner-menu-popover">
+              <button type="button" class="text-button" id="exit-day-runner">Plan / edit day</button>
+            </div>
+          </details>
+        </div>
       </div>
-      <section class="day-step-card ${gymState ? 'day-step-card-gym' : ''}" id="day-step-card" aria-label="Current action: ${escapeHtml(title)}">
+      <section class="day-step-card ${gymState ? 'day-step-card-gym' : ''} ${action.type === 'todo' ? 'day-step-card-todo' : ''}" id="day-step-card" aria-label="Current action: ${escapeHtml(action.title)}">
         ${cardBody}
       </section>
-      <div class="day-action-controls" aria-label="Daily action controls">
+      <div class="day-action-controls" aria-label="Current action controls">
         <div class="day-secondary-actions">
-          ${canLater ? '<button type="button" class="day-option-button" id="later-daily-step">Later today</button>' : ''}
-          <button type="button" class="day-option-button" id="skip-daily-step">Skip today</button>
+          ${canLater ? '<button type="button" class="day-option-button" id="later-current-action">Later today</button>' : ''}
+          <button type="button" class="day-option-button" id="skip-current-action">Skip today</button>
         </div>
-        <button type="button" class="day-primary-action" id="primary-daily-action">${escapeHtml(rightLabel)} <span aria-hidden="true">&rarr;</span></button>
+        <button type="button" class="day-primary-action" id="primary-current-action">${escapeHtml(primaryLabel)} <span aria-hidden="true">&rarr;</span></button>
       </div>
-      ${renderDailyUndoToast()}
+      ${undoHtml}
     </div>`,
     { title: 'Day', showAccount: false, showTimer: false, showHeader: false, view: 'day-runner' })
 
-  document.querySelector('#primary-daily-action')?.addEventListener('click', () => triggerDailyPrimaryAction(step))
-  document.querySelector('#skip-daily-step')?.addEventListener('click', () => skipDailyStep(step.id))
-  document.querySelector('#later-daily-step')?.addEventListener('click', () => deferDailyStep(step.id))
+  document.querySelector('#runner-capture')?.addEventListener('click', showRunnerCapture)
   document.querySelector('#exit-day-runner')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
+
+  if (action.type === 'todo') {
+    document.querySelector('#primary-current-action')?.addEventListener('click', () => completePowerAction(action.plan.id))
+    document.querySelector('#skip-current-action')?.addEventListener('click', () => skipPowerAction(action.plan.id))
+    document.querySelector('#later-current-action')?.addEventListener('click', () => deferPowerAction(action.plan.id))
+  } else {
+    document.querySelector('#primary-current-action')?.addEventListener('click', () => triggerDailyPrimaryAction(action.step))
+    document.querySelector('#skip-current-action')?.addEventListener('click', () => skipDailyStep(action.step.id))
+    document.querySelector('#later-current-action')?.addEventListener('click', () => deferDailyStep(action.step.id))
+  }
   bindDailyUndoToast()
+  bindPowerUndoToast()
 }
 
 async function addDailyStep(event) {
@@ -3093,7 +3218,7 @@ async function addDailyStep(event) {
   }
   await loadDailySystem()
   saveSnapshot()
-  renderDay()
+  renderDay('', { forceOverview: true, openPlanner: true })
 }
 
 async function updateDailyStep(event) {
@@ -3116,7 +3241,7 @@ async function updateDailyStep(event) {
   }
   await loadDailySystem()
   saveSnapshot()
-  renderDay()
+  renderDay('', { forceOverview: true, openPlanner: true })
 }
 
 async function moveDailyStep(stepId, direction) {
@@ -5620,6 +5745,10 @@ async function handleSessionChange(session) {
   dailyMedTakenIds = []
   dailyMedsDate = todayDateKey()
   dailyMedsAvailable = true
+  powerTodos = []
+  powerPlans = []
+  powerActionsDate = todayDateKey()
+  powerActionsAvailable = true
   plannerSelectedDate = null
   signedUrlCache = new Map()
   usingCachedData = false
