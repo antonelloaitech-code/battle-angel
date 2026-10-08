@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.15.0'
+const APP_VERSION = '1.16.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -38,6 +38,7 @@ const DAILY_STEP_NOTE_MAX = 320
 const DAILY_SUBSTEP_TITLE_MAX = 120
 const DAILY_SUBSTEP_MAX = 20
 const DAILY_MED_NAME_MAX = 120
+const POWER_TODO_TITLE_MAX = 160
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   document.querySelector('#app').innerHTML = `
@@ -106,6 +107,15 @@ let dailyUndoSnapshot = null
 let dailyUndoLabel = ''
 let dailyUndoExpiresAt = 0
 let dailyUndoTimer = null
+let powerTodos = []
+let powerPlans = []
+let powerActionsDate = todayDateKey()
+let powerActionsAvailable = true
+let powerUndoSnapshot = null
+let powerUndoLabel = ''
+let powerUndoExpiresAt = 0
+let powerUndoTimer = null
+let lastPowerTapAt = 0
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 12
 const MOTIVATION_SOUND_KEY = 'battle-angel-motivation-sound'
@@ -285,6 +295,28 @@ function timerStorageKey() {
   return currentUser ? `gymflow-timer-${currentUser.id}` : 'gymflow-timer'
 }
 
+function dayModeStorageKey() {
+  return currentUser ? `battle-angel-day-mode-${currentUser.id}` : 'battle-angel-day-mode'
+}
+
+function getActiveDayMode() {
+  try {
+    const value = window.localStorage.getItem(dayModeStorageKey())
+    return value === 'power' ? 'power' : value === 'daily' ? 'daily' : null
+  } catch {
+    return null
+  }
+}
+
+function setActiveDayMode(mode) {
+  try {
+    if (mode === 'daily' || mode === 'power') window.localStorage.setItem(dayModeStorageKey(), mode)
+    else window.localStorage.removeItem(dayModeStorageKey())
+  } catch {
+    // The current screen still works if storage is unavailable.
+  }
+}
+
 function normalizeWorkoutStateValue(value, fallbackUpdatedAt = Date.now()) {
   if (!value || typeof value.folderId !== 'string') return null
   return {
@@ -422,6 +454,11 @@ function isMissingDailySystemError(error) {
 function isMissingDailyMedsError(error) {
   const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
   return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_meds') || text.includes('daily_med_log')
+}
+
+function isMissingPowerActionsError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('power_todos') || text.includes('power_action_plan')
 }
 
 function normalizeDailySubsteps(value) {
@@ -571,6 +608,248 @@ async function loadDailyMeds() {
   dailyMeds = medsResult.data || []
   dailyMedsDate = dateKey
   dailyMedTakenIds = mergeDailyMedTakenIds((logResult.data || []).map((row) => row.med_id), dateKey)
+}
+
+
+function applyPendingPowerWrites(todos, plans, dateKey = todayDateKey()) {
+  const writes = Object.values(readPending().powerPlanWrites || {}).filter((item) => item?.action_date === dateKey)
+  if (!writes.length) return { todos, plans }
+  const nextPlans = plans.map((plan) => {
+    const write = writes.find((item) => item.plan_id === plan.id)
+    return write ? { ...plan, status: write.status, sort_order: write.sort_order, started_at: write.started_at, updated_at: write.updated_at } : plan
+  })
+  const nextTodos = [...todos]
+  writes.forEach((write) => {
+    if (!Object.prototype.hasOwnProperty.call(write, 'todo_completed_at')) return
+    const existingIndex = nextTodos.findIndex((todo) => todo.id === write.todo_id)
+    if (write.todo_completed_at) {
+      if (existingIndex >= 0) nextTodos.splice(existingIndex, 1)
+      return
+    }
+    if (existingIndex < 0 && write.todo_title) {
+      nextTodos.push({
+        id: write.todo_id,
+        title: write.todo_title,
+        sort_order: Number(write.todo_sort_order) || 0,
+        completed_at: null,
+        created_at: write.todo_created_at || write.updated_at,
+        updated_at: write.updated_at
+      })
+    }
+  })
+  nextTodos.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  nextPlans.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  return { todos: nextTodos, plans: nextPlans }
+}
+
+async function loadPowerActions() {
+  const dateKey = todayDateKey()
+  powerActionsDate = dateKey
+  if (!currentUser || !powerActionsAvailable) {
+    powerTodos = []
+    powerPlans = []
+    return
+  }
+
+  const [todosResult, planResult] = await Promise.all([
+    supabase
+      .from('power_todos')
+      .select('id,title,sort_order,completed_at,created_at,updated_at')
+      .is('completed_at', null)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('power_action_plan')
+      .select('id,todo_id,action_date,status,sort_order,started_at,created_at,updated_at')
+      .eq('action_date', dateKey)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+  ])
+
+  const firstError = todosResult.error || planResult.error
+  if (firstError) {
+    if (isMissingPowerActionsError(firstError)) {
+      powerActionsAvailable = false
+      powerTodos = []
+      powerPlans = []
+      return
+    }
+    throw firstError
+  }
+
+  const merged = applyPendingPowerWrites(todosResult.data || [], planResult.data || [], dateKey)
+  powerTodos = merged.todos
+  powerPlans = merged.plans
+}
+
+function getPowerTodo(todoId) {
+  return powerTodos.find((todo) => todo.id === todoId) || null
+}
+
+function getTodayPowerPlans() {
+  const dateKey = todayDateKey()
+  if (powerActionsDate !== dateKey) {
+    powerActionsDate = dateKey
+    powerPlans = []
+  }
+  return powerPlans.filter((plan) => plan.action_date === dateKey)
+}
+
+function getPendingPowerPlans() {
+  return getTodayPowerPlans()
+    .filter((plan) => plan.status === 'pending' && getPowerTodo(plan.todo_id))
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+}
+
+function powerActionsInProgress() {
+  return getPendingPowerPlans().some((plan) => Boolean(plan.started_at))
+}
+
+function queuePowerPlanWrite(plan, todo, todoCompletedAtMarker = 'unchanged') {
+  const pending = readPending()
+  const write = {
+    plan_id: plan.id,
+    todo_id: plan.todo_id,
+    action_date: plan.action_date,
+    status: plan.status,
+    sort_order: Number(plan.sort_order) || 0,
+    started_at: plan.started_at || null,
+    updated_at: new Date().toISOString(),
+    todo_title: todo?.title || '',
+    todo_sort_order: Number(todo?.sort_order) || 0,
+    todo_created_at: todo?.created_at || null
+  }
+  if (todoCompletedAtMarker !== 'unchanged') write.todo_completed_at = todoCompletedAtMarker
+  pending.powerPlanWrites[plan.id] = write
+  writePending(pending)
+  flushPendingWrites()
+}
+
+function clearPendingPowerWrite(planId) {
+  const pending = readPending()
+  if (pending.powerPlanWrites[planId]) {
+    delete pending.powerPlanWrites[planId]
+    writePending(pending)
+  }
+}
+
+function setLocalPowerPlan(planId, patch) {
+  powerPlans = powerPlans.map((plan) => plan.id === planId ? { ...plan, ...patch } : plan)
+  saveSnapshot()
+  return powerPlans.find((plan) => plan.id === planId) || null
+}
+
+function clearPowerUndo() {
+  if (powerUndoTimer) window.clearTimeout(powerUndoTimer)
+  powerUndoTimer = null
+  powerUndoSnapshot = null
+  powerUndoLabel = ''
+  powerUndoExpiresAt = 0
+}
+
+function rememberPowerUndo(plan, todo, label, todoCompletionChanged = false) {
+  if (powerUndoTimer) window.clearTimeout(powerUndoTimer)
+  powerUndoTimer = null
+  powerUndoSnapshot = {
+    plan: JSON.parse(JSON.stringify(plan)),
+    todo: todo ? JSON.parse(JSON.stringify(todo)) : null,
+    todoCompletionChanged
+  }
+  powerUndoLabel = label
+  powerUndoExpiresAt = Date.now() + 5000
+}
+
+function renderPowerUndoToast() {
+  if (!powerUndoSnapshot || Date.now() >= powerUndoExpiresAt) return ''
+  return `
+    <div class="day-undo-toast" id="power-undo-toast" role="status">
+      <span>${escapeHtml(powerUndoLabel)}</span>
+      <button type="button" id="undo-power-action">Undo</button>
+    </div>`
+}
+
+function bindPowerUndoToast() {
+  const toast = document.querySelector('#power-undo-toast')
+  const undo = document.querySelector('#undo-power-action')
+  if (!toast || !undo || !powerUndoSnapshot) return
+  undo.addEventListener('click', () => {
+    const snapshot = powerUndoSnapshot
+    clearPowerUndo()
+    const restoredPlan = setLocalPowerPlan(snapshot.plan.id, snapshot.plan)
+    if (snapshot.todo && !powerTodos.some((todo) => todo.id === snapshot.todo.id)) {
+      powerTodos.push(snapshot.todo)
+      powerTodos.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0))
+    }
+    if (restoredPlan) queuePowerPlanWrite(restoredPlan, snapshot.todo, snapshot.todoCompletionChanged ? null : 'unchanged')
+    saveSnapshot()
+    renderPowerActionsRunner()
+  })
+  const delay = Math.max(0, powerUndoExpiresAt - Date.now())
+  powerUndoTimer = window.setTimeout(() => {
+    toast.classList.add('is-hiding')
+    window.setTimeout(() => {
+      toast.remove()
+      clearPowerUndo()
+    }, 180)
+  }, delay)
+}
+
+function startPowerActions() {
+  const pendingPlans = getPendingPowerPlans()
+  if (!pendingPlans.length) return
+  setActiveDayMode('power')
+  const startedAt = pendingPlans.find((plan) => plan.started_at)?.started_at || new Date().toISOString()
+  pendingPlans.forEach((plan) => {
+    if (plan.started_at) return
+    const next = setLocalPowerPlan(plan.id, { started_at: startedAt, updated_at: new Date().toISOString() })
+    if (next) queuePowerPlanWrite(next, getPowerTodo(next.todo_id))
+  })
+  renderPowerActionsRunner()
+}
+
+function completePowerAction(planId) {
+  const now = Date.now()
+  if (now - lastPowerTapAt < 900) return
+  lastPowerTapAt = now
+  const plan = powerPlans.find((item) => item.id === planId)
+  const todo = plan ? getPowerTodo(plan.todo_id) : null
+  if (!plan || !todo) return
+  rememberPowerUndo(plan, todo, 'Done', true)
+  const completedAt = new Date().toISOString()
+  const next = setLocalPowerPlan(plan.id, { status: 'done', updated_at: completedAt })
+  powerTodos = powerTodos.filter((item) => item.id !== todo.id)
+  if (next) queuePowerPlanWrite(next, todo, completedAt)
+  saveSnapshot()
+  renderPowerActionsRunner()
+}
+
+function skipPowerAction(planId) {
+  const now = Date.now()
+  if (now - lastPowerTapAt < 900) return
+  lastPowerTapAt = now
+  const plan = powerPlans.find((item) => item.id === planId)
+  const todo = plan ? getPowerTodo(plan.todo_id) : null
+  if (!plan || !todo) return
+  rememberPowerUndo(plan, todo, 'Skipped today', false)
+  const next = setLocalPowerPlan(plan.id, { status: 'skipped', updated_at: new Date().toISOString() })
+  if (next) queuePowerPlanWrite(next, todo)
+  renderPowerActionsRunner()
+}
+
+function deferPowerAction(planId) {
+  const now = Date.now()
+  if (now - lastPowerTapAt < 900) return
+  lastPowerTapAt = now
+  const pendingPlans = getPendingPowerPlans()
+  if (pendingPlans.length <= 1) return
+  const plan = powerPlans.find((item) => item.id === planId)
+  const todo = plan ? getPowerTodo(plan.todo_id) : null
+  if (!plan || !todo) return
+  rememberPowerUndo(plan, todo, 'Moved to later', false)
+  const nextOrder = Math.max(0, ...pendingPlans.map((item) => Number(item.sort_order) || 0)) + 1
+  const next = setLocalPowerPlan(plan.id, { sort_order: nextOrder, updated_at: new Date().toISOString() })
+  if (next) queuePowerPlanWrite(next, todo)
+  renderPowerActionsRunner()
 }
 
 function currentDailyMedTakenSet() {
@@ -745,6 +1024,7 @@ function getDailyGymState(step = getCurrentDailyStep()) {
 
 function startDailySystem() {
   if (!dailySteps.length) return
+  setActiveDayMode('daily')
   const progress = currentDailyProgress()
   if (!progress.started_at) progress.started_at = new Date().toISOString()
   progress.is_complete = false
@@ -1124,6 +1404,8 @@ async function downloadFullBackup() {
     let dailyProgressBackupRows = []
     let dailyMedBackupRows = []
     let dailyMedLogBackupRows = []
+    let powerTodoBackupRows = []
+    let powerPlanBackupRows = []
     if (weightLogAvailable) {
       const { data: weightData, error: weightError } = await supabase
         .from('exercise_weight_log')
@@ -1157,9 +1439,18 @@ async function downloadFullBackup() {
       if (!medLogResult.error) dailyMedLogBackupRows = medLogResult.data || []
     }
 
+    if (powerActionsAvailable) {
+      const [powerTodosResult, powerPlanResult] = await Promise.all([
+        supabase.from('power_todos').select('id,title,sort_order,completed_at,created_at,updated_at').order('created_at', { ascending: true }),
+        supabase.from('power_action_plan').select('id,todo_id,action_date,status,sort_order,started_at,created_at,updated_at').order('action_date', { ascending: true }).order('sort_order', { ascending: true })
+      ])
+      if (!powerTodosResult.error) powerTodoBackupRows = powerTodosResult.data || []
+      if (!powerPlanResult.error) powerPlanBackupRows = powerPlanResult.data || []
+    }
+
     const manifest = {
       format: 'battle-angel-backup',
-      version: 9,
+      version: 10,
       exported_at: new Date().toISOString(),
       account_email: currentUser.email || '',
       folders: folderRows.filter((folder) => folder.name !== MOTIVATION_FOLDER_NAME),
@@ -1172,7 +1463,9 @@ async function downloadFullBackup() {
       daily_steps: dailyStepBackupRows,
       daily_progress: dailyProgressBackupRows,
       daily_meds: dailyMedBackupRows,
-      daily_med_log: dailyMedLogBackupRows
+      daily_med_log: dailyMedLogBackupRows,
+      power_todos: powerTodoBackupRows,
+      power_action_plan: powerPlanBackupRows
     }
 
     const parts = []
@@ -1375,7 +1668,8 @@ async function loadFolders() {
     loadMotivationVideos(),
     loadSchedule(),
     loadDailySystem(),
-    loadDailyMeds()
+    loadDailyMeds(),
+    loadPowerActions()
   ])
   if (countResult.error) throw countResult.error
 
@@ -1443,7 +1737,10 @@ function saveSnapshot() {
     dailyProgress,
     dailyMeds,
     dailyMedTakenIds,
-    dailyMedsDate
+    dailyMedsDate,
+    powerTodos,
+    powerPlans,
+    powerActionsDate
   })
 }
 
@@ -1463,6 +1760,12 @@ async function restoreSnapshot() {
   dailyMedsDate = snapshot.dailyMedsDate === todayDateKey() ? snapshot.dailyMedsDate : todayDateKey()
   dailyMedTakenIds = snapshot.dailyMedsDate === todayDateKey() && Array.isArray(snapshot.dailyMedTakenIds) ? snapshot.dailyMedTakenIds : []
   dailyMedTakenIds = mergeDailyMedTakenIds(dailyMedTakenIds, todayDateKey())
+  powerTodos = Array.isArray(snapshot.powerTodos) ? snapshot.powerTodos : []
+  powerActionsDate = snapshot.powerActionsDate === todayDateKey() ? snapshot.powerActionsDate : todayDateKey()
+  powerPlans = snapshot.powerActionsDate === todayDateKey() && Array.isArray(snapshot.powerPlans) ? snapshot.powerPlans : []
+  const pendingPowerMerged = applyPendingPowerWrites(powerTodos, powerPlans, powerActionsDate)
+  powerTodos = pendingPowerMerged.todos
+  powerPlans = pendingPowerMerged.plans
   motivationVideos = await hydrateMotivationRows(snapshot.motivationRows || [])
   return true
 }
@@ -1562,7 +1865,8 @@ function readPending() {
     uncompletions: Array.isArray(pending.uncompletions) ? pending.uncompletions : [],
     weightLogs: pending.weightLogs && typeof pending.weightLogs === 'object' ? pending.weightLogs : {},
     dailyProgress: pending.dailyProgress && typeof pending.dailyProgress === 'object' ? pending.dailyProgress : null,
-    medToggles: pending.medToggles && typeof pending.medToggles === 'object' ? pending.medToggles : {}
+    medToggles: pending.medToggles && typeof pending.medToggles === 'object' ? pending.medToggles : {},
+    powerPlanWrites: pending.powerPlanWrites && typeof pending.powerPlanWrites === 'object' ? pending.powerPlanWrites : {}
   }
 }
 
@@ -1587,7 +1891,7 @@ let flushingPending = false
 async function flushPendingWrites() {
   if (!currentUser || flushingPending || navigator.onLine === false) return
   const pending = readPending()
-  if (!Object.keys(pending.weights).length && !pending.completions.length && !pending.uncompletions.length && !Object.keys(pending.weightLogs).length && !pending.dailyProgress && !Object.keys(pending.medToggles).length) return
+  if (!Object.keys(pending.weights).length && !pending.completions.length && !pending.uncompletions.length && !Object.keys(pending.weightLogs).length && !pending.dailyProgress && !Object.keys(pending.medToggles).length && !Object.keys(pending.powerPlanWrites).length) return
   flushingPending = true
   try {
     for (const [groupId, value] of Object.entries(pending.weights)) {
@@ -1666,6 +1970,33 @@ async function flushPendingWrites() {
         writePending(next)
       }
     }
+    if (powerActionsAvailable) {
+      for (const [key, item] of Object.entries(readPending().powerPlanWrites)) {
+        const { error: planError } = await supabase.from('power_action_plan').update({
+          status: item.status,
+          sort_order: item.sort_order,
+          started_at: item.started_at || null,
+          updated_at: item.updated_at || new Date().toISOString()
+        }).eq('id', item.plan_id)
+        if (planError) {
+          if (isMissingPowerActionsError(planError)) powerActionsAvailable = false
+          break
+        }
+        if (Object.prototype.hasOwnProperty.call(item, 'todo_completed_at')) {
+          const { error: todoError } = await supabase.from('power_todos').update({
+            completed_at: item.todo_completed_at,
+            updated_at: item.updated_at || new Date().toISOString()
+          }).eq('id', item.todo_id)
+          if (todoError) {
+            if (isMissingPowerActionsError(todoError)) powerActionsAvailable = false
+            break
+          }
+        }
+        const next = readPending()
+        if (next.powerPlanWrites[key]?.updated_at === item.updated_at) delete next.powerPlanWrites[key]
+        writePending(next)
+      }
+    }
     if (weightLogAvailable) {
       for (const [key, item] of Object.entries(pending.weightLogs)) {
         const { error } = await supabase.from('exercise_weight_log').upsert({
@@ -1703,7 +2034,9 @@ function dataSignature() {
     dailyProgress,
     dailyMeds.map((med) => [med.id, med.name, med.sort_order]),
     dailyMedsDate,
-    dailyMedTakenIds
+    dailyMedTakenIds,
+    powerTodos.map((todo) => [todo.id, todo.title, todo.sort_order]),
+    powerPlans.map((plan) => [plan.id, plan.todo_id, plan.action_date, plan.status, plan.sort_order, plan.started_at])
   ])
 }
 
@@ -2330,6 +2663,246 @@ async function deleteDailyMed(medId) {
   renderDay('', { forceOverview: true })
 }
 
+
+function renderPowerActionsLaunch() {
+  if (!powerActionsAvailable) {
+    return `
+      <section class="power-launch-card power-launch-setup">
+        <div><strong>Power actions</strong><small>Run the v1.16 SQL once</small></div>
+      </section>`
+  }
+  const plans = getTodayPowerPlans()
+  const pendingPlans = getPendingPowerPlans()
+  const inProgress = powerActionsInProgress()
+  const doneCount = plans.filter((plan) => plan.status === 'done').length
+  const skippedCount = plans.filter((plan) => plan.status === 'skipped').length
+  const finished = plans.length > 0 && pendingPlans.length === 0
+  const helper = pendingPlans.length
+    ? `${pendingPlans.length} ready`
+    : finished
+      ? `${doneCount} done${skippedCount ? ` · ${skippedCount} skipped` : ''}`
+      : 'Choose from Todos below'
+  return `
+    <button type="button" class="power-launch-card ${finished ? 'is-finished' : ''}" id="start-power-actions" ${pendingPlans.length ? '' : 'disabled'}>
+      <span class="power-launch-copy"><strong>${finished ? 'Power actions done' : (inProgress ? 'Continue power actions' : 'Start power actions')}</strong><small>${escapeHtml(helper)}</small></span>
+      ${pendingPlans.length ? '<span class="power-launch-arrow" aria-hidden="true">&rarr;</span>' : ''}
+    </button>`
+}
+
+function renderPowerTodos() {
+  if (!powerActionsAvailable) return ''
+  const plansByTodo = new Map(getTodayPowerPlans().map((plan) => [plan.todo_id, plan]))
+  const rows = powerTodos.map((todo) => {
+    const plan = plansByTodo.get(todo.id)
+    const selected = plan?.status === 'pending'
+    return `
+      <div class="power-todo-row">
+        <span class="power-todo-title">${escapeHtml(todo.title)}</span>
+        <button type="button" class="power-today-toggle ${selected ? 'is-selected' : ''}" data-power-today="${todo.id}" aria-pressed="${selected ? 'true' : 'false'}">${selected ? 'Today ✓' : 'Today'}</button>
+      </div>`
+  }).join('')
+
+  const editRows = powerTodos.map((todo) => `
+    <form class="power-todo-edit-row" data-power-todo-edit="${todo.id}">
+      <input name="title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required value="${escapeHtml(todo.title)}" aria-label="Todo title" />
+      <div class="power-todo-edit-actions">
+        <button type="submit" class="small-button">Save</button>
+        <button type="button" class="text-button danger-text" data-power-todo-delete="${todo.id}">Delete</button>
+      </div>
+    </form>`).join('')
+
+  return `
+    <details class="power-todos-card" id="power-todos-card">
+      <summary><span>Todos</span><span class="power-todos-count">${powerTodos.length}</span></summary>
+      <div class="power-todos-body">
+        <form id="add-power-todo" class="power-todo-add-form">
+          <input id="power-todo-title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Add a todo" aria-label="Add a todo" />
+          <button type="submit" class="primary-button">Add</button>
+        </form>
+        ${rows ? `<div class="power-todo-list">${rows}</div>` : '<div class="daily-editor-empty">Add todos here. Tap Today only for what you want battle angel to serve today.</div>'}
+        ${editRows ? `<details class="power-todo-manage"><summary>Edit todos</summary><div class="power-todo-edit-list">${editRows}</div></details>` : ''}
+        <div id="power-todos-status" class="status-line" aria-live="polite"></div>
+      </div>
+    </details>`
+}
+
+function bindPowerTodos() {
+  document.querySelector('#add-power-todo')?.addEventListener('submit', addPowerTodo)
+  document.querySelectorAll('[data-power-today]').forEach((button) => {
+    button.addEventListener('click', () => togglePowerTodoToday(button.dataset.powerToday))
+  })
+  document.querySelectorAll('[data-power-todo-edit]').forEach((form) => form.addEventListener('submit', updatePowerTodo))
+  document.querySelectorAll('[data-power-todo-delete]').forEach((button) => {
+    button.addEventListener('click', () => deletePowerTodo(button.dataset.powerTodoDelete))
+  })
+}
+
+async function addPowerTodo(event) {
+  event.preventDefault()
+  if (!currentUser || !powerActionsAvailable) return
+  const input = document.querySelector('#power-todo-title')
+  const status = document.querySelector('#power-todos-status')
+  const title = input?.value.trim().slice(0, POWER_TODO_TITLE_MAX)
+  if (!title) return
+  if (status) status.textContent = 'Saving...'
+  const nextOrder = Math.max(0, ...powerTodos.map((todo) => Number(todo.sort_order) || 0)) + 1
+  const { error } = await supabase.from('power_todos').insert({
+    user_id: currentUser.id,
+    title,
+    sort_order: nextOrder,
+    updated_at: new Date().toISOString()
+  })
+  if (error) {
+    if (status) status.textContent = isNetworkError(error) ? 'Connect to add todos.' : error.message
+    return
+  }
+  await loadPowerActions()
+  saveSnapshot()
+  renderDay('', { forceOverview: true })
+  const details = document.querySelector('#power-todos-card')
+  if (details) details.open = true
+}
+
+async function togglePowerTodoToday(todoId) {
+  if (!currentUser || !powerActionsAvailable) return
+  const todo = getPowerTodo(todoId)
+  if (!todo) return
+  const dateKey = todayDateKey()
+  const existing = getTodayPowerPlans().find((plan) => plan.todo_id === todoId)
+  if (existing?.status === 'pending') {
+    const { error } = await supabase.from('power_action_plan').delete().eq('id', existing.id)
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to change today\'s Power Actions.' : error.message)
+      return
+    }
+    clearPendingPowerWrite(existing.id)
+  } else if (existing) {
+    const nextOrder = Math.max(0, ...getPendingPowerPlans().map((plan) => Number(plan.sort_order) || 0)) + 1
+    const startedAt = powerActionsInProgress() ? (getPendingPowerPlans().find((plan) => plan.started_at)?.started_at || new Date().toISOString()) : null
+    const { error } = await supabase.from('power_action_plan').update({ status: 'pending', sort_order: nextOrder, started_at: startedAt, updated_at: new Date().toISOString() }).eq('id', existing.id)
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to change today\'s Power Actions.' : error.message)
+      return
+    }
+    clearPendingPowerWrite(existing.id)
+  } else {
+    const nextOrder = Math.max(0, ...getTodayPowerPlans().map((plan) => Number(plan.sort_order) || 0)) + 1
+    const startedAt = powerActionsInProgress() ? (getPendingPowerPlans().find((plan) => plan.started_at)?.started_at || new Date().toISOString()) : null
+    const { error } = await supabase.from('power_action_plan').insert({
+      user_id: currentUser.id,
+      todo_id: todoId,
+      action_date: dateKey,
+      status: 'pending',
+      sort_order: nextOrder,
+      started_at: startedAt,
+      updated_at: new Date().toISOString()
+    })
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to choose today\'s Power Actions.' : error.message)
+      return
+    }
+  }
+  await loadPowerActions()
+  saveSnapshot()
+  renderDay('', { forceOverview: true })
+  const details = document.querySelector('#power-todos-card')
+  if (details) details.open = true
+}
+
+async function updatePowerTodo(event) {
+  event.preventDefault()
+  const form = event.currentTarget
+  const id = form.dataset.powerTodoEdit
+  const title = form.elements.title.value.trim().slice(0, POWER_TODO_TITLE_MAX)
+  if (!title) return
+  const { error } = await supabase.from('power_todos').update({ title, updated_at: new Date().toISOString() }).eq('id', id)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit todos.' : error.message)
+    return
+  }
+  await loadPowerActions()
+  saveSnapshot()
+  renderDay('', { forceOverview: true })
+  const details = document.querySelector('#power-todos-card')
+  if (details) details.open = true
+}
+
+async function deletePowerTodo(todoId) {
+  const todo = getPowerTodo(todoId)
+  if (!todo || !confirm(`Delete "${todo.title}"?`)) return
+  const { error } = await supabase.from('power_todos').delete().eq('id', todoId)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit todos.' : error.message)
+    return
+  }
+  powerTodos = powerTodos.filter((item) => item.id !== todoId)
+  powerPlans = powerPlans.filter((plan) => plan.todo_id !== todoId)
+  const pending = readPending()
+  Object.keys(pending.powerPlanWrites).forEach((key) => {
+    if (pending.powerPlanWrites[key]?.todo_id === todoId) delete pending.powerPlanWrites[key]
+  })
+  writePending(pending)
+  await loadPowerActions()
+  saveSnapshot()
+  renderDay('', { forceOverview: true })
+  const details = document.querySelector('#power-todos-card')
+  if (details) details.open = true
+}
+
+function renderPowerActionsRunner() {
+  setActiveDayMode('power')
+  const pendingPlans = getPendingPowerPlans()
+  if (!pendingPlans.length) {
+    clearPowerUndo()
+    if (getActiveDayMode() === 'power') setActiveDayMode(null)
+    renderDay('', { forceOverview: true })
+    return
+  }
+  const plan = pendingPlans[0]
+  const todo = getPowerTodo(plan.todo_id)
+  if (!todo) {
+    renderDay('', { forceOverview: true })
+    return
+  }
+  const plans = getTodayPowerPlans()
+  const resolvedCount = plans.filter((item) => item.status === 'done' || item.status === 'skipped').length
+  const actionNumber = resolvedCount + 1
+  const actionTotal = resolvedCount + pendingPlans.length
+  const canLater = pendingPlans.length > 1
+
+  renderShell(`
+    <div class="day-runner-screen power-runner-screen">
+      <div class="day-runner-top">
+        <div class="day-runner-position">${actionNumber} of ${actionTotal}</div>
+        <details class="day-runner-menu">
+          <summary aria-label="Power action options">•••</summary>
+          <div class="day-runner-menu-popover">
+            <button type="button" class="text-button" id="exit-power-runner">Exit power actions</button>
+          </div>
+        </details>
+      </div>
+      <section class="day-step-card power-step-card" aria-label="Current power action: ${escapeHtml(todo.title)}">
+        <div class="day-step-parent">Power action</div>
+        <h2>${escapeHtml(todo.title)}</h2>
+      </section>
+      <div class="day-action-controls" aria-label="Power action controls">
+        <div class="day-secondary-actions">
+          ${canLater ? '<button type="button" class="day-option-button" id="later-power-action">Later today</button>' : ''}
+          <button type="button" class="day-option-button" id="skip-power-action">Skip today</button>
+        </div>
+        <button type="button" class="day-primary-action" id="done-power-action">DONE <span aria-hidden="true">&rarr;</span></button>
+      </div>
+      ${renderPowerUndoToast()}
+    </div>`,
+    { title: 'Power actions', showAccount: false, showTimer: false, showHeader: false, view: 'day-runner' })
+
+  document.querySelector('#done-power-action')?.addEventListener('click', () => completePowerAction(plan.id))
+  document.querySelector('#skip-power-action')?.addEventListener('click', () => skipPowerAction(plan.id))
+  document.querySelector('#later-power-action')?.addEventListener('click', () => deferPowerAction(plan.id))
+  document.querySelector('#exit-power-runner')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
+  bindPowerUndoToast()
+}
+
 function renderDay(errorMessage = '', options = {}) {
   activeFolder = null
   activeExerciseGroups = []
@@ -2351,9 +2924,25 @@ function renderDay(errorMessage = '', options = {}) {
 
   // Once the day has started, opening battle angel goes straight back to the next action.
   // Exit is the deliberate escape hatch to edit or inspect the routine.
-  if (inProgress && !options.forceOverview && !errorMessage) {
-    renderDayRunner()
-    return
+  const powerInProgress = powerActionsInProgress()
+  const activeDayMode = getActiveDayMode()
+  if (!options.forceOverview && !errorMessage) {
+    if (activeDayMode === 'power' && powerInProgress) {
+      renderPowerActionsRunner()
+      return
+    }
+    if (activeDayMode === 'daily' && inProgress) {
+      renderDayRunner()
+      return
+    }
+    if (inProgress) {
+      renderDayRunner()
+      return
+    }
+    if (powerInProgress) {
+      renderPowerActionsRunner()
+      return
+    }
   }
 
   let mainCard = ''
@@ -2384,16 +2973,21 @@ function renderDay(errorMessage = '', options = {}) {
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${usingCachedData ? '<div class="offline-note">Offline · saved routine available</div>' : ''}
     ${mainCard}
+    ${renderPowerActionsLaunch()}
     ${renderDailyEditor()}
-    ${renderDailyMeds()}`,
+    ${renderDailyMeds()}
+    ${renderPowerTodos()}`,
     { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
 
   document.querySelector('#start-day')?.addEventListener('click', startDailySystem)
+  document.querySelector('#start-power-actions')?.addEventListener('click', startPowerActions)
   bindDailyEditor()
   bindDailyMeds()
+  bindPowerTodos()
 }
 
 function renderDayRunner() {
+  setActiveDayMode('daily')
   if (!dailySteps.length) {
     renderDay()
     return
@@ -4854,6 +5448,13 @@ document.addEventListener('visibilitychange', () => {
     dailyMedsDate = todayDateKey()
     dailyMedTakenIds = mergeDailyMedTakenIds([], dailyMedsDate)
     loadDailyMeds().then(() => {
+      if (['day', 'day-overview'].includes(currentView)) renderDay('', { forceOverview: currentView === 'day-overview' })
+    }).catch(() => {})
+  }
+  if (powerActionsDate !== todayDateKey()) {
+    powerActionsDate = todayDateKey()
+    powerPlans = []
+    loadPowerActions().then(() => {
       if (['day', 'day-overview'].includes(currentView)) renderDay('', { forceOverview: currentView === 'day-overview' })
     }).catch(() => {})
   }

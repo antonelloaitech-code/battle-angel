@@ -8,7 +8,7 @@ battle angel is a low-friction daily-system + gym app: set your routine and work
 
 The app is split into four simple tabs so the screen stays quiet:
 
-- **Day** — your daily system. Tap Start and battle angel shows one step at a time.
+- **Day** — two separate execution lanes: your recurring Daily Autopilot and today's one-off Power Actions. Both run one card at a time.
 - **Gym** — today's planned gym modules, resume, offline video prep, and access to all workouts.
 - **Plan** — calendar, recurring weekly plan, and repeat-last-week.
 - **More** — motivation videos and photos, theme, backup, and sign out.
@@ -95,6 +95,8 @@ Your existing Netlify environment variables remain:
 - Daily routine progress by date: `daily_progress`
 - Daily medication list: `daily_meds`
 - Daily medication checkmarks by date: `daily_med_log`
+- Master todo list: `power_todos`
+- Today's Power Action selections/status: `power_action_plan`
 - Videos: private `gym-videos` Supabase Storage bucket
 
 Row Level Security limits data and Storage objects to the signed-in account. Video playback uses temporary signed URLs.
@@ -107,7 +109,7 @@ Videos over 12 MB are compressed on the phone before uploading (H.264 MP4, up to
 
 ## backup
 
-Open **More -> Backup library** to create a ZIP containing the workout library, planning data, motivation references, and uploaded videos. Save the ZIP somewhere independent such as iCloud Drive or your computer.
+Open **More -> Backup library** to create a ZIP containing the workout library, planning data, Daily System, meds, Power Actions/todos, motivation references, and uploaded videos. Save the ZIP somewhere independent such as iCloud Drive or your computer.
 
 ## v1.8 — multiple workouts per day + rest lock screen
 
@@ -301,3 +303,18 @@ No database changes.
 - Medication checks work from the phone cache and sync to Supabase when online.
 - Backups now include the medication list and daily taken log.
 - The tracker records only what you enter and whether you marked it taken; it does not make dosing decisions or change your routine automatically.
+
+
+## v1.16 — Power Actions
+
+**Database:** run the whole `supabase/schema.sql` once, or run `supabase/power_actions_upgrade.sql`. This is additive only and does not delete gym data, routine steps, meds, videos, plans, history, or weights.
+
+- Daily Autopilot and one-off todos are intentionally separate. The recurring routine stays your fixed daily sequence.
+- Directly under the Start Day card is a compact **Start power actions** card for only the todos you chose for today.
+- **Todos** is a dedicated collapsed section. Add a todo once, then tap **Today** beside only the items you want served today.
+- Power Actions use the same one-card execution model as Daily Autopilot: one action, one large **DONE** button, plus **Later today** and **Skip today**.
+- **Done** permanently completes that todo and removes it from the active todo list. **Skip today** leaves the todo in the master list for another day. **Later today** moves it behind the remaining Power Actions for today.
+- Today's selections are date-specific. A new day starts with zero Power Actions selected, while unfinished todos remain available in the master list.
+- If Power Actions were started and the app closes, battle angel resumes the current Power Action automatically when the fixed Daily routine is not actively running.
+- Power Action execution is cached locally and queued for Supabase sync, matching the app's low-friction/offline-first behavior.
+- Backups include the master todo list and dated Power Action plan/history.
