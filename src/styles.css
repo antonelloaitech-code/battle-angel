@@ -12,9 +12,9 @@
   --text: #f3f5f4;
   --muted: #9ca5a2;
   --border: #2d3334;
-  --accent: #57b98d;
-  --accent-dark: #8ad2b2;
-  --accent-soft: #17352a;
+  --accent: #f651bf;
+  --accent-dark: #fb9ddc;
+  --accent-soft: #3e1430;
   --danger: #f08a8a;
   --danger-soft: #3a1f21;
   --gold: #e2b84f;
@@ -34,9 +34,9 @@
   --text: #161616;
   --muted: #6e6e67;
   --border: #dcdcd4;
-  --accent: #17684f;
-  --accent-dark: #0e4f3c;
-  --accent-soft: #dcece6;
+  --accent: #ba1282;
+  --accent-dark: #890b5f;
+  --accent-soft: #fbe0f2;
   --danger: #a13d3d;
   --danger-soft: #f6e6e6;
   --gold: #b8871b;
@@ -3598,3 +3598,731 @@ body.day-runner-active {
     justify-self: end;
   }
 }
+
+/* v1.18 — Action Engine: triage, 5-minute start, momentum, low-energy days, wins */
+
+/* Runner head: running score + thin progress line */
+.runner-head {
+  display: grid;
+  gap: 8px;
+}
+
+.runner-score {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.runner-score strong {
+  color: var(--accent-dark);
+  font-size: 1.02rem;
+  font-weight: 900;
+}
+
+.runner-progress,
+.day-start-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--surface-strong);
+}
+
+.runner-progress span,
+.day-start-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 280ms ease;
+}
+
+.day-start-progress {
+  margin-top: 14px;
+}
+
+.runner-meds-pill {
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  border: 1px solid color-mix(in srgb, var(--gold) 55%, var(--border));
+  border-radius: 999px;
+  background: var(--gold-soft);
+  color: var(--gold-text);
+  font-size: 0.78rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+/* The DONE moment: a check lands on the card before the next one slides in. */
+.day-step-card > * {
+  transition: opacity 120ms ease;
+}
+
+.day-step-card.is-done {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: var(--accent-soft);
+  animation: none;
+}
+
+.day-step-card.is-done > * {
+  opacity: 0.18;
+}
+
+.day-step-card.is-done::after {
+  content: "\2713";
+  position: absolute;
+  inset: 0;
+  width: 104px;
+  height: 104px;
+  margin: auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 3.2rem;
+  font-weight: 900;
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--accent) 40%, transparent);
+  animation: done-pop 300ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes done-pop {
+  from { transform: scale(0.35); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Paralysis tools on the card */
+.card-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin-top: 2px;
+}
+
+.sprint-pill {
+  position: relative;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  padding: 10px 18px;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent-dark);
+  font-size: 0.95rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.sprint-pill > span {
+  position: relative;
+  z-index: 1;
+}
+
+.sprint-pill .sprint-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 0;
+  background: var(--accent-soft);
+  transition: width 500ms linear;
+}
+
+.sprint-pill .sprint-time {
+  font-size: 1.08rem;
+}
+
+.sprint-pill .sprint-label {
+  font-weight: 850;
+}
+
+.sprint-pill[data-state="running"] {
+  border-color: var(--accent);
+}
+
+.sprint-pill[data-state="ended"] {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.card-link {
+  min-height: 40px;
+  padding: 6px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.defer-nudge {
+  max-width: 34rem;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
+  border-radius: 14px;
+  background: var(--gold-soft);
+  color: var(--text);
+  font-size: 0.93rem;
+  line-height: 1.42;
+}
+
+.defer-nudge strong {
+  color: var(--gold-text);
+}
+
+/* Triage: same one-card screen as the runner */
+.triage-exit {
+  min-height: 40px;
+  flex: 0 0 auto;
+  padding: 7px 15px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.triage-card h2 {
+  font-size: clamp(1.9rem, 9vw, 3.3rem);
+}
+
+.triage-count-line {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.triage-picked {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 1.3em;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+/* Bottom sheets (capture, shrink it, meds) */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  align-items: end;
+  background: color-mix(in srgb, #000 45%, transparent);
+  padding: 14px max(14px, env(safe-area-inset-right, 0px)) max(14px, calc(env(safe-area-inset-bottom, 0px) + 10px)) max(14px, env(safe-area-inset-left, 0px));
+  animation: sheet-fade 140ms ease-out;
+}
+
+.sheet {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 40px);
+  margin: 0 auto;
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.3);
+  animation: sheet-up 180ms ease-out;
+}
+
+.sheet .runner-capture-form {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sheet-head strong {
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.sheet-close {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sheet-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.sheet-copy strong {
+  color: var(--text);
+}
+
+.sheet-hint {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.meds-sheet-list {
+  padding: 8px 0 0;
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(18px); opacity: 0.6; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes sheet-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Toasts float above the bottom nav; in the full-screen runner they sit up top, away from the buttons. */
+#toast-host .day-undo-toast {
+  bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 74px);
+}
+
+body.day-runner-active #toast-host .day-undo-toast {
+  top: calc(env(safe-area-inset-top, 0px) + 64px);
+  bottom: auto;
+}
+
+body.day-runner-active #toast-host .day-undo-toast.is-hiding {
+  transform: translate(-50%, -8px);
+}
+
+/* Day overview */
+.day-start-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-top: 8px;
+}
+
+.quiet-link {
+  min-height: 40px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.day-stack-start-card.is-low-energy {
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--border));
+}
+
+.triage-launch {
+  width: 100%;
+  min-height: 56px;
+  margin-top: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
+  border-radius: 14px;
+  background: var(--gold-soft);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.triage-launch-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.triage-launch-copy strong {
+  font-weight: 900;
+}
+
+.triage-launch-copy small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.triage-launch-count {
+  min-width: 30px;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--gold-text);
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.today-load-line {
+  padding: 10px 2px 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.today-load-line.is-heavy {
+  color: var(--gold-text);
+  font-weight: 850;
+}
+
+.today-stack-row.is-done {
+  opacity: 0.5;
+}
+
+.today-stack-row.is-done strong {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.today-inbox-choice small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+/* Inbox rows: title + Save on top, meta (age · size · snooze) and Delete underneath, so each line clearly belongs to its own item. */
+.todo-inbox-row.has-meta {
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.todo-inbox-row.has-meta:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.todo-inbox-row.has-meta .todo-inbox-meta {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: center;
+  min-width: 0;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.todo-inbox-row.has-meta .text-button {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+  min-height: 36px;
+}
+
+/* Routine editor: core steps */
+.daily-add-form .core-check,
+.daily-edit-form .core-check,
+.core-check {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.core-check input {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.core-check strong {
+  color: var(--text);
+}
+
+.core-badge {
+  margin-left: 7px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+/* Wins */
+.day-complete-card .wins-summary {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.win-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.win-chip {
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 0.84rem;
+  font-weight: 850;
+  overflow-wrap: anywhere;
+}
+
+.win-chip.is-workout {
+  background: var(--gold-soft);
+  color: var(--gold-text);
+}
+
+.wins-list {
+  margin-top: 12px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.wins-list summary {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wins-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.day-complete-card .wins-note {
+  font-size: 0.86rem;
+}
+
+.day-complete-card.is-celebrating {
+  animation: day-complete-pop 520ms cubic-bezier(0.2, 1.2, 0.4, 1);
+}
+
+.day-complete-card.is-celebrating .day-complete-mark {
+  animation: done-pop 420ms 120ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes day-complete-pop {
+  from { transform: scale(0.96); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
+
+/* Gym: decide-for-me suggestion + finish card week progress */
+.gym-suggestion {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 15px;
+  background: var(--surface-soft);
+}
+
+.gym-suggestion span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gym-suggestion strong {
+  font-size: 1.4rem;
+  font-weight: 900;
+  letter-spacing: -0.025em;
+}
+
+.gym-suggestion small {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.gym-choose-other {
+  width: 100%;
+  text-align: center;
+}
+
+.finish-week {
+  display: grid;
+  justify-items: center;
+  margin: 2px 0 20px;
+}
+
+.finish-week .week-progress {
+  margin: 0;
+  justify-content: center;
+}
+
+/* More: feedback settings */
+.settings-row {
+  width: 100%;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface-soft);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-row > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-row strong {
+  font-weight: 850;
+}
+
+.settings-row small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.settings-state {
+  min-width: 46px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+.settings-row.is-on .settings-state {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.db-upgrade-note {
+  margin-top: 6px;
+  padding: 9px 11px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 380px) {
+  .runner-score { font-size: 0.76rem; gap: 6px; }
+  .runner-meds-pill { padding-inline: 9px; }
+  .sprint-pill { padding-inline: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .day-step-card.is-done::after,
+  .day-complete-card.is-celebrating,
+  .day-complete-card.is-celebrating .day-complete-mark,
+  .sheet,
+  .sheet-backdrop {
+    animation: none !important;
+  }
+
+  .runner-progress span,
+  .day-start-progress span,
+  .sprint-pill .sprint-fill {
+    transition: none;
+  }
+}
+
+/* The runner blocks text selection; typing in a sheet must still work everywhere. */
+.sheet input,
+.sheet textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* v1.18.1 — zero-decision start: paralysis tools appear only when you're stuck */
+.stuck-tools {
+  animation: stuck-in 260ms ease-out;
+}
+
+.stuck-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@keyframes stuck-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stuck-tools { animation: none; }
+}
+
