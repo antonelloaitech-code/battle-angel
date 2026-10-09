@@ -160,9 +160,9 @@ No new database changes. If you haven't run `supabase/multi_workout_upgrade.sql`
 Photos need the storage bucket to accept images. This is included in `supabase/schema.sql`.
 
 **Golden weeks**
-- When 4 or more workouts are marked done in a calendar week (Monday to Sunday, one row), that row turns gold.
-- Each module counts once, so Chest + Triceps on the same day counts as 2.
-- The selected day in Plan shows how close the week is: "2 of 4 done this week".
+- When 4 or more different days have a workout done in a calendar week (Monday to Sunday, one row), that row turns gold. (Since v1.23.2; before that it counted workouts.)
+- Two workouts on the same day count as one day.
+- The selected day in Destiny shows how close the week is: "2 of 4 days trained this week".
 - Days with a finished workout show a ✓ in the calendar.
 
 **Log past days**
@@ -527,3 +527,7 @@ No database changes.
 ## v1.23.1 — soft pastel pink
 
 The accent is now a soft pastel pink: `#f4a4cf` in dark mode, `#ea86bb` in light mode. Buttons and badges on pink use dark text so they stay easy to read. No database changes.
+
+## v1.23.2 — golden week = 4 days trained
+
+A golden week now takes **4 different days** with at least one workout done that week (Monday to Sunday). Two workouts on the same day count as one day. The week bar reads "2 of 4 days trained this week", a golden week reads "Golden week · 5 days trained", and streaks follow the same rule. No database changes.

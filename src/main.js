@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.23.1'
+const APP_VERSION = '1.23.2'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -27,6 +27,7 @@ const IMAGE_JPEG_QUALITY = 0.82
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm'])
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'])
 const MOTIVATION_IMAGE_SECONDS = 6
+// A golden week is 4 days with at least one workout done (two workouts on one day is still one day).
 const GOLDEN_WEEK_TARGET = 4
 const HISTORY_LOOKBACK_DAYS = 400
 const AUTO_RESUME_WINDOW_MS = 12 * 60 * 60 * 1000
@@ -5857,11 +5858,13 @@ function getDayFolders(dateKey) {
   return [...planned, ...getCompletedFolders(dateKey).filter((folder) => !plannedIds.has(folder.id))]
 }
 
-// Each workout module marked done counts once (Chest + Triceps on one day = 2).
+// Days in the week with at least one workout done. Chest + Triceps on Monday = 1 day.
 function weekDoneCount(weekStartKey) {
-  let count = 0
-  for (let i = 0; i < 7; i += 1) count += getCompletedFolders(addDaysKey(weekStartKey, i)).length
-  return count
+  let days = 0
+  for (let i = 0; i < 7; i += 1) {
+    if (getCompletedFolders(addDaysKey(weekStartKey, i)).length) days += 1
+  }
+  return days
 }
 
 function isGoldenWeek(weekStartKey) {
@@ -5931,10 +5934,10 @@ function renderWeekProgress(dateKey, options = {}) {
   const done = weekDoneCount(startOfWeekKey(dateKey))
   const streak = options.streak ? renderStreakLine() : ''
   if (done >= GOLDEN_WEEK_TARGET) {
-    return `<div class="week-progress is-golden">Golden week · ${done} workouts done</div>${streak}`
+    return `<div class="week-progress is-golden">Golden week · ${plural(done, 'day')} trained</div>${streak}`
   }
   const pips = Array.from({ length: GOLDEN_WEEK_TARGET }, (_, i) => `<span class="week-pip ${i < done ? 'filled' : ''}"></span>`).join('')
-  return `<div class="week-progress"><span class="week-pips" aria-hidden="true">${pips}</span>${done} of ${GOLDEN_WEEK_TARGET} done this week</div>${streak}`
+  return `<div class="week-progress"><span class="week-pips" aria-hidden="true">${pips}</span>${done} of ${GOLDEN_WEEK_TARGET} days trained this week</div>${streak}`
 }
 
 function renderDoneControls(dateKey) {
