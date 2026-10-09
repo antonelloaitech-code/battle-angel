@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.22.0'
+const APP_VERSION = '1.23.1'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -40,7 +40,8 @@ const DAILY_SUBSTEP_MAX = 20
 const DAILY_MED_NAME_MAX = 120
 const POWER_TODO_TITLE_MAX = 160
 // v1.18 Action Engine
-const TODAY_TODO_TARGET = 3
+// Up to five power actions a day, ranked by importance.
+const TODAY_TODO_TARGET = 5
 const SPRINT_MINUTES = 5
 const DEFER_NUDGE_AT = 2
 const SNOOZE_STEPS_DAYS = [1, 3, 7]
@@ -5963,7 +5964,14 @@ function renderPlanner(errorMessage = '') {
   const selectedIds = new Set(selectedFolders.map((folder) => folder.id))
   const weeklyFolders = getWeeklyFolders(plannerSelectedDate)
   const tomorrowKey = addDaysKey(plannerSelectedDate, 1)
-  const folderButtons = folders.map((folder) => `
+  // A past day is about what you did, not what you planned: one tap logs a workout as done.
+  const logging = plannerSelectedDate < todayDateKey() && canMarkDone()
+  const doneIds = new Set(getCompletedFolders(plannerSelectedDate).map((folder) => folder.id))
+  const missedPlan = selectedFolders.some((folder) => !doneIds.has(folder.id))
+  const folderButtons = folders.map((folder) => logging
+    ? `
+    <button type="button" class="plan-muscle-button log-button ${doneIds.has(folder.id) ? 'is-logged' : ''} ${selectedIds.has(folder.id) && !doneIds.has(folder.id) ? 'is-planned' : ''}" data-log-folder="${folder.id}" aria-pressed="${doneIds.has(folder.id)}">${doneIds.has(folder.id) ? '<span aria-hidden="true">&#10003;</span> ' : ''}${escapeHtml(folder.name)}</button>`
+    : `
     <button type="button" class="plan-muscle-button ${selectedIds.has(folder.id) ? 'selected' : ''}" data-schedule-folder="${folder.id}">${escapeHtml(folder.name)}</button>`).join('')
   const moveOptions = selectedFolders.map((folder) => `<option value="${folder.id}">${escapeHtml(folder.name)}</option>`).join('')
 
@@ -5985,12 +5993,13 @@ function renderPlanner(errorMessage = '') {
       <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
     </div>
     <div class="calendar-grid" aria-label="Workout calendar">${calendarCells(plannerMonthStart)}</div>
-    ${canMarkDone() ? '<div class="calendar-hint">Hold a day to mark it done</div>' : ''}
+    ${canMarkDone() ? '<div class="calendar-hint">Tap a past day to log what you trained. Hold a day to mark its plan done.</div>' : ''}
     <section class="plan-day-editor">
       <div class="plan-day-title">${escapeHtml(formatPlanDate(plannerSelectedDate))}</div>
       ${renderWeekProgress(plannerSelectedDate, { streak: startOfWeekKey(plannerSelectedDate) === startOfWeekKey(todayDateKey()) })}
+      ${logging ? `<div class="plan-log-head"><strong>What did you train?</strong><span>Tap to mark done, tap again to undo.${missedPlan ? ' Outlined: planned, not done yet.' : ''}</span></div>` : ''}
       <div class="plan-muscle-grid">${folderButtons}</div>
-      ${renderDoneControls(plannerSelectedDate)}
+      ${logging ? '' : renderDoneControls(plannerSelectedDate)}
       ${selectedFolders.length ? `<div class="plan-day-actions">
         <details class="move-plan">
           <summary>Move</summary>
@@ -6059,6 +6068,9 @@ function renderPlanner(errorMessage = '') {
   })
   document.querySelectorAll('[data-schedule-folder]').forEach((button) => {
     button.addEventListener('click', () => toggleScheduledWorkout(plannerSelectedDate, button.dataset.scheduleFolder))
+  })
+  document.querySelectorAll('[data-log-folder]').forEach((button) => {
+    button.addEventListener('click', () => logPastWorkout(plannerSelectedDate, button.dataset.logFolder))
   })
   document.querySelectorAll('[data-done-folder]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -6287,6 +6299,20 @@ async function setWorkoutDone(dateKey, folderId, done) {
   await flushPendingWrites()
 }
 
+// Past day in Destiny: one tap logs (or un-logs) a workout, no planning first.
+async function logPastWorkout(dateKey, folderId) {
+  const folder = folders.find((item) => item.id === folderId)
+  if (!folder || !canMarkDone() || dateKey > todayDateKey()) return
+  const done = !wasWorkoutCompleted(dateKey, folderId)
+  plannerStatusMessage = `${folder.name} on ${formatPlanDate(dateKey, { short: true })}: ${done ? 'done ✓' : 'undone'}.`
+  if (done) {
+    unlockAudio()
+    playDoneTick()
+    vibrate(12)
+  }
+  await setWorkoutDone(dateKey, folderId, done)
+}
+
 // Long-press a day on the calendar: marks every workout on that day done, or undoes them if all are done.
 async function quickToggleDayDone(dateKey) {
   plannerSelectedDate = dateKey
@@ -6302,7 +6328,7 @@ async function quickToggleDayDone(dateKey) {
   }
   const dayFolders = getDayFolders(dateKey)
   if (!dayFolders.length) {
-    plannerStatusMessage = 'Pick the muscles you trained below, then hold the day again.'
+    plannerStatusMessage = dateKey < todayDateKey() ? 'Tap what you trained below.' : 'Pick the muscles you trained below, then hold the day again.'
     renderPlanner()
     return
   }

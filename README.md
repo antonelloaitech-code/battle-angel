@@ -508,3 +508,22 @@ No database changes.
 ### Tab names
 
 - **Gifts · Forge · Destiny · More**. Forge is the gym, Destiny is the calendar. The workout card says *battle angel workout · Forge*.
+
+## v1.23 — log past workouts with one tap, up to 5 power actions
+
+No database changes.
+
+### Past workouts
+
+- In **Destiny**, tap any past day. It asks **What did you train?** and shows all your workouts.
+- **One tap marks a workout done** for that day (pink with a check), tap again to undo. No planning first. Planned workouts you didn't mark yet are outlined, so a missed one stands out.
+- The calendar day gets its check and golden weeks count it right away. Works offline too; it syncs when you're back online.
+- Today and future days still plan the way they did. Holding a day still marks its whole plan done.
+
+### Power actions
+
+- The morning question now takes **up to 5** power actions, still tapped in order of importance. The sixth tap is refused with a note, so the day stays winnable.
+
+## v1.23.1 — soft pastel pink
+
+The accent is now a soft pastel pink: `#f4a4cf` in dark mode, `#ea86bb` in light mode. Buttons and badges on pink use dark text so they stay easy to read. No database changes.

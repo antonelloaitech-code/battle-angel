@@ -12,9 +12,11 @@
   --text: #f3f5f4;
   --muted: #9ca5a2;
   --border: #2d3334;
-  --accent: #f651bf;
-  --accent-dark: #fb9ddc;
-  --accent-soft: #3e1430;
+  --accent: #f4a4cf;
+  --accent-dark: #f7badb;
+  --accent-soft: #3f2231;
+  /* Text on the pastel accent is dark, so it stays easy to read. */
+  --on-accent: #2b1222;
   --danger: #f08a8a;
   --danger-soft: #3a1f21;
   --gold: #e2b84f;
@@ -34,9 +36,10 @@
   --text: #161616;
   --muted: #6e6e67;
   --border: #dcdcd4;
-  --accent: #ba1282;
-  --accent-dark: #890b5f;
-  --accent-soft: #fbe0f2;
+  --accent: #ea86bb;
+  --accent-dark: #8f285f;
+  --accent-soft: #fae0ee;
+  --on-accent: #35102a;
   --danger: #a13d3d;
   --danger-soft: #f6e6e6;
   --gold: #b8871b;
@@ -213,7 +216,7 @@ h2 {
 .big-action {
   border: 1px solid transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .primary-button {
@@ -223,7 +226,7 @@ h2 {
 .primary-button:active,
 .start-workout-button:active,
 .big-action:active {
-  background: var(--accent-dark);
+  background: color-mix(in srgb, var(--accent) 84%, #000);
 }
 
 .secondary-button,
@@ -1071,7 +1074,7 @@ input::placeholder { color: #97978f; }
 .set-dot.done {
   border-color: transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .micro-status {
@@ -1119,7 +1122,7 @@ input::placeholder { color: #97978f; }
   margin: 0 auto 15px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 1.8rem;
   font-weight: 900;
 }
@@ -2785,7 +2788,7 @@ textarea:focus-visible {
   border: 1px solid transparent;
   border-radius: 20px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   padding: 14px 20px;
   display: flex;
   align-items: center;
@@ -2797,7 +2800,7 @@ textarea:focus-visible {
 }
 
 .day-primary-action:active {
-  background: var(--accent-dark);
+  background: color-mix(in srgb, var(--accent) 84%, #000);
   transform: scale(0.99);
 }
 
@@ -3685,7 +3688,7 @@ body.day-runner-active {
   place-items: center;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 3.2rem;
   font-weight: 900;
   box-shadow: 0 12px 40px color-mix(in srgb, var(--accent) 40%, transparent);
@@ -3752,7 +3755,7 @@ body.day-runner-active {
 .sprint-pill[data-state="ended"] {
   border-color: transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .card-link {
@@ -4447,7 +4450,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
 
 .slot.is-filled .slot-num {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .slot.is-new .slot-num { animation: slot-pop 280ms cubic-bezier(0.2, 0.9, 0.3, 1.35); }
@@ -4755,13 +4758,13 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   border: 0;
   border-radius: 18px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 1.12rem;
   font-weight: 900;
   cursor: pointer;
 }
 
-.day-hero-cta:active { background: var(--accent-dark); }
+.day-hero-cta:active { background: color-mix(in srgb, var(--accent) 84%, #000); }
 
 .day-hero-tools {
   display: flex;
@@ -4834,7 +4837,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
 .day-section-action.is-active {
   border-color: transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .day-section-note {
@@ -4892,7 +4895,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   place-items: center;
   border-radius: 14px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 1.35rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
@@ -4991,7 +4994,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   background: var(--accent);
 }
 
-.order-row.is-now .order-mark.is-power { color: #fff; }
+.order-row.is-now .order-mark.is-power { color: var(--on-accent); }
 
 .order-row.is-now .order-copy small {
   color: var(--accent-dark);
@@ -5286,7 +5289,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
 .day-toggle[aria-pressed="true"] {
   border-color: transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .day-picker-summary {
@@ -5387,12 +5390,12 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
 }
 
 .glance-row.is-now .glance-mark { border-color: var(--accent); }
-.glance-row.is-now .glance-mark.is-power { background: var(--accent); color: #fff; }
+.glance-row.is-now .glance-mark.is-power { background: var(--accent); color: var(--on-accent); }
 
 .glance-row.is-done .glance-mark {
   border-color: transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .glance-row.is-skipped .glance-mark {
@@ -5481,6 +5484,37 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   .glance-row.is-changed .glance-mark { animation: none; }
 }
 
+/* ---- v1.23: log a past day's workouts with one tap ---- */
+.plan-log-head {
+  display: grid;
+  gap: 3px;
+  margin: 4px 0 10px;
+}
+
+.plan-log-head strong {
+  font-size: 0.98rem;
+  font-weight: 900;
+}
+
+.plan-log-head span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.plan-muscle-button.is-planned { border: 1.5px dashed var(--accent); }
+
+.plan-muscle-button.is-logged {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Five slots fit the morning screen: the empty ones stay slim. */
+.slot.is-empty { min-height: 50px; }
+.slot.is-empty .slot-num { height: 32px; font-size: 1.3rem; }
+
 /* ---- v1.22: finish my day ---- */
 .finish-day-cta { margin-top: 18px; }
 .finish-day-note { margin-top: 8px; }
@@ -5507,7 +5541,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: #f651bf;
+  background: #f4a4cf;
   transition: width 500ms linear;
 }
 
@@ -5566,7 +5600,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
 
 .finish-question-sign {
   margin: 0;
-  color: #f651bf;
+  color: #f4a4cf;
   font-size: 1.25rem;
   font-weight: 900;
   letter-spacing: 0.01em;
