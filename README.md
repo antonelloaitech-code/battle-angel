@@ -8,9 +8,9 @@ battle angel is a low-friction daily-system + gym app built for an ADHD brain: s
 
 The app is split into four simple tabs so the screen stays quiet:
 
-- **Day** — each morning it asks which power actions you're getting done today, then serves your routine and those power actions one card at a time. **Today** (top right) opens the whole day: power actions, boosters, today's order, Inbox, and setup.
-- **Gym** — today's planned gym modules, resume, offline video prep, and access to all workouts.
-- **Plan** — calendar, recurring weekly plan, and repeat-last-week.
+- **Gifts** (the day) — each morning it asks which power actions you're getting done today, then serves your routine and those power actions one card at a time. The **eye** (top left) shows every card of today; tap any to mark it done. **Open the full day** in there has power actions, boosters, today's order, Inbox, and setup.
+- **Forge** (the gym) — today's planned workouts, resume, offline video prep, and access to all workouts.
+- **Destiny** (the calendar) — calendar, recurring weekly plan, and repeat-last-week.
 - **More** — motivation videos and photos, theme, backup, and sign out.
 
 ## exercise creation
@@ -93,6 +93,7 @@ Your existing Netlify environment variables remain:
 - Completed-workout markers: `workout_history`
 - Daily routine steps: `daily_steps`
 - Daily routine progress by date: `daily_progress`
+- Routine steps: `daily_steps` (`weekdays` = the days a step runs, `opens_workout` = the step that opens today's workout)
 - Boosters list: `daily_meds` (shown as Boosters in the app)
 - Boosters checkmarks by date: `daily_med_log`
 - Master todo list: `power_todos`
@@ -448,3 +449,62 @@ No database changes. Everything you have stays as it is.
   5. **Inbox**: dump a thought; your backlog, newest first, without today's picks repeated (Sort, Edit)
   6. **Setup**: **Edit routine** and **Edit boosters**, two matching rows that each open their own screen with a back button
 - Editing never happens in the middle of the overview anymore, so the page stays about today.
+
+## v1.20 — routine steps on chosen days, a workout step that opens Train, new tab names
+
+**Database:** run `supabase/routine_upgrade.sql` once in the Supabase SQL editor (or the whole `supabase/schema.sql`, always safe). It only adds two columns to `daily_steps`; nothing is deleted or changed. The last query prints `true` twice. Until it runs, battle angel keeps working: every step runs every day, and steps with gym, workout or training in their name still open the workout. More shows a reminder.
+
+### Steps on chosen days
+
+- **Edit routine** → open a step → **Days**: seven buttons, Monday first. All on means every day. Turn off the days it shouldn't run. The last day can't be switched off.
+- New steps get the same buttons right under the name.
+- On days a step doesn't run, it's simply not in your autopilot. **Today's order** says so ("Not on Thursdays: Laundry."), so nothing looks lost.
+- The step list shows each step's days: Weekdays, Weekends, or Mon, Wed, Fri.
+
+### Your workout step opens Train
+
+- A routine step with **workout**, **gym** or **training** in its name (like "battle angel workout") is your workout card. Any step can be linked or unlinked with **Opens today's workout** in Edit routine.
+- On the card, **START BACK** (or whatever Calendar planned for today) goes straight into that workout. Nothing planned? It suggests the muscle you trained least recently, with **Choose another**.
+- A workout you paused shows **RESUME**.
+- Finish the workout and you're back on your day with the step checked off. Did the workout from Train first? The step is checked off there too, so you never do it twice.
+
+### New tab names
+
+- **Gifts** (was Day), **Forge** (was Gym), **Campaign** (was Plan), **More**. Page titles and back buttons match.
+
+### Fix
+
+- In Edit routine, the checkbox rows (Core step, Opens today's workout) sit on one line again.
+
+## v1.21 — the eye, Train and Calendar
+
+No database changes (v1.20's `routine_upgrade.sql` is still the latest).
+
+### The eye
+
+- A small **eye** sits at the top left of every card. Tap it to see every card of today: **To do** in the order they come up (the current one says *Up now*), then **Done**.
+- **Tap any card to mark it done**, in any order: a routine step (a step with substeps is done as a whole), a power action, a first step. Tap it again to undo; within the same look it goes back exactly where it was.
+- Skipped cards show under Done as skipped. Tap one to put it back on today.
+- Close it and the autopilot picks up at the next card that isn't done. If that was the last one, the day is complete.
+- The same view is on the day overview (**All cards**) and on the finished-day card (**See today's cards**), so a slip is always one tap to fix.
+- **Open the full day** at the bottom goes to power actions, boosters, inbox and setup. It replaces the Today button.
+
+### Tab names
+
+- **Gifts · Train · Calendar · More**. Train was Forge, Calendar was Campaign. A workout step's card says *battle angel workout · Train*.
+
+## v1.22 — Finish my day, Forge and Destiny
+
+No database changes.
+
+### Finish my day
+
+- When the day is done (every card, or **Wrap up day**), the finished-day card shows **Finish my day**.
+- It closes the day and plays your motivation videos and photos full screen for **5 minutes straight**: the same library as the rest timer, shuffled, looping until the time is up. The screen stays on.
+- Small controls at the top: a progress line with the time left, **Sound on/off**, and **Skip** if you ever need it.
+- Then black, and one question: **"Are you living life like the person you want to be?"**, signed **battle angel.** After a few seconds (or a tap) it exits back to Gifts.
+- No motivation saved yet? It goes straight to the question and tells you where to add some (More → Edit motivation).
+
+### Tab names
+
+- **Gifts · Forge · Destiny · More**. Forge is the gym, Destiny is the calendar. The workout card says *battle angel workout · Forge*.

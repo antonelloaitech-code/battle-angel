@@ -4353,33 +4353,35 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   padding-bottom: max(80px, calc(env(safe-area-inset-bottom, 0px) + 72px));
 }
 
-/* ---- runner: a labeled way to the whole day, next to capture ---- */
-.runner-today-button {
-  min-height: 42px;
-  display: inline-flex;
+/* ---- runner: the eye (top left) opens every card of today ---- */
+.runner-left {
+  display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 14px 0 12px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.runner-eye {
+  width: 44px;
+  height: 42px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   border: 1px solid var(--border);
   border-radius: 13px;
   background: var(--surface);
   color: var(--text);
-  font-size: 0.9rem;
-  font-weight: 850;
   cursor: pointer;
 }
 
-.runner-today-button svg {
-  width: 16px;
-  height: 16px;
-  flex: 0 0 auto;
+.runner-eye svg {
+  width: 23px;
+  height: 23px;
 }
 
-.runner-today-button:active { background: var(--surface-soft); }
-
-@media (max-width: 359px) {
-  .runner-today-button { padding: 0 12px; }
-  .runner-today-button span { display: none; }
+.runner-eye:active {
+  background: var(--surface-soft);
+  color: var(--accent-dark);
 }
 
 /* ---- morning: the question and three numbered slots ---- */
@@ -5185,7 +5187,8 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   padding: 2px 14px 16px;
 }
 
-.editor-form label {
+/* Field labels stack; checkbox rows (core, workout link) stay one line: box, then text. */
+.editor-form label:not(.core-check) {
   display: grid;
   gap: 6px;
 }
@@ -5248,8 +5251,350 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   padding-inline: 4px;
 }
 
+/* ---- v1.20: the days a routine step runs ---- */
+.day-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.day-picker legend {
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+.day-picker-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.day-toggle {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.day-toggle[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.day-picker-summary {
+  margin: 6px 2px 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.day-picker-summary.is-flash {
+  color: var(--accent-dark);
+  animation: prompt-nudge 360ms ease;
+}
+
+.editor-add .day-picker { margin-top: 2px; }
+.editor-db-note { margin: -6px 4px 16px; }
+
+/* ---- v1.21: the eye sheet, today's cards with tap-to-done ---- */
+.day-chip-eye {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+}
+
+.day-chip-eye svg {
+  width: 18px;
+  height: 18px;
+}
+
+.glance-sheet { padding-bottom: 14px; }
+
+.glance-hint {
+  margin: 4px 2px 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.glance-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 16px 4px 8px;
+  font-size: 0.98rem;
+  font-weight: 850;
+}
+
+.glance-group span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.glance-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--bg);
+}
+
+.glance-row {
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.glance-row + .glance-row { border-top: 1px solid var(--border); }
+.glance-row:active { background: var(--surface-soft); }
+.glance-row.is-now { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.glance-mark {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 2px solid color-mix(in srgb, var(--muted) 55%, var(--border));
+  border-radius: 50%;
+  font-size: 0.86rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.glance-mark.is-power {
+  border: 0;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.glance-row.is-now .glance-mark { border-color: var(--accent); }
+.glance-row.is-now .glance-mark.is-power { background: var(--accent); color: #fff; }
+
+.glance-row.is-done .glance-mark {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.glance-row.is-skipped .glance-mark {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.glance-row.is-changed .glance-mark { animation: slot-pop 260ms cubic-bezier(0.2, 0.9, 0.3, 1.35); }
+
+.glance-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.glance-copy strong {
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.glance-copy small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.glance-row.is-now small { color: var(--accent-dark); }
+
+.glance-row.is-done strong,
+.glance-row.is-skipped strong { color: var(--muted); }
+
+.glance-row.is-done strong {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.glance-empty {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 18px;
+  color: var(--muted);
+}
+
+.glance-note {
+  margin: 10px 4px 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.glance-open-day {
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  margin-top: 16px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--text);
+  font-weight: 850;
+  text-align: left;
+  cursor: pointer;
+}
+
+.glance-open-day small {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.glance-open-day span {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--muted);
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glance-row.is-changed .glance-mark { animation: none; }
+}
+
+/* ---- v1.22: finish my day ---- */
+.finish-day-cta { margin-top: 18px; }
+.finish-day-note { margin-top: 8px; }
+
+.finish-reel-top {
+  grid-area: 1 / 1;
+  z-index: 2;
+  align-self: start;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 30px;
+  background: linear-gradient(rgba(0, 0, 0, 0.6), transparent);
+}
+
+.finish-reel-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.finish-reel-bar span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #f651bf;
+  transition: width 500ms linear;
+}
+
+.finish-reel-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.finish-reel-button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.finish-reel-time {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.92rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Black, one question, the signature. Always dark, whatever the theme. */
+.finish-question {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  align-content: center;
+  gap: 18px;
+  padding: max(32px, env(safe-area-inset-top, 0px)) max(28px, env(safe-area-inset-right, 0px)) max(32px, env(safe-area-inset-bottom, 0px)) max(28px, env(safe-area-inset-left, 0px));
+  background: #000;
+  color: #fff;
+  cursor: pointer;
+  animation: finish-fade 1400ms ease both;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.finish-question-text {
+  max-width: 14ch;
+  margin: 0;
+  font-size: clamp(2.2rem, 10vw, 3.6rem);
+  font-weight: 900;
+  line-height: 1.04;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+.finish-question-sign {
+  margin: 0;
+  color: #f651bf;
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  animation: finish-fade 1400ms ease 900ms both;
+}
+
+.finish-question-hint {
+  max-width: 32ch;
+  margin: 18px 0 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+@keyframes finish-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .finish-question,
+  .finish-question-sign { animation: none; }
+  .finish-reel-bar span { transition: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .slot.is-new .slot-num,
-  .prompt-status.is-flash { animation: none; }
+  .prompt-status.is-flash,
+  .day-picker-summary.is-flash { animation: none; }
   .prompt-resting > summary::after { transition: none; }
 }

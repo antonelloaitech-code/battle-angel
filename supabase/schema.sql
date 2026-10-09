@@ -922,6 +922,31 @@ with check (
   )
 );
 
+-- ---------------------------------------------------------------------------
+-- v1.20: routine steps on chosen days (0 = Sunday ... 6 = Saturday, NULL = every day),
+-- and a routine step linked to your workout (NULL = decided by the step's name)
+-- ---------------------------------------------------------------------------
+alter table public.daily_steps
+  add column if not exists weekdays smallint[];
+
+alter table public.daily_steps
+  add column if not exists opens_workout boolean;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'daily_steps_weekdays_valid' and conrelid = 'public.daily_steps'::regclass
+  ) then
+    alter table public.daily_steps
+      add constraint daily_steps_weekdays_valid
+      check (
+        weekdays is null
+        or (cardinality(weekdays) between 1 and 7 and weekdays <@ array[0, 1, 2, 3, 4, 5, 6]::smallint[])
+      );
+  end if;
+end $$;
+
 notify pgrst, 'reload schema';
 
 -- Verification: every column should say true.
@@ -945,4 +970,6 @@ select
   exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'energy_mode') as low_energy_ready,
   exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'closed_at') as wrap_up_ready,
   exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'power_todos' and column_name = 'snoozed_until') as triage_snooze_ready,
-  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'power_todos' and column_name = 'parent_id') as first_steps_ready;
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'power_todos' and column_name = 'parent_id') as first_steps_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_steps' and column_name = 'weekdays') as routine_days_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_steps' and column_name = 'opens_workout') as workout_link_ready;
