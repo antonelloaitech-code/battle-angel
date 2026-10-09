@@ -1,22 +1,23 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #f3f5f4;
-  background: #0d0f10;
+  color: #f2f5f7;
+  background: #000000;
   color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --bg: #0d0f10;
-  --surface: #151819;
-  --surface-soft: #1b1f20;
-  --surface-strong: #24292a;
-  --text: #f3f5f4;
-  --muted: #9ca5a2;
-  --border: #2d3334;
-  --accent: #f4a4cf;
-  --accent-dark: #f7badb;
-  --accent-soft: #3f2231;
-  /* Text on the pastel accent is dark, so it stays easy to read. */
-  --on-accent: #2b1222;
+  /* Black and light electric blue. */
+  --bg: #000000;
+  --surface: #0f1012;
+  --surface-soft: #16181b;
+  --surface-strong: #1f2226;
+  --text: #f2f5f7;
+  --muted: #9aa3ad;
+  --border: #26292e;
+  --accent: #5ce1ff;
+  --accent-dark: #9aeeff;
+  --accent-soft: #0b2530;
+  /* Text on the light blue is near-black, so it stays easy to read. */
+  --on-accent: #00141c;
   --danger: #f08a8a;
   --danger-soft: #3a1f21;
   --gold: #e2b84f;
@@ -26,20 +27,20 @@
 }
 
 :root[data-theme="light"] {
-  color: #161616;
-  background: #f5f5f2;
+  color: #0d1114;
+  background: #f3f5f7;
   color-scheme: light;
-  --bg: #f5f5f2;
+  --bg: #f3f5f7;
   --surface: #ffffff;
-  --surface-soft: #edede8;
-  --surface-strong: #e5e5de;
-  --text: #161616;
-  --muted: #6e6e67;
-  --border: #dcdcd4;
-  --accent: #ea86bb;
-  --accent-dark: #8f285f;
-  --accent-soft: #fae0ee;
-  --on-accent: #35102a;
+  --surface-soft: #e9edf1;
+  --surface-strong: #e0e5ea;
+  --text: #0d1114;
+  --muted: #5f6b75;
+  --border: #d5dbe1;
+  --accent: #2cc3f2;
+  --accent-dark: #0a6a90;
+  --accent-soft: #dbf4fc;
+  --on-accent: #03222f;
   --danger: #a13d3d;
   --danger-soft: #f6e6e6;
   --gold: #b8871b;
@@ -5541,7 +5542,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: #f4a4cf;
+  background: #5ce1ff;
   transition: width 500ms linear;
 }
 
@@ -5600,7 +5601,7 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
 
 .finish-question-sign {
   margin: 0;
-  color: #f4a4cf;
+  color: #5ce1ff;
   font-size: 1.25rem;
   font-weight: 900;
   letter-spacing: 0.01em;

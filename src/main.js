@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.23.2'
+const APP_VERSION = '1.24.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -218,7 +218,7 @@ function applyTheme(theme) {
   const next = theme === 'light' ? 'light' : 'dark'
   document.documentElement.dataset.theme = next
   const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.setAttribute('content', next === 'dark' ? '#0d0f10' : '#f5f5f2')
+  if (meta) meta.setAttribute('content', next === 'dark' ? '#000000' : '#f3f5f7')
   try {
     window.localStorage.setItem(THEME_STORAGE_KEY, next)
   } catch {

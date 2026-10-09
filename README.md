@@ -531,3 +531,10 @@ The accent is now a soft pastel pink: `#f4a4cf` in dark mode, `#ea86bb` in light
 ## v1.23.2 — golden week = 4 days trained
 
 A golden week now takes **4 different days** with at least one workout done that week (Monday to Sunday). Two workouts on the same day count as one day. The week bar reads "2 of 4 days trained this week", a golden week reads "Golden week · 5 days trained", and streaks follow the same rule. No database changes.
+
+## v1.24 — black and light electric blue
+
+- Dark mode is now true black with neutral greys, and the accent is a light electric blue (`#5ce1ff`). Buttons and badges on blue use near-black text so they stay easy to read.
+- Light mode uses a deeper blue (`#2cc3f2`) on cool, clean greys.
+- The phone's status bar matches (black in dark mode).
+- No database changes.
