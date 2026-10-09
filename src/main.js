@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.18.3'
+const APP_VERSION = '1.19.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -57,7 +57,11 @@ const DAILY_PROGRESS_COLUMNS = `${DAILY_PROGRESS_COLUMNS_LEGACY},energy_mode,def
 const POWER_TODO_COLUMNS_LEGACY = 'id,title,sort_order,completed_at,created_at,updated_at'
 const POWER_TODO_COLUMNS = `${POWER_TODO_COLUMNS_LEGACY},size,snoozed_until,snooze_count,parent_id`
 const POWER_PLAN_COLUMNS = 'id,todo_id,action_date,status,sort_order,started_at,created_at,updated_at'
-const DAY_VIEWS = ['day', 'day-overview', 'day-runner', 'triage']
+const DAY_VIEWS = ['day', 'day-overview', 'day-runner', 'triage', 'day-prompt', 'day-routine', 'day-boosters']
+// v1.19: the morning question, and how much of Inbox and Today's order the overview shows before "Show all"
+const POWER_PROMPT_QUESTION = 'What power actions are you getting done today to get to another place?'
+const INBOX_PREVIEW_COUNT = 5
+const ORDER_PREVIEW_COUNT = 5
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   document.querySelector('#app').innerHTML = `
@@ -136,6 +140,9 @@ let sprintTicker = null
 let lastRunnerKey = ''
 let stuckRevealTimer = null
 const revealedStuckKeys = new Set()
+// v1.19 Day tab state: the morning picker, and the overview's edit modes
+let powerPrompt = null
+let dayUi = { reorder: false, orderAll: false, inboxEdit: false, inboxAll: false }
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 12
 const MOTIVATION_SOUND_KEY = 'battle-angel-motivation-sound'
@@ -1054,7 +1061,7 @@ function dropTodo(todoId) {
 }
 
 // ---------- Day Stack ----------
-// Routine steps, today's chosen todos, and the "pick today's todos" planning card share one ordered queue.
+// Routine steps and today's power actions share one ordered queue.
 
 function routineStackKey(stepId) {
   return `routine:${stepId}`
@@ -1075,54 +1082,6 @@ function hasCoreSteps() {
 // On a low-energy day only core steps run. Nothing is skipped or lost: switch back and they return.
 function stepRunsToday(step, progress) {
   return !isLowEnergy(progress) || !hasCoreSteps() || Boolean(step.is_core)
-}
-
-// ---------- "picked for you" ----------
-// If fewer than 3 todos are chosen when the day starts, battle angel fills the gap from Inbox
-// (oldest first), so the morning has nothing to decide. Skip snoozes a pick (1, 3, then 7 days),
-// so the Inbox sorts itself over a few days. Items passed on 3 times wait for Sort inbox instead.
-
-function autoPickStorageKey(dateKey = todayDateKey()) {
-  return `battle-angel-autopick-${currentUser?.id || 'anon'}-${dateKey}`
-}
-
-function readAutoPick(dateKey = todayDateKey()) {
-  const value = readJson(autoPickStorageKey(dateKey), null)
-  return value && Array.isArray(value.ids)
-    ? { ran: true, ids: value.ids.filter((id) => typeof id === 'string') }
-    : { ran: false, ids: [] }
-}
-
-function isAutoPicked(todoId) {
-  return readAutoPick().ids.includes(todoId)
-}
-
-function autoPickCandidates() {
-  const dateKey = todayDateKey()
-  const planned = new Set(getTodayPowerPlans().map((plan) => plan.todo_id))
-  return powerTodos
-    .filter((todo) => !planned.has(todo.id) && !isTodoSnoozed(todo, dateKey) && todo.snooze_count < STALE_SNOOZE_COUNT)
-    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
-}
-
-// Runs once per day, at the moment the day starts.
-function maybeAutoPickTodos(progress = currentDailyProgress()) {
-  if (!currentUser || !actionEngineAvailable || !powerActionsAvailable || progress.started_at) return
-  const dateKey = todayDateKey()
-  if (readAutoPick(dateKey).ran) return
-  const open = Math.max(0, TODAY_TODO_TARGET - getPendingPowerPlans().length)
-  const picks = autoPickCandidates().slice(0, open)
-  writeJson(autoPickStorageKey(dateKey), { ids: picks.map((todo) => todo.id) })
-  // Older days' markers are no longer needed.
-  try {
-    const prefix = `battle-angel-autopick-${currentUser.id}-`
-    Object.keys(window.localStorage)
-      .filter((key) => key.startsWith(prefix) && key !== autoPickStorageKey(dateKey))
-      .forEach((key) => window.localStorage.removeItem(key))
-  } catch {
-    // Nothing to tidy.
-  }
-  picks.forEach((todo) => setTodoTodayStatus(todo.id, 'pending'))
 }
 
 function normalizeTodayStackOrder(progress = currentDailyProgress()) {
@@ -1229,8 +1188,11 @@ function todayScore(progress = currentDailyProgress()) {
 function moveTodayStackItem(key, direction) {
   const progress = currentDailyProgress()
   const order = normalizeTodayStackOrder(progress)
-  // Move among the rows you can see, so hidden low-energy steps never make a tap look like it did nothing.
-  const visible = getTodayStackEntries(progress).map((entry) => entry.key)
+  // Move among the rows you can see (what's left today), so a tap never looks like it did nothing.
+  const resolved = dailyResolvedStepIds(progress)
+  const visible = getTodayStackEntries(progress)
+    .filter((entry) => entry.type === 'todo' || !resolved.has(entry.id))
+    .map((entry) => entry.key)
   const visibleIndex = visible.indexOf(key)
   const targetKey = visibleIndex < 0 ? null : visible[direction === 'up' ? visibleIndex - 1 : visibleIndex + 1]
   if (!targetKey) return
@@ -1239,7 +1201,7 @@ function moveTodayStackItem(key, direction) {
   progress.stack_order = order
   progress.is_complete = false
   saveDailyProgress(progress)
-  rerenderOverview({ openIds: [...currentOpenDetailIds(), 'today-stack-planner'] })
+  rerenderOverview()
 }
 
 // "Later today": send a card to the back of today's stack and count how often that happened.
@@ -1370,7 +1332,6 @@ function gymStepSatisfied(gym) {
 
 function startDailySystem() {
   const progress = currentDailyProgress()
-  maybeAutoPickTodos(progress)
   const order = normalizeTodayStackOrder(progress)
   if (!order.length || remainingTodayActionCount(progress) <= 0) return false
   progress.stack_order = order
@@ -1380,6 +1341,17 @@ function startDailySystem() {
   saveDailyProgress(progress)
   renderDayRunner()
   return true
+}
+
+// v1.18.1 kept a "picked for you" marker per day; picking is yours now, so the markers can go.
+function clearLegacyAutoPickMarkers() {
+  try {
+    Object.keys(window.localStorage)
+      .filter((key) => key.startsWith('battle-angel-autopick-'))
+      .forEach((key) => window.localStorage.removeItem(key))
+  } catch {
+    // Nothing to tidy.
+  }
 }
 
 function advanceDailyAction(stepId, skip = false) {
@@ -2555,6 +2527,7 @@ async function refreshInBackground() {
   if (viewVersion !== version || (dataSignature() === before && !wasCached)) return
   if (currentView === 'day') renderDay()
   else if (currentView === 'day-runner') refreshRunnerIfChanged()
+  else if (currentView === 'day-prompt') refreshPowerPromptIfIdle()
   else if (currentView === 'home') renderHome()
   else if (currentView === 'workouts') renderWorkouts()
 }
@@ -2873,7 +2846,7 @@ function renderShell(content, options = {}) {
   document.documentElement.classList.toggle('day-runner-active', lockDayRunner)
   document.body.classList.toggle('day-runner-active', lockDayRunner)
   app.innerHTML = `
-    <main class="shell ${workoutMode ? 'workout-shell' : ''} ${options.navTab ? 'has-bottom-nav' : ''} ${showHeader ? '' : 'shell-no-header'}">
+    <main class="shell ${workoutMode ? 'workout-shell' : ''} ${options.navTab ? 'has-bottom-nav' : ''} ${showHeader ? '' : 'shell-no-header'} ${options.shellClass || ''}">
       ${showHeader ? `<header class="topbar">
         <div class="topbar-title">
           <div class="brand-name brand-name-compact">battle angel</div>
@@ -2965,9 +2938,14 @@ function ageInDays(iso) {
   return Math.max(0, Math.round((dateFromKey(todayDateKey()).getTime() - createdDay) / 86400000))
 }
 
+// Inbox lists run newest first. powerTodos itself stays oldest first (new ones are appended).
+function newestFirst(todos) {
+  return [...todos].reverse()
+}
+
 function ageShortLabel(iso) {
   const days = ageInDays(iso)
-  if (days <= 0) return 'today'
+  if (days <= 0) return 'new'
   if (days < 14) return `${days}d`
   return `${Math.floor(days / 7)}w`
 }
@@ -3086,14 +3064,32 @@ function currentOpenDetailIds() {
   return [...document.querySelectorAll('#main-content details[open][id]')].map((element) => element.id)
 }
 
+// Redraw the Day screen you're on with fresh data, keeping your place: scroll position and open items.
+function rerenderDayView(extra = {}) {
+  const openIds = extra.openIds || currentOpenDetailIds()
+  const y = window.scrollY
+  if (currentView === 'day-routine') renderRoutineEditor()
+  else if (currentView === 'day-boosters') renderBoostersEditor()
+  else if (currentView === 'day-prompt') renderPowerPrompt()
+  else renderDay('', { forceOverview: true, ...extra })
+  openIds.forEach((id) => document.getElementById(id)?.setAttribute('open', ''))
+  window.scrollTo(0, y)
+}
+
 function rerenderOverview(extra = {}) {
-  renderDay('', { forceOverview: true, openIds: currentOpenDetailIds(), ...extra })
+  if (currentView === 'day-routine' || currentView === 'day-boosters' || currentView === 'day-prompt') {
+    rerenderDayView(extra)
+    return
+  }
+  const y = window.scrollY
+  renderDay('', { forceOverview: true, ...extra })
+  window.scrollTo(0, y)
 }
 
 function rerenderCurrentDayView() {
   if (currentView === 'triage') renderTriage()
   else if (currentView === 'day-runner') renderDayRunner()
-  else if (currentView === 'day-overview' || currentView === 'day') rerenderOverview()
+  else if (DAY_VIEWS.includes(currentView)) rerenderDayView()
 }
 
 // ---------- feedback: sound, haptics, celebration ----------
@@ -3303,90 +3299,106 @@ function startSprintTicker() {
   }, 500)
 }
 
-// ---------- routine editor ----------
+// ---------- setup screens: routine and boosters ----------
+// Both work the same way: a numbered list you open item by item, and an add form at the bottom.
+// They live on their own screens, so the Day overview stays about today.
+
+function openDayEditor(kind) {
+  if (kind === 'routine') renderRoutineEditor()
+  else renderBoostersEditor()
+  window.scrollTo(0, 0)
+}
 
 function renderCoreCheckbox(checked, id = '') {
   if (!actionEngineAvailable) return ''
   return `
     <label class="core-check">
       <input type="checkbox" name="is_core" ${id ? `id="${id}"` : ''} ${checked ? 'checked' : ''} />
-      <span><strong>Core step</strong> · still runs on low-energy days</span>
+      <span><strong>Core step</strong>, still runs on low-energy days</span>
     </label>`
 }
 
-function renderDailyEditor() {
-  const progress = currentDailyProgress()
-  const rows = dailySteps.map((step, index) => {
-    const substeps = normalizeDailySubsteps(step.substeps)
-    return `
-    <details class="daily-edit-item">
-      <summary>
-        <span>${index + 1}. ${escapeHtml(step.title)}${step.is_core ? '<em class="core-badge">core</em>' : ''}</span>
-        <span class="daily-edit-more">${substeps.length ? `${substeps.length} substeps · ` : ''}Edit</span>
-      </summary>
-      <form class="daily-edit-form" data-daily-edit="${step.id}">
-        <label>
-          <span class="eyebrow">STEP</span>
-          <input name="title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required value="${escapeHtml(step.title)}" />
-        </label>
-        <label>
-          <span class="eyebrow">SHORT NOTE · OPTIONAL</span>
-          <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only what you need to remember">${escapeHtml(step.note || '')}</textarea>
-        </label>
-        <details class="daily-substeps-editor" ${substeps.length ? 'open' : ''}>
-          <summary>Substeps${substeps.length ? ` · ${substeps.length}` : ' · optional'}</summary>
-          <label>
-            <span class="eyebrow">ONE PER LINE</span>
-            <textarea name="substeps" rows="${Math.min(6, Math.max(3, substeps.length + 1))}" placeholder="Brush teeth\nSkincare\nGet dressed">${escapeHtml(dailySubstepsText(step))}</textarea>
-          </label>
-        </details>
-        ${renderCoreCheckbox(step.is_core)}
-        <div class="daily-edit-actions">
-          <button type="submit" class="primary-button">Save</button>
-          <button type="button" class="secondary-button" data-daily-move="up" data-daily-step-id="${step.id}" ${index === 0 ? 'disabled' : ''}>Up</button>
-          <button type="button" class="secondary-button" data-daily-move="down" data-daily-step-id="${step.id}" ${index === dailySteps.length - 1 ? 'disabled' : ''}>Down</button>
-          <button type="button" class="ghost-danger" data-daily-delete="${step.id}">Delete</button>
-        </div>
-      </form>
-    </details>`
-  }).join('')
-
-  const coreTip = actionEngineAvailable && dailySteps.length >= 4 && !dailySteps.some((step) => step.is_core)
-    ? '<div class="daily-editor-empty">Tip: mark 3–5 steps as <strong>core</strong>. On a rough day you run only those. A minimum day still counts.</div>'
-    : ''
-
+function renderEditorItem({ id, number, title, meta, form }) {
   return `
-    <details class="daily-editor" id="daily-editor" ${dailySteps.length ? '' : 'open'}>
-      <summary>Edit routine</summary>
-      <div class="daily-editor-body">
-        <form id="add-daily-step" class="daily-add-form">
-          <label>
-            <span class="eyebrow">NEW STEP</span>
-            <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="e.g. Get ready" />
-          </label>
-          <label>
-            <span class="eyebrow">SHORT NOTE · OPTIONAL</span>
-            <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only if it helps"></textarea>
-          </label>
-          <details class="daily-substeps-editor">
-            <summary>Add substeps · optional</summary>
-            <label>
-              <span class="eyebrow">ONE PER LINE</span>
-              <textarea id="daily-step-substeps" rows="4" placeholder="Brush teeth\nSkincare\nGet dressed"></textarea>
-            </label>
-          </details>
-          ${renderCoreCheckbox(false, 'daily-step-core')}
-          <button type="submit" class="primary-button">Add step</button>
-        </form>
-        ${rows ? `<div class="daily-edit-list">${rows}</div>` : '<div class="daily-editor-empty">Add your routine once. During the day you only see the next action. A step named <strong>Gym</strong> starts today\'s workout.</div>'}
-        ${coreTip}
-        ${progress.started_at ? '<button type="button" class="text-button danger-text daily-reset" id="reset-day-progress">Restart today</button>' : ''}
-        <div id="daily-editor-status" class="status-line" aria-live="polite"></div>
-      </div>
+    <details class="editor-item" id="${id}">
+      <summary>
+        <span class="editor-item-num" aria-hidden="true">${number}</span>
+        <span class="editor-item-copy"><strong>${escapeHtml(title)}</strong>${meta ? `<small>${escapeHtml(meta)}</small>` : ''}</span>
+        <span class="editor-item-open" aria-hidden="true">Edit</span>
+      </summary>
+      ${form}
     </details>`
 }
 
-function bindDailyEditor() {
+function renderEditorActions({ moveAttr, idAttr, id, index, count, deleteAttr }) {
+  return `
+    <div class="editor-actions">
+      <button type="submit" class="primary-button">Save</button>
+      <button type="button" class="secondary-button" ${moveAttr}="up" ${idAttr}="${id}" ${index === 0 ? 'disabled' : ''} aria-label="Move up">&uarr;</button>
+      <button type="button" class="secondary-button" ${moveAttr}="down" ${idAttr}="${id}" ${index === count - 1 ? 'disabled' : ''} aria-label="Move down">&darr;</button>
+      <button type="button" class="ghost-danger" ${deleteAttr}="${id}">Delete</button>
+    </div>`
+}
+
+function renderRoutineEditor() {
+  if (!dailySystemAvailable) {
+    renderDay()
+    return
+  }
+  const progress = currentDailyProgress()
+  const rows = dailySteps.map((step, index) => {
+    const substeps = normalizeDailySubsteps(step.substeps)
+    const meta = [substeps.length ? plural(substeps.length, 'substep') : '', step.is_core && actionEngineAvailable ? 'core' : ''].filter(Boolean).join(', ')
+    return renderEditorItem({
+      id: `routine-step-${step.id}`,
+      number: index + 1,
+      title: step.title,
+      meta,
+      form: `
+        <form class="editor-form" data-daily-edit="${step.id}">
+          <label>
+            <span class="field-label">Step</span>
+            <input name="title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required value="${escapeHtml(step.title)}" />
+          </label>
+          <label>
+            <span class="field-label">Short note, optional</span>
+            <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only what you need to remember">${escapeHtml(step.note || '')}</textarea>
+          </label>
+          <label>
+            <span class="field-label">Substeps, one per line, optional</span>
+            <textarea name="substeps" rows="${Math.min(6, Math.max(2, substeps.length + 1))}" placeholder="Brush teeth&#10;Skincare&#10;Get dressed">${escapeHtml(dailySubstepsText(step))}</textarea>
+          </label>
+          ${renderCoreCheckbox(step.is_core)}
+          ${renderEditorActions({ moveAttr: 'data-daily-move', idAttr: 'data-daily-step-id', id: step.id, index, count: dailySteps.length, deleteAttr: 'data-daily-delete' })}
+        </form>`
+    })
+  }).join('')
+
+  const coreTip = actionEngineAvailable && dailySteps.length >= 4 && !dailySteps.some((step) => step.is_core)
+    ? '<p class="editor-tip">Tip: mark 3 to 5 steps as <strong>core</strong>. On a rough day you run only those, and a minimum day still counts.</p>'
+    : ''
+
+  renderShell(`
+    <button type="button" class="back-button editor-back" id="editor-back"><span aria-hidden="true">&lsaquo;</span> Day</button>
+    <p class="editor-intro">Runs top to bottom, every day. A step named <strong>Gym</strong> opens today's workout.</p>
+    ${rows ? `<div class="editor-list">${rows}</div>` : '<div class="day-panel"><p class="day-empty">No steps yet. Start with the first thing you do after waking up.</p></div>'}
+    ${coreTip}
+    <form id="add-daily-step" class="editor-add">
+      <h3 class="editor-add-title">Add a step</h3>
+      <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="e.g. Get ready" aria-label="New step" />
+      <details class="editor-add-more" id="routine-add-more">
+        <summary>Note, substeps${actionEngineAvailable ? ', core' : ''}</summary>
+        <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Short note, optional" aria-label="Short note"></textarea>
+        <textarea id="daily-step-substeps" rows="3" placeholder="Substeps, one per line" aria-label="Substeps, one per line"></textarea>
+        ${renderCoreCheckbox(false, 'daily-step-core')}
+      </details>
+      <button type="submit" class="primary-button">Add step</button>
+      <div id="daily-editor-status" class="status-line" aria-live="polite"></div>
+    </form>
+    ${progress.started_at ? '<button type="button" class="text-button danger-text editor-reset" id="reset-day-progress">Restart today from the first step</button>' : ''}`,
+    { title: 'Routine', showAccount: false, showTimer: false, navTab: 'day', view: 'day-routine' })
+
+  document.querySelector('#editor-back')?.addEventListener('click', openDayOverview)
   document.querySelector('#add-daily-step')?.addEventListener('submit', addDailyStep)
   document.querySelectorAll('[data-daily-edit]').forEach((form) => form.addEventListener('submit', updateDailyStep))
   document.querySelectorAll('[data-daily-move]').forEach((button) => {
@@ -3396,6 +3408,49 @@ function bindDailyEditor() {
     button.addEventListener('click', () => deleteDailyStep(button.dataset.dailyDelete))
   })
   document.querySelector('#reset-day-progress')?.addEventListener('click', resetTodayDailyProgress)
+}
+
+function renderBoostersEditor() {
+  if (!dailyMedsAvailable) {
+    openDayOverview()
+    return
+  }
+  const rows = dailyMeds.map((med, index) => renderEditorItem({
+    id: `booster-${med.id}`,
+    number: index + 1,
+    title: med.name,
+    meta: '',
+    form: `
+      <form class="editor-form" data-daily-med-edit="${med.id}">
+        <label>
+          <span class="field-label">Name</span>
+          <input name="name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required value="${escapeHtml(med.name)}" />
+        </label>
+        ${renderEditorActions({ moveAttr: 'data-daily-med-move', idAttr: 'data-daily-med-id', id: med.id, index, count: dailyMeds.length, deleteAttr: 'data-daily-med-delete' })}
+      </form>`
+  })).join('')
+
+  renderShell(`
+    <button type="button" class="back-button editor-back" id="editor-back"><span aria-hidden="true">&lsaquo;</span> Day</button>
+    <p class="editor-intro">Your daily boosters. Check them off on the Day tab, or with the Boosters button while you work.</p>
+    ${rows ? `<div class="editor-list">${rows}</div>` : '<div class="day-panel"><p class="day-empty">No boosters yet. Add the first one below.</p></div>'}
+    <form id="add-daily-med" class="editor-add">
+      <h3 class="editor-add-title">Add a booster</h3>
+      <input id="daily-med-name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required placeholder="e.g. Vitamin D" aria-label="New booster" />
+      <button type="submit" class="primary-button">Add booster</button>
+      <div id="daily-meds-status" class="status-line" aria-live="polite"></div>
+    </form>`,
+    { title: 'Boosters', showAccount: false, showTimer: false, navTab: 'day', view: 'day-boosters' })
+
+  document.querySelector('#editor-back')?.addEventListener('click', openDayOverview)
+  document.querySelector('#add-daily-med')?.addEventListener('submit', addDailyMed)
+  document.querySelectorAll('[data-daily-med-edit]').forEach((form) => form.addEventListener('submit', updateDailyMed))
+  document.querySelectorAll('[data-daily-med-move]').forEach((button) => {
+    button.addEventListener('click', () => moveDailyMed(button.dataset.dailyMedId, button.dataset.dailyMedMove))
+  })
+  document.querySelectorAll('[data-daily-med-delete]').forEach((button) => {
+    button.addEventListener('click', () => deleteDailyMed(button.dataset.dailyMedDelete))
+  })
 }
 
 async function insertOrUpdateDailyStep(row, id = null) {
@@ -3437,7 +3492,9 @@ async function addDailyStep(event) {
   }
   await loadDailySystem()
   saveSnapshot()
-  rerenderOverview()
+  rerenderDayView()
+  document.querySelector('#daily-step-title')?.focus()
+  showToast(`Added: ${shorten(title, 28)}`)
 }
 
 async function updateDailyStep(event) {
@@ -3462,7 +3519,7 @@ async function updateDailyStep(event) {
   }
   await loadDailySystem()
   saveSnapshot()
-  rerenderOverview()
+  rerenderDayView({ openIds: currentOpenDetailIds().filter((openId) => openId !== `routine-step-${id}`) })
   showToast('Step saved')
 }
 
@@ -3484,7 +3541,7 @@ async function moveDailyStep(stepId, direction) {
   }
   await loadDailySystem()
   saveSnapshot()
-  rerenderOverview()
+  rerenderDayView()
 }
 
 async function deleteDailyStep(stepId) {
@@ -3506,85 +3563,19 @@ async function deleteDailyStep(stepId) {
   saveDailyProgress(progress)
   await loadDailySystem()
   saveSnapshot()
-  rerenderOverview()
+  rerenderDayView()
 }
 
+// Starting over brings back this morning's question, with today's power actions still picked.
 function resetTodayDailyProgress() {
-  if (!confirm('Restart today from step 1? Finished todos stay finished.')) return
+  if (!confirm('Restart today from the first step? Finished power actions stay finished.')) return
   clearSprint()
   saveDailyProgress(emptyDailyProgress(todayDateKey()))
-  rerenderOverview()
+  renderDay()
 }
 
-// ---------- meds ----------
-
-function renderDailyMeds() {
-  if (!dailyMedsAvailable) {
-    return `
-      <details class="daily-meds-card daily-meds-setup">
-        <summary><span>Meds</span><span class="daily-meds-count">setup</span></summary>
-        <div class="daily-meds-editor-body">
-          <div class="daily-editor-empty">Run the v1.15 meds SQL once, then reopen battle angel.</div>
-        </div>
-      </details>`
-  }
-
-  const taken = currentDailyMedTakenSet()
-  const rows = dailyMeds.map((med) => {
-    const isTaken = taken.has(med.id)
-    return `
-      <button type="button" class="daily-med-row ${isTaken ? 'is-taken' : ''}" data-daily-med-toggle="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}">
-        <span class="daily-med-check" aria-hidden="true">${isTaken ? '&#10003;' : ''}</span>
-        <span class="daily-med-name">${escapeHtml(med.name)}</span>
-      </button>`
-  }).join('')
-
-  const editRows = dailyMeds.map((med, index) => `
-    <form class="daily-med-edit-row" data-daily-med-edit="${med.id}">
-      <input name="name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required value="${escapeHtml(med.name)}" aria-label="Medication name" />
-      <div class="daily-med-edit-actions">
-        <button type="submit" class="small-button">Save</button>
-        <button type="button" class="small-button" data-daily-med-move="up" data-daily-med-id="${med.id}" ${index === 0 ? 'disabled' : ''}>&uarr;</button>
-        <button type="button" class="small-button" data-daily-med-move="down" data-daily-med-id="${med.id}" ${index === dailyMeds.length - 1 ? 'disabled' : ''}>&darr;</button>
-        <button type="button" class="text-button danger-text" data-daily-med-delete="${med.id}">Delete</button>
-      </div>
-    </form>`).join('')
-
-  return `
-    <section class="daily-meds-card" aria-label="Daily medications">
-      <div class="daily-meds-head">
-        <span>Meds</span>
-        <span class="daily-meds-count">${taken.size}/${dailyMeds.length}</span>
-      </div>
-      ${rows ? `<div class="daily-meds-list">${rows}</div>` : '<div class="daily-meds-empty">No meds added.</div>'}
-      <details class="daily-meds-editor" id="daily-meds-editor">
-        <summary>${dailyMeds.length ? 'Edit meds' : 'Add meds'}</summary>
-        <div class="daily-meds-editor-body">
-          <form id="add-daily-med" class="daily-med-add-form">
-            <input id="daily-med-name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required placeholder="Medication name" aria-label="Medication name" />
-            <button type="submit" class="primary-button">Add</button>
-          </form>
-          ${editRows ? `<div class="daily-med-edit-list">${editRows}</div>` : ''}
-          <div id="daily-meds-status" class="status-line" aria-live="polite"></div>
-        </div>
-      </details>
-    </section>`
-}
-
-function bindDailyMeds() {
-  document.querySelectorAll('[data-daily-med-toggle]').forEach((button) => {
-    button.addEventListener('click', () => toggleDailyMed(button.dataset.dailyMedToggle))
-  })
-  document.querySelector('#add-daily-med')?.addEventListener('submit', addDailyMed)
-  document.querySelectorAll('[data-daily-med-edit]').forEach((form) => form.addEventListener('submit', updateDailyMed))
-  document.querySelectorAll('[data-daily-med-move]').forEach((button) => {
-    button.addEventListener('click', () => moveDailyMed(button.dataset.dailyMedId, button.dataset.dailyMedMove))
-  })
-  document.querySelectorAll('[data-daily-med-delete]').forEach((button) => {
-    button.addEventListener('click', () => deleteDailyMed(button.dataset.dailyMedDelete))
-  })
-}
-
+// ---------- boosters ----------
+// Shown as Boosters; stored in the daily_meds tables, so nothing in the database changes.
 async function addDailyMed(event) {
   event.preventDefault()
   if (!currentUser || !dailyMedsAvailable) return
@@ -3601,12 +3592,14 @@ async function addDailyMed(event) {
     updated_at: new Date().toISOString()
   })
   if (error) {
-    if (status) status.textContent = isNetworkError(error) ? 'Connect to edit meds.' : error.message
+    if (status) status.textContent = isNetworkError(error) ? 'Connect to edit boosters.' : error.message
     return
   }
   await loadDailyMeds()
   saveSnapshot()
-  rerenderOverview()
+  rerenderDayView()
+  document.querySelector('#daily-med-name')?.focus()
+  showToast(`Added: ${shorten(name, 28)}`)
 }
 
 async function updateDailyMed(event) {
@@ -3617,12 +3610,13 @@ async function updateDailyMed(event) {
   if (!name) return
   const { error } = await supabase.from('daily_meds').update({ name, updated_at: new Date().toISOString() }).eq('id', id)
   if (error) {
-    alert(isNetworkError(error) ? 'Connect to edit meds.' : error.message)
+    alert(isNetworkError(error) ? 'Connect to edit boosters.' : error.message)
     return
   }
   await loadDailyMeds()
   saveSnapshot()
-  rerenderOverview()
+  rerenderDayView({ openIds: currentOpenDetailIds().filter((openId) => openId !== `booster-${id}`) })
+  showToast('Booster saved')
 }
 
 async function moveDailyMed(medId, direction) {
@@ -3636,21 +3630,21 @@ async function moveDailyMed(medId, direction) {
   for (let i = 0; i < ordered.length; i += 1) {
     const { error } = await supabase.from('daily_meds').update({ sort_order: i + 1, updated_at: new Date().toISOString() }).eq('id', ordered[i].id)
     if (error) {
-      alert(isNetworkError(error) ? 'Connect to reorder meds.' : error.message)
+      alert(isNetworkError(error) ? 'Connect to reorder boosters.' : error.message)
       return
     }
   }
   await loadDailyMeds()
   saveSnapshot()
-  rerenderOverview()
+  rerenderDayView()
 }
 
 async function deleteDailyMed(medId) {
   const med = dailyMeds.find((item) => item.id === medId)
-  if (!med || !confirm(`Delete "${med.name}"?`)) return
+  if (!med || !confirm(`Delete "${med.name}" from your boosters?`)) return
   const { error } = await supabase.from('daily_meds').delete().eq('id', medId)
   if (error) {
-    alert(isNetworkError(error) ? 'Connect to edit meds.' : error.message)
+    alert(isNetworkError(error) ? 'Connect to edit boosters.' : error.message)
     return
   }
   dailyMedTakenIds = dailyMedTakenIds.filter((id) => id !== medId)
@@ -3661,26 +3655,26 @@ async function deleteDailyMed(medId) {
   writePending(pending)
   await loadDailyMeds()
   saveSnapshot()
-  rerenderOverview()
+  rerenderDayView()
 }
 
-// Meds live where you are: a small pill in the runner until they're all checked.
+// Boosters live where you are: a small pill in the runner until they're all checked.
 function renderRunnerMedsPill() {
   if (!dailyMedsAvailable || !dailyMeds.length) return ''
   const taken = currentDailyMedTakenSet().size
   if (taken >= dailyMeds.length) return ''
-  return `<button type="button" class="runner-meds-pill" id="runner-meds" aria-label="Meds: ${taken} of ${dailyMeds.length} taken">Meds ${taken}/${dailyMeds.length}</button>`
+  return `<button type="button" class="runner-meds-pill" id="runner-meds" aria-label="Boosters: ${taken} of ${dailyMeds.length} done">Boosters ${taken}/${dailyMeds.length}</button>`
 }
 
 function renderMedsSheetBody() {
   const taken = currentDailyMedTakenSet()
   return `
-    <div class="sheet-head"><strong>Meds today</strong><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
+    <div class="sheet-head"><strong>Boosters today</strong><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
     <div class="daily-meds-list meds-sheet-list">
       ${dailyMeds.map((med) => {
         const isTaken = taken.has(med.id)
         return `
-          <button type="button" class="daily-med-row ${isTaken ? 'is-taken' : ''}" data-sheet-med="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}">
+          <button type="button" class="daily-med-row booster-row ${isTaken ? 'is-taken' : ''}" data-sheet-med="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}">
             <span class="daily-med-check" aria-hidden="true">${isTaken ? '&#10003;' : ''}</span>
             <span class="daily-med-name">${escapeHtml(med.name)}</span>
           </button>`
@@ -3689,7 +3683,7 @@ function renderMedsSheetBody() {
 }
 
 function showMedsSheet() {
-  const backdrop = openSheet(renderMedsSheetBody(), { label: 'Meds today' })
+  const backdrop = openSheet(renderMedsSheetBody(), { label: 'Boosters today' })
   const bind = () => {
     backdrop.querySelectorAll('[data-sheet-med]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -3718,17 +3712,6 @@ function updateRunnerMedsPill() {
 
 // ---------- capture ----------
 // Capture never needs signal and never asks you to decide anything. Brain-dump mode: the field stays focused.
-
-function renderQuickCapture() {
-  if (!powerActionsAvailable) return ''
-  return `
-    <section class="day-capture-card" aria-label="Quick capture">
-      <form id="capture-form" class="day-capture-form" autocomplete="off">
-        <input id="capture-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Dump a thought..." aria-label="Capture a todo to Inbox" enterkeyhint="done" />
-        <button type="submit" class="day-capture-button" aria-label="Add to Inbox">+</button>
-      </form>
-    </section>`
-}
 
 function handleCaptureSubmit(event) {
   event.preventDefault()
@@ -3777,109 +3760,7 @@ function showRunnerCapture() {
   })
 }
 
-// ---------- plan today + inbox ----------
-
-function renderTriageLaunch(due) {
-  if (!due) return ''
-  return `
-    <button type="button" class="triage-launch" data-open-triage>
-      <span class="triage-launch-copy"><strong>Sort inbox</strong><small>one at a time · stops at ${TODAY_TODO_TARGET}</small></span>
-      <span class="triage-launch-count">${due}</span>
-    </button>`
-}
-
-function renderTodayPlanner() {
-  if (!powerActionsAvailable) {
-    return '<details class="today-stack-planner" id="today-stack-planner"><summary><span>Plan today</span><span>setup</span></summary><div class="today-stack-body"><div class="daily-editor-empty">Run the Day Stack SQL once (see README).</div></div></details>'
-  }
-  const progress = currentDailyProgress()
-  const entries = getTodayStackEntries(progress)
-  const resolved = dailyResolvedStepIds(progress)
-  const pendingTodoIds = new Set(entries.filter((entry) => entry.type === 'todo').map((entry) => entry.id))
-  const todoCount = pendingTodoIds.size
-  const due = dueInboxCount()
-  const restingCount = isLowEnergy(progress) && hasCoreSteps() ? dailySteps.filter((step) => !step.is_core).length : 0
-
-  const rows = entries.map((entry, index) => {
-    const isDone = entry.type === 'routine' && resolved.has(entry.id)
-    const kind = entry.type === 'todo'
-      ? `todo${isAutoPicked(entry.id) ? ' · picked for you' : ''}`
-      : `routine${entry.step.is_core ? ' · core' : ''}`
-    return `
-      <div class="today-stack-row is-${entry.type} ${isDone ? 'is-done' : ''}">
-        <span class="today-stack-number">${isDone ? '&#10003;' : index + 1}</span>
-        <span class="today-stack-copy"><strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(kind)}</small></span>
-        <span class="today-stack-actions">
-          <button type="button" class="stack-icon-button" data-stack-move="up" data-stack-key="${escapeHtml(entry.key)}" ${index === 0 ? 'disabled' : ''} aria-label="Move earlier">&uarr;</button>
-          <button type="button" class="stack-icon-button" data-stack-move="down" data-stack-key="${escapeHtml(entry.key)}" ${index === entries.length - 1 ? 'disabled' : ''} aria-label="Move later">&darr;</button>
-          ${entry.type === 'todo' ? `<button type="button" class="stack-remove-button" data-power-today="${entry.id}" aria-label="Remove from today">&times;</button>` : ''}
-        </span>
-      </div>`
-  }).join('')
-
-  const inboxChoices = powerTodos.filter((todo) => !pendingTodoIds.has(todo.id))
-  const choices = inboxChoices.map((todo) => `
-    <button type="button" class="today-inbox-choice" data-power-today="${todo.id}">
-      <span>${escapeHtml(todo.title)}${isTodoSnoozed(todo) ? `<small> · back ${escapeHtml(returnDayLabel(todo.snoozed_until))}</small>` : ''}</span><strong>+ Today</strong>
-    </button>`).join('')
-
-  const loadLine = todoCount > TODAY_TODO_TARGET
-    ? `<div class="today-load-line is-heavy">${todoCount} todos today. A short list you finish beats a long one you avoid.</div>`
-    : `<div class="today-load-line">${todoCount} of ${TODAY_TODO_TARGET} todos picked${todoCount === TODAY_TODO_TARGET ? ' · full plate' : ''}</div>`
-
-  return `
-    <details class="today-stack-planner" id="today-stack-planner">
-      <summary><span>Plan today</span><span>${todoCount ? plural(todoCount, 'todo') : 'routine only'}${due ? ` · ${due} to sort` : ''}</span></summary>
-      <div class="today-stack-body">
-        ${renderTriageLaunch(due)}
-        ${loadLine}
-        ${restingCount ? `<div class="today-load-line">Low-energy day · ${plural(restingCount, 'non-core step')} resting</div>` : ''}
-        <div class="today-stack-heading">Today stack</div>
-        ${rows ? `<div class="today-stack-list">${rows}</div>` : '<div class="daily-editor-empty">Add a routine or pick a todo for today.</div>'}
-        ${inboxChoices.length ? `
-          <details class="today-inbox-picker" id="today-inbox-picker">
-            <summary>Pick by hand <span>${inboxChoices.length}</span></summary>
-            <div class="today-inbox-choice-list">${choices}</div>
-          </details>` : '<div class="today-stack-empty-inbox">Inbox clear.</div>'}
-      </div>
-    </details>`
-}
-
-function renderTodoInbox() {
-  if (!powerActionsAvailable) return ''
-  const today = todayDateKey()
-  const inToday = new Set(getPendingPowerPlans().map((plan) => plan.todo_id))
-  const due = dueInboxCount()
-  const rows = powerTodos.map((todo) => {
-    const meta = [ageShortLabel(todo.created_at)]
-    if (inToday.has(todo.id)) meta.push('in today')
-    else if (isTodoSnoozed(todo, today)) meta.push(`back ${returnDayLabel(todo.snoozed_until)}`)
-    if (todo.snooze_count) meta.push(`passed ${todo.snooze_count}×`)
-    return `
-      <form class="todo-inbox-row has-meta" data-power-todo-edit="${todo.id}">
-        <input name="title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required value="${escapeHtml(todo.title)}" aria-label="Todo title" />
-        <button type="submit" class="small-button">Save</button>
-        <span class="todo-inbox-meta">${escapeHtml(meta.join(' · '))}</span>
-        <button type="button" class="text-button danger-text" data-power-todo-delete="${todo.id}">Delete</button>
-      </form>`
-  }).join('')
-  return `
-    <details class="todo-inbox-card" id="todo-inbox-card">
-      <summary><span>Inbox</span><span>${powerTodos.length}${due && due !== powerTodos.length ? ` · ${due} to sort` : ''}</span></summary>
-      <div class="todo-inbox-body">
-        ${renderTriageLaunch(due)}
-        ${rows ? `<div class="todo-inbox-list">${rows}</div>` : '<div class="daily-editor-empty">Nothing waiting. Anything you dump lands here.</div>'}
-      </div>
-    </details>`
-}
-
-function togglePowerTodoToday(todoId) {
-  if (!powerActionsAvailable) return
-  const plan = getTodayPlanForTodo(todoId)
-  if (plan?.status === 'pending') removeTodayPlan(todoId)
-  else setTodoTodayStatus(todoId, 'pending')
-  rerenderOverview({ openIds: [...currentOpenDetailIds(), 'today-stack-planner'] })
-}
+// ---------- inbox edits ----------
 
 function updatePowerTodo(event) {
   event.preventDefault()
@@ -3941,7 +3822,7 @@ function reopenDay() {
   renderDay()
 }
 
-// ---------- Day overview ----------
+// ---------- wins ----------
 
 function getTodayWins() {
   const progress = currentDailyProgress()
@@ -3983,6 +3864,529 @@ function renderDayCompleteCard({ closed, celebrate }) {
     </section>`
 }
 
+// ---------- morning: today's power actions ----------
+// The day opens with one deliberate choice: what moves you forward today, ranked by importance.
+// Three numbered slots fill in the order you tap. Everything you don't pick waits in Inbox.
+
+function newPowerPrompt(mode = 'start') {
+  const ids = getPowerActionList().filter((item) => !item.done && getPowerTodo(item.todo.id)).map((item) => item.todo.id)
+  return { mode, date: todayDateKey(), ids, lastPicked: null }
+}
+
+// Returns false when power actions aren't available, so the caller can fall back to the plain routine.
+function openPowerPrompt(mode = 'start') {
+  if (!powerActionsAvailable || !currentUser) return false
+  if (mode === 'change' || !powerPrompt || powerPrompt.date !== todayDateKey() || powerPrompt.mode !== mode) {
+    powerPrompt = newPowerPrompt(mode)
+  }
+  renderPowerPrompt()
+  window.scrollTo(0, 0)
+  return true
+}
+
+function openPowerPromptForToday() {
+  return openPowerPrompt(currentDailyProgress().started_at ? 'change' : 'start')
+}
+
+function renderPromptSlot(todo, rank, canMoveUp) {
+  return `
+    <div class="slot is-filled ${powerPrompt.lastPicked === todo.id ? 'is-new' : ''}">
+      <span class="slot-num" aria-hidden="true">${rank}</span>
+      <span class="slot-title">${escapeHtml(todo.title)}</span>
+      <span class="slot-tools">
+        ${canMoveUp ? `<button type="button" class="slot-tool" data-prompt-up="${todo.id}" aria-label="Make ${escapeHtml(todo.title)} more important">&uarr;</button>` : ''}
+        <button type="button" class="slot-tool" data-prompt-pick="${todo.id}" aria-label="Remove ${escapeHtml(todo.title)} from today">&times;</button>
+      </span>
+    </div>`
+}
+
+function renderPromptRow(todo, full) {
+  const meta = isTodoSnoozed(todo) ? `back ${returnDayLabel(todo.snoozed_until)}` : ageShortLabel(todo.created_at)
+  return `
+    <button type="button" class="prompt-row ${full ? 'is-full' : ''}" data-prompt-pick="${todo.id}">
+      <span class="prompt-ring" aria-hidden="true"></span>
+      <span class="prompt-title">${escapeHtml(todo.title)}</span>
+      <span class="prompt-meta">${escapeHtml(meta)}</span>
+    </button>`
+}
+
+function renderPowerPrompt(options = {}) {
+  if (!powerPrompt || powerPrompt.date !== todayDateKey()) powerPrompt = newPowerPrompt('start')
+  powerPrompt.ids = powerPrompt.ids.filter((id, index, list) => getPowerTodo(id) && list.indexOf(id) === index)
+  const picked = powerPrompt.ids.map((id) => getPowerTodo(id))
+  const pickedIds = new Set(powerPrompt.ids)
+  const doneToday = getPowerActionList().filter((item) => item.done)
+  const offset = doneToday.length
+  const count = picked.length
+  const full = count >= TODAY_TODO_TARGET
+  const change = powerPrompt.mode === 'change'
+  const dateKey = todayDateKey()
+  // Same order as Inbox on the Day tab (newest first), so the list looks familiar every morning.
+  const ready = newestFirst(powerTodos.filter((todo) => !pickedIds.has(todo.id) && !isTodoSnoozed(todo, dateKey)))
+  const resting = newestFirst(powerTodos.filter((todo) => !pickedIds.has(todo.id) && isTodoSnoozed(todo, dateKey)))
+
+  const slots = picked.map((todo, index) => renderPromptSlot(todo, offset + index + 1, index > 0))
+  for (let position = count + 1; position <= TODAY_TODO_TARGET; position += 1) {
+    const rank = offset + position
+    slots.push(position === count + 1
+      ? `
+        <form class="slot is-open" id="prompt-add" autocomplete="off">
+          <span class="slot-num" aria-hidden="true">${rank}</span>
+          <input id="prompt-add-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" placeholder="${ready.length || resting.length ? 'Type it, or tap one below' : 'Type it here'}" aria-label="Power action ${rank}" enterkeyhint="done" />
+          <button type="submit" class="slot-add" aria-label="Add">+</button>
+        </form>`
+      : `<div class="slot is-empty" aria-hidden="true"><span class="slot-num">${rank}</span></div>`)
+  }
+
+  const status = full
+    ? 'All set. To swap one, remove it first.'
+    : count
+      ? `Next: your #${offset + count + 1}, or lock in.`
+      : `Tap in order of importance. Your #${offset + 1} first.`
+  const primaryLabel = change ? 'Save power actions' : count ? 'Lock in and start' : `Pick your #${offset + 1} first`
+
+  renderShell(`
+    <div class="prompt-screen">
+      <header class="prompt-head">
+        <p class="prompt-date">${escapeHtml(formatPlanDate(dateKey))}</p>
+        <h2 class="prompt-question">${escapeHtml(POWER_PROMPT_QUESTION)}</h2>
+      </header>
+      <section class="prompt-slots" aria-label="Today's power actions">
+        ${doneToday.map((item) => `
+          <div class="slot is-done"><span class="slot-num" aria-hidden="true">&#10003;</span><span class="slot-title"><span class="visually-hidden">Done: </span>${escapeHtml(item.todo.title)}</span></div>`).join('')}
+        ${slots.join('')}
+        <p class="prompt-status" id="prompt-status" aria-live="polite">${escapeHtml(status)}</p>
+      </section>
+      ${ready.length ? `
+        <section class="prompt-inbox" aria-labelledby="prompt-inbox-title">
+          <h3 class="prompt-section-title" id="prompt-inbox-title">From your Inbox</h3>
+          <div class="prompt-list">${ready.map((todo) => renderPromptRow(todo, full)).join('')}</div>
+        </section>` : ''}
+      ${resting.length ? `
+        <details class="prompt-resting" id="prompt-resting" ${powerPrompt.restingOpen ? 'open' : ''}>
+          <summary>Resting until later <span>${resting.length}</span></summary>
+          <div class="prompt-list">${resting.map((todo) => renderPromptRow(todo, full)).join('')}</div>
+        </details>` : ''}
+      <div class="prompt-actions">
+        <button type="button" class="day-primary-action prompt-lock" id="prompt-lock" ${!change && !count ? 'disabled' : ''}>${escapeHtml(primaryLabel)} <span aria-hidden="true">&rarr;</span></button>
+        <button type="button" class="quiet-link prompt-skip" id="prompt-skip">${change ? 'Cancel' : 'Skip and start with my routine'}</button>
+      </div>
+    </div>`,
+    { title: 'Day', showAccount: false, showTimer: false, showHeader: false, navTab: 'day', view: 'day-prompt', shellClass: 'prompt-shell' })
+
+  powerPrompt.lastPicked = null
+  document.querySelectorAll('[data-prompt-pick]').forEach((button) => {
+    button.addEventListener('click', () => togglePromptPick(button.dataset.promptPick))
+  })
+  document.querySelectorAll('[data-prompt-up]').forEach((button) => {
+    button.addEventListener('click', () => movePromptPickUp(button.dataset.promptUp))
+  })
+  document.querySelector('#prompt-add')?.addEventListener('submit', addPromptTodo)
+  document.querySelector('#prompt-lock')?.addEventListener('click', lockInPowerActions)
+  document.querySelector('#prompt-skip')?.addEventListener('click', skipPowerPrompt)
+  document.querySelector('#prompt-resting')?.addEventListener('toggle', (event) => {
+    if (powerPrompt) powerPrompt.restingOpen = event.currentTarget.open
+  })
+  if (options.focusAdd) document.querySelector('#prompt-add-input')?.focus()
+}
+
+function rerenderPowerPrompt(options = {}) {
+  const y = window.scrollY
+  renderPowerPrompt(options)
+  window.scrollTo(0, y)
+}
+
+// A background sync can bring new todos in; redraw only when you're not typing.
+function refreshPowerPromptIfIdle() {
+  const input = document.querySelector('#prompt-add-input')
+  if (input && (input.value || document.activeElement === input)) return
+  if (document.querySelector('.sheet-backdrop')) return
+  rerenderPowerPrompt()
+}
+
+function flashPromptStatus(message) {
+  const status = document.querySelector('#prompt-status')
+  if (!status) return
+  status.textContent = message
+  status.classList.remove('is-flash')
+  void status.offsetWidth
+  status.classList.add('is-flash')
+}
+
+function togglePromptPick(todoId) {
+  if (!powerPrompt) return
+  const index = powerPrompt.ids.indexOf(todoId)
+  if (index >= 0) {
+    powerPrompt.ids.splice(index, 1)
+  } else if (powerPrompt.ids.length >= TODAY_TODO_TARGET) {
+    flashPromptStatus(`That's ${TODAY_TODO_TARGET}. Remove one above to swap it.`)
+    vibrate(30)
+    return
+  } else {
+    powerPrompt.ids.push(todoId)
+    powerPrompt.lastPicked = todoId
+    vibrate(12)
+  }
+  rerenderPowerPrompt()
+}
+
+function movePromptPickUp(todoId) {
+  if (!powerPrompt) return
+  const index = powerPrompt.ids.indexOf(todoId)
+  if (index <= 0) return
+  powerPrompt.ids.splice(index, 1)
+  powerPrompt.ids.splice(index - 1, 0, todoId)
+  powerPrompt.lastPicked = todoId
+  rerenderPowerPrompt()
+}
+
+function addPromptTodo(event) {
+  event.preventDefault()
+  const input = document.querySelector('#prompt-add-input')
+  const todo = createLocalTodo(input?.value || '')
+  if (!todo || !powerPrompt) {
+    input?.focus()
+    return
+  }
+  powerPrompt.ids.push(todo.id)
+  powerPrompt.lastPicked = todo.id
+  rerenderPowerPrompt({ focusAdd: powerPrompt.ids.length < TODAY_TODO_TARGET })
+}
+
+// Your picks become today's power actions, in the order you ranked them. Anything you un-picked
+// goes back to Inbox untouched.
+function applyPowerActionPicks(ids) {
+  const keep = new Set(ids)
+  getPendingPowerPlans().forEach((plan) => {
+    const todo = getPowerTodo(plan.todo_id)
+    // A first step made with Shrink it stays as long as its power action does.
+    if (keep.has(plan.todo_id) || (todo?.parent_id && keep.has(todo.parent_id))) return
+    removeTodayPlan(plan.todo_id)
+  })
+  ids.forEach((id) => {
+    const todo = getPowerTodo(id)
+    if (!todo) return
+    // Picking something that was resting means it matters now.
+    if (actionEngineAvailable && isTodoSnoozed(todo)) patchLocalTodo(id, { snoozed_until: null })
+    if (getTodayPlanForTodo(id)?.status !== 'pending') setTodoTodayStatus(id, 'pending')
+  })
+
+  // The picks run together, in rank order, where your todos already were (after the routine on a fresh day).
+  const progress = currentDailyProgress()
+  const order = normalizeTodayStackOrder(progress)
+  const keys = ids.map(todoStackKey).filter((key) => order.includes(key))
+  const firstIndex = order.findIndex((key) => keys.includes(key))
+  const rest = order.filter((key) => !keys.includes(key))
+  const insertAt = firstIndex < 0 ? rest.length : order.slice(0, firstIndex).filter((key) => !keys.includes(key)).length
+  rest.splice(insertAt, 0, ...keys)
+  progress.stack_order = rest
+  saveDailyProgress(progress)
+
+  // The plan rows carry the rank too (after anything already done today), so every device shows the same order.
+  const base = Math.max(0, ...getTodayPowerPlans().filter((plan) => plan.status === 'done').map((plan) => Number(plan.sort_order) || 0))
+  ids.forEach((id, index) => {
+    const plan = getTodayPlanForTodo(id)
+    if (plan && Number(plan.sort_order) !== base + index + 1) queuePlanWrite(setLocalPowerPlan(id, { sort_order: base + index + 1, updated_at: nowIso() }))
+  })
+  saveSnapshot()
+}
+
+// Starting the day always works, even with nothing queued: you land on your first card, or on the overview.
+function beginDay() {
+  const progress = currentDailyProgress()
+  progress.stack_order = normalizeTodayStackOrder(progress)
+  if (!progress.started_at) progress.started_at = nowIso()
+  progress.is_complete = false
+  progress.closed_at = null
+  saveDailyProgress(progress)
+  if (remainingTodayActionCount(progress) > 0) renderDayRunner()
+  else openDayOverview()
+}
+
+function lockInPowerActions() {
+  if (!powerPrompt || !guardActionTap(500)) return
+  const { mode } = powerPrompt
+  const ids = powerPrompt.ids.filter((id) => getPowerTodo(id))
+  if (mode === 'start' && !ids.length) {
+    flashPromptStatus('Pick at least one, or skip to start with your routine.')
+    return
+  }
+  unlockAudio()
+  applyPowerActionPicks(ids)
+  powerPrompt = null
+  if (mode === 'change') {
+    openDayOverview()
+    showToast(ids.length ? `Power actions saved: ${ids.length}` : 'No power actions today')
+    return
+  }
+  beginDay()
+  showToast(`Locked in: ${plural(ids.length, 'power action')}`)
+}
+
+function skipPowerPrompt() {
+  if (!powerPrompt) return
+  const { mode } = powerPrompt
+  powerPrompt = null
+  if (mode === 'change') {
+    openDayOverview()
+    return
+  }
+  beginDay()
+}
+
+// Today's power actions in order of importance: the rank you gave them, which stays put when a card
+// moves to Later. A "first step" made with Shrink it rides along with its power action instead of
+// counting as one of its own.
+function getPowerActionList() {
+  const plans = sortBySortOrder(getTodayPowerPlans().filter((plan) => plan.status === 'pending' || plan.status === 'done'))
+  const planned = new Set(plans.map((plan) => plan.todo_id))
+  return plans
+    .map((plan) => ({ plan, todo: getAnyTodo(plan.todo_id), done: plan.status === 'done' }))
+    .filter((item) => item.todo && !(item.todo.parent_id && planned.has(item.todo.parent_id)))
+    .map((item, index) => ({ ...item, number: index + 1 }))
+}
+
+// How a todo is named on its card and in Today's order: "Power action 2 of 3", or "First step of #2".
+function powerActionLabel(todo, list = getPowerActionList()) {
+  const parent = todo.parent_id ? list.find((item) => item.todo.id === todo.parent_id) : null
+  if (parent) return { text: `First step of #${parent.number}`, number: parent.number, parentTitle: parent.todo.title }
+  const item = list.find((entry) => entry.todo.id === todo.id)
+  return item
+    ? { text: `Power action ${item.number} of ${list.length}`, number: item.number, parentTitle: '' }
+    : { text: 'Power action', number: 0, parentTitle: '' }
+}
+
+// ---------- Day overview ----------
+// One page, one order: what's up now, your power actions, boosters, the rest of today, Inbox, setup.
+// Every section has the same head (title, count, one action). Editing always opens its own screen.
+
+function openDayOverview() {
+  dayUi = { reorder: false, orderAll: false, inboxEdit: false, inboxAll: false }
+  renderDay('', { forceOverview: true })
+  window.scrollTo(0, 0)
+}
+
+function renderDayHero({ progress, entries, remaining, score, started, closed, complete, low, celebrate }) {
+  if (complete) return renderDayCompleteCard({ closed, celebrate })
+  const date = escapeHtml(formatPlanDate(todayDateKey()))
+  if (!entries.length) {
+    return `
+      <section class="day-hero">
+        <p class="day-hero-date">${date}</p>
+        <h2 class="day-hero-title">Nothing queued yet.</h2>
+        <p class="day-hero-copy">Set up your routine below${powerActionsAvailable ? ', or pick what you\'re getting done today' : ''}.</p>
+        ${powerActionsAvailable ? '<button type="button" class="day-hero-cta" id="hero-pick">Pick power actions <span aria-hidden="true">&rarr;</span></button>' : ''}
+      </section>`
+  }
+  if (!started) {
+    return `
+      <section class="day-hero">
+        <p class="day-hero-date">${date}</p>
+        <h2 class="day-hero-title">Ready when you are.</h2>
+        <p class="day-hero-copy">${plural(remaining, 'action')} lined up.</p>
+        <button type="button" class="day-hero-cta" id="hero-start">Start your day <span aria-hidden="true">&rarr;</span></button>
+      </section>`
+  }
+  const action = getCurrentStackAction(progress)
+  const tools = [
+    hasCoreSteps() ? `<button type="button" class="day-chip" id="toggle-energy">${low ? 'Back to full day' : 'Low energy: core only'}</button>` : '',
+    actionEngineAvailable ? '<button type="button" class="day-chip" id="wrap-up-day">Wrap up day</button>' : ''
+  ].join('')
+  return `
+    <section class="day-hero ${low ? 'is-low-energy' : ''}">
+      <div class="day-hero-row">
+        <p class="day-hero-date">${date}${low ? ', core only' : ''}</p>
+        <p class="day-hero-score"><strong>${score.done}</strong> of ${score.total} done</p>
+      </div>
+      <div class="day-hero-progress" aria-hidden="true"><span style="width:${score.percent}%"></span></div>
+      <p class="day-hero-label">Up now</p>
+      <p class="day-hero-now">${escapeHtml(action?.title || '')}</p>
+      <button type="button" class="day-hero-cta" id="hero-continue">Continue <span aria-hidden="true">&rarr;</span></button>
+      ${tools ? `<div class="day-hero-tools">${tools}</div>` : ''}
+    </section>`
+}
+
+function renderSectionHead(id, title, count = '', actions = '') {
+  return `
+    <div class="day-section-head">
+      <h3 id="${id}">${escapeHtml(title)}</h3>
+      ${count !== '' ? `<span class="day-section-count">${escapeHtml(String(count))}</span>` : ''}
+      ${actions ? `<span class="day-section-actions">${actions}</span>` : ''}
+    </div>`
+}
+
+function renderPowerActionsSection() {
+  if (!powerActionsAvailable) return ''
+  const list = getPowerActionList()
+  const doneCount = list.filter((item) => item.done).length
+  const rows = list.map((item) => `
+    <li class="pa-row ${item.done ? 'is-done' : ''}">
+      <span class="pa-num" aria-hidden="true">${item.done ? '&#10003;' : item.number}</span>
+      <span class="pa-title">${item.done ? '<span class="visually-hidden">Done: </span>' : ''}${escapeHtml(item.todo.title)}</span>
+    </li>`).join('')
+  return `
+    <section class="day-section" id="power-actions" aria-labelledby="power-actions-title">
+      ${renderSectionHead('power-actions-title', 'Power actions', list.length ? `${doneCount}/${list.length}` : '',
+        `<button type="button" class="day-section-action" id="change-power-actions">${list.length ? 'Change' : 'Pick'}</button>`)}
+      ${rows
+        ? `<ol class="day-panel pa-list">${rows}</ol>`
+        : '<div class="day-panel"><p class="day-empty">None picked for today. What would move you forward?</p></div>'}
+    </section>`
+}
+
+function renderBoostersSection() {
+  if (!dailyMedsAvailable) {
+    return `
+      <section class="day-section" id="boosters" aria-labelledby="boosters-title">
+        ${renderSectionHead('boosters-title', 'Boosters')}
+        <div class="day-panel"><p class="day-empty">Boosters need the v1.15 database step once (see README).</p></div>
+      </section>`
+  }
+  const taken = currentDailyMedTakenSet()
+  const rows = dailyMeds.map((med) => {
+    const isTaken = taken.has(med.id)
+    return `
+      <button type="button" class="daily-med-row booster-row ${isTaken ? 'is-taken' : ''}" data-daily-med-toggle="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}">
+        <span class="daily-med-check" aria-hidden="true">${isTaken ? '&#10003;' : ''}</span>
+        <span class="daily-med-name">${escapeHtml(med.name)}</span>
+      </button>`
+  }).join('')
+  return `
+    <section class="day-section" id="boosters" aria-labelledby="boosters-title">
+      ${renderSectionHead('boosters-title', 'Boosters', dailyMeds.length ? `${taken.size}/${dailyMeds.length}` : '')}
+      ${rows
+        ? `<div class="day-panel booster-list">${rows}</div>`
+        : '<div class="day-panel"><p class="day-empty">No boosters yet.</p><button type="button" class="day-panel-link" data-open-boosters-editor>Add boosters</button></div>'}
+    </section>`
+}
+
+function orderKindLabel(entry, progress, list) {
+  if (entry.type === 'todo') {
+    const label = powerActionLabel(entry.todo, list)
+    return label.parentTitle ? label.text : label.number ? `Power action ${label.number}` : 'Power action'
+  }
+  const substeps = normalizeDailySubsteps(entry.step.substeps)
+  const parts = ['Routine']
+  if (entry.step.is_core && hasCoreSteps()) parts.push('core')
+  if (substeps.length) {
+    const position = clamp(Number.parseInt(progress.substep_positions?.[entry.id], 10) || 0, 0, substeps.length)
+    parts.push(`${position} of ${substeps.length} done`)
+  }
+  return parts.join(', ')
+}
+
+// What's left today, in the order it will come up. Power actions carry their number.
+// The next few show by default; Reorder or "Show all" opens the whole list. (A "Show all" that
+// would reveal a single row takes as much room as the row, so then the whole list shows.)
+function renderDayOrderSection(progress, entries, low) {
+  const resolved = dailyResolvedStepIds(progress)
+  const upcoming = entries.filter((entry) => entry.type === 'todo' || !resolved.has(entry.id))
+  const currentKey = getCurrentStackAction(progress)?.key || ''
+  const list = getPowerActionList()
+  const restingCount = low ? dailySteps.filter((step) => !step.is_core).length : 0
+  const showAll = dayUi.reorder || dayUi.orderAll || upcoming.length <= ORDER_PREVIEW_COUNT + 1
+  const shown = showAll ? upcoming : upcoming.slice(0, ORDER_PREVIEW_COUNT)
+  const rows = shown.map((entry, index) => {
+    const isNow = entry.key === currentKey
+    const kind = orderKindLabel(entry, progress, list)
+    const mark = entry.type === 'todo'
+      ? `<span class="order-mark is-power" aria-hidden="true">${powerActionLabel(entry.todo, list).number || ''}</span>`
+      : '<span class="order-mark" aria-hidden="true"></span>'
+    return `
+      <li class="order-row is-${entry.type} ${isNow ? 'is-now' : ''}">
+        ${mark}
+        <span class="order-copy"><strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(isNow ? `Up now. ${kind}` : kind)}</small></span>
+        ${dayUi.reorder ? `
+          <span class="order-move">
+            <button type="button" class="order-move-button" data-order-move="up" data-stack-key="${escapeHtml(entry.key)}" ${index === 0 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} earlier">&uarr;</button>
+            <button type="button" class="order-move-button" data-order-move="down" data-stack-key="${escapeHtml(entry.key)}" ${index === upcoming.length - 1 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} later">&darr;</button>
+          </span>` : ''}
+      </li>`
+  }).join('')
+  const more = !showAll && upcoming.length > shown.length
+    ? `<button type="button" class="day-panel-link" id="order-show-all">Show all ${upcoming.length}</button>`
+    : ''
+  return `
+    <section class="day-section" id="day-order" aria-labelledby="day-order-title">
+      ${renderSectionHead('day-order-title', "Today's order", `${upcoming.length} left`,
+        upcoming.length > 1 ? `<button type="button" class="day-section-action ${dayUi.reorder ? 'is-active' : ''}" id="toggle-reorder" aria-pressed="${dayUi.reorder}">${dayUi.reorder ? 'Done' : 'Reorder'}</button>` : '')}
+      ${rows ? `<ol class="day-panel order-list">${rows}</ol>${more}` : '<div class="day-panel"><p class="day-empty">Nothing left for today.</p></div>'}
+      ${restingCount ? `<p class="day-section-note">Low energy: ${plural(restingCount, 'non-core step')} resting today.</p>` : ''}
+    </section>`
+}
+
+// Inbox is your backlog: everything that isn't in today. Today's picks live under Power actions,
+// so nothing shows up twice.
+function renderInboxSection() {
+  if (!powerActionsAvailable) return ''
+  const dateKey = todayDateKey()
+  const inToday = new Set(getTodayPowerPlans().filter((plan) => plan.status === 'pending').map((plan) => plan.todo_id))
+  // Newest first: what you just dumped shows at the top, and the oldest wait for Sort.
+  const backlog = newestFirst(powerTodos.filter((todo) => !inToday.has(todo.id)))
+  const due = dueInboxCount()
+  const showAll = dayUi.inboxAll || dayUi.inboxEdit || backlog.length <= INBOX_PREVIEW_COUNT + 1
+  const shown = showAll ? backlog : backlog.slice(0, INBOX_PREVIEW_COUNT)
+  const rows = shown.map((todo) => {
+    if (dayUi.inboxEdit) {
+      return `
+        <li>
+          <form class="inbox-edit-row" data-power-todo-edit="${todo.id}">
+            <input name="title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required value="${escapeHtml(todo.title)}" aria-label="Rename ${escapeHtml(todo.title)}" />
+            <button type="submit" class="small-button">Save</button>
+            <button type="button" class="inbox-delete" data-power-todo-delete="${todo.id}" aria-label="Delete ${escapeHtml(todo.title)}">Delete</button>
+          </form>
+        </li>`
+    }
+    const meta = isTodoSnoozed(todo, dateKey) ? `back ${returnDayLabel(todo.snoozed_until)}` : ageShortLabel(todo.created_at)
+    return `
+      <li class="inbox-row">
+        <span class="inbox-title">${escapeHtml(todo.title)}</span>
+        <span class="inbox-meta">${escapeHtml(meta)}</span>
+      </li>`
+  }).join('')
+  const actions = [
+    due ? '<button type="button" class="day-section-action" data-open-triage>Sort</button>' : '',
+    backlog.length ? `<button type="button" class="day-section-action ${dayUi.inboxEdit ? 'is-active' : ''}" id="toggle-inbox-edit" aria-pressed="${dayUi.inboxEdit}">${dayUi.inboxEdit ? 'Done' : 'Edit'}</button>` : ''
+  ].join('')
+  const more = !showAll && backlog.length > shown.length
+    ? `<button type="button" class="day-panel-link" id="inbox-show-all">Show all ${backlog.length}</button>`
+    : ''
+  const empty = powerTodos.length
+    ? 'Everything left is in today. Anything new you dump lands here.'
+    : 'Empty. Anything you dump lands here.'
+  return `
+    <section class="day-section" id="inbox" aria-labelledby="inbox-title">
+      ${renderSectionHead('inbox-title', 'Inbox', backlog.length || '', actions)}
+      <form id="capture-form" class="day-capture-form" autocomplete="off">
+        <input id="capture-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Dump a thought" aria-label="Add to Inbox" enterkeyhint="done" />
+        <button type="submit" class="day-capture-button" aria-label="Add to Inbox">+</button>
+      </form>
+      ${rows
+        ? `<ul class="day-panel inbox-list ${dayUi.inboxEdit ? 'is-editing' : ''}">${rows}</ul>${more}`
+        : `<div class="day-panel"><p class="day-empty">${empty}</p></div>`}
+    </section>`
+}
+
+function renderDaySetup() {
+  const coreCount = actionEngineAvailable ? dailySteps.filter((step) => step.is_core).length : 0
+  const routineMeta = dailySteps.length ? `${plural(dailySteps.length, 'step')}${coreCount ? `, ${coreCount} core` : ''}` : 'Not set up yet'
+  const boosterMeta = !dailyMedsAvailable ? 'Needs the database step' : dailyMeds.length ? plural(dailyMeds.length, 'booster') : 'None yet'
+  return `
+    <section class="day-section day-setup" aria-labelledby="setup-title">
+      ${renderSectionHead('setup-title', 'Setup')}
+      <div class="day-panel setup-list">
+        <button type="button" class="setup-row" id="open-routine-editor">
+          <span class="setup-copy"><strong>Edit routine</strong><small>${escapeHtml(routineMeta)}</small></span>
+          <span class="setup-chevron" aria-hidden="true">&rsaquo;</span>
+        </button>
+        <button type="button" class="setup-row" id="open-boosters-editor" ${dailyMedsAvailable ? '' : 'disabled'}>
+          <span class="setup-copy"><strong>Edit boosters</strong><small>${escapeHtml(boosterMeta)}</small></span>
+          <span class="setup-chevron" aria-hidden="true">&rsaquo;</span>
+        </button>
+      </div>
+    </section>`
+}
+
 function renderDay(errorMessage = '', options = {}) {
   activeFolder = null
   activeExerciseGroups = []
@@ -3998,73 +4402,51 @@ function renderDay(errorMessage = '', options = {}) {
 
   const progress = currentDailyProgress()
   progress.stack_order = normalizeTodayStackOrder(progress)
+  const entries = getTodayStackEntries(progress)
   const remaining = remainingTodayActionCount(progress)
+  const score = todayScore(progress)
   const started = Boolean(progress.started_at)
   const closed = Boolean(progress.closed_at)
-  const complete = closed || (started && remaining === 0)
+  const complete = closed || (started && remaining === 0 && (entries.length > 0 || score.done > 0))
 
-  // Opening the Day tab goes straight to the next action: no overview, no Start button.
-  // The overview is the back office (••• → Plan / edit day).
+  // The Day tab goes straight to what's next: first thing in the morning that's your power actions,
+  // after that it's one card at a time. The overview is one tap away (Today).
   if (!options.forceOverview && !errorMessage && !complete) {
     if (started && remaining > 0) {
       renderDayRunner()
       return
     }
-    if (!started && startDailySystem()) return
+    if (!started) {
+      if (openPowerPrompt('start')) return
+      if (startDailySystem()) return
+    }
   }
 
-  const stackEntries = getTodayStackEntries(progress)
-  const todoCount = stackEntries.filter((entry) => entry.type === 'todo').length
   const low = isLowEnergy(progress) && hasCoreSteps()
-  const score = todayScore(progress)
-  let mainCard = ''
-  if (complete) {
-    mainCard = renderDayCompleteCard({ closed, celebrate: Boolean(options.justCompleted) })
-  } else if (!stackEntries.length) {
-    mainCard = `
-      <section class="day-start-card">
-        <div class="today-label">Today</div>
-        <h2>Nothing queued.</h2>
-        <p>Add your routine once in Edit routine, or dump a todo below and pick it for today.${score.done ? ` ${plural(score.done, 'thing')} done already.` : ''}</p>
-      </section>`
-  } else {
-    const energyLink = hasCoreSteps() ? `<button type="button" class="quiet-link" id="toggle-energy">${low ? 'Back to full day' : 'Low-energy day? Core only'}</button>` : ''
-    const wrapLink = started && actionEngineAvailable ? '<button type="button" class="quiet-link" id="wrap-up-day">Wrap up day</button>' : ''
-    mainCard = `
-      <section class="day-start-card day-stack-start-card ${low ? 'is-low-energy' : ''}">
-        <div class="today-label">${started ? 'In progress' : 'Today'}${low ? ' · low-energy' : ''}</div>
-        <h2>${started ? 'Keep moving.' : 'Ready.'}</h2>
-        <p>${started ? `${score.done} done · ${remaining} to go` : `${plural(remaining, 'action')}${todoCount ? ` · ${plural(todoCount, 'todo')}` : ''}`}</p>
-        ${started ? `<div class="day-start-progress" aria-hidden="true"><span style="width:${score.percent}%"></span></div>` : ''}
-        <button type="button" class="start-workout-button day-start-button" id="start-day">${started ? 'Continue' : 'Start day'} <span aria-hidden="true">&rarr;</span></button>
-        ${energyLink || wrapLink ? `<div class="day-start-links">${energyLink}${wrapLink}</div>` : ''}
-      </section>`
-  }
-
-  const openIds = new Set(options.openIds || [])
-  if (options.openPlanner) openIds.add('today-stack-planner')
-  if (options.openInbox) openIds.add('todo-inbox-card')
-
   renderShell(`
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${usingCachedData ? '<div class="offline-note">Offline · saved day available</div>' : ''}
-    ${mainCard}
-    ${renderQuickCapture()}
-    ${renderTodayPlanner()}
-    ${renderDailyEditor()}
-    ${renderDailyMeds()}
-    ${renderTodoInbox()}`,
+    ${renderDayHero({ progress, entries, remaining, score, started, closed, complete, low, celebrate: Boolean(options.justCompleted) })}
+    ${renderPowerActionsSection()}
+    ${renderBoostersSection()}
+    ${complete ? '' : renderDayOrderSection(progress, entries, low)}
+    ${renderInboxSection()}
+    ${renderDaySetup()}`,
     { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
 
-  openIds.forEach((id) => document.getElementById(id)?.setAttribute('open', ''))
   bindDayOverview()
   if (options.focusCapture) document.querySelector('#capture-input')?.focus()
 }
 
 function bindDayOverview() {
-  document.querySelector('#start-day')?.addEventListener('click', () => {
+  document.querySelector('#hero-continue')?.addEventListener('click', () => {
     if (!startDailySystem()) rerenderOverview()
   })
+  document.querySelector('#hero-start')?.addEventListener('click', () => {
+    if (openPowerPrompt('start')) return
+    if (!startDailySystem()) rerenderOverview()
+  })
+  document.querySelector('#hero-pick')?.addEventListener('click', openPowerPromptForToday)
   document.querySelector('#toggle-energy')?.addEventListener('click', () => {
     toggleEnergyMode()
     rerenderOverview()
@@ -4075,22 +4457,41 @@ function bindDayOverview() {
     toggleEnergyMode()
     if (!startDailySystem()) rerenderOverview()
   })
+  document.querySelector('#change-power-actions')?.addEventListener('click', openPowerPromptForToday)
+  document.querySelectorAll('[data-daily-med-toggle]').forEach((button) => {
+    button.addEventListener('click', () => toggleDailyMed(button.dataset.dailyMedToggle))
+  })
+  document.querySelector('#toggle-reorder')?.addEventListener('click', () => {
+    dayUi.reorder = !dayUi.reorder
+    rerenderOverview()
+  })
+  document.querySelectorAll('[data-order-move]').forEach((button) => {
+    button.addEventListener('click', () => moveTodayStackItem(button.dataset.stackKey, button.dataset.orderMove))
+  })
+  document.querySelector('#order-show-all')?.addEventListener('click', () => {
+    dayUi.orderAll = true
+    rerenderOverview()
+  })
   document.querySelector('#capture-form')?.addEventListener('submit', handleCaptureSubmit)
   document.querySelectorAll('[data-open-triage]').forEach((button) => {
-    button.addEventListener('click', () => openTriage({ returnTo: 'overview' }))
+    button.addEventListener('click', () => openTriage())
   })
-  document.querySelectorAll('[data-stack-move]').forEach((button) => {
-    button.addEventListener('click', () => moveTodayStackItem(button.dataset.stackKey, button.dataset.stackMove))
+  document.querySelector('#toggle-inbox-edit')?.addEventListener('click', () => {
+    dayUi.inboxEdit = !dayUi.inboxEdit
+    rerenderOverview()
   })
-  document.querySelectorAll('[data-power-today]').forEach((button) => {
-    button.addEventListener('click', () => togglePowerTodoToday(button.dataset.powerToday))
+  document.querySelector('#inbox-show-all')?.addEventListener('click', () => {
+    dayUi.inboxAll = true
+    rerenderOverview()
   })
   document.querySelectorAll('[data-power-todo-edit]').forEach((form) => form.addEventListener('submit', updatePowerTodo))
   document.querySelectorAll('[data-power-todo-delete]').forEach((button) => {
     button.addEventListener('click', () => deletePowerTodo(button.dataset.powerTodoDelete))
   })
-  bindDailyEditor()
-  bindDailyMeds()
+  document.querySelector('#open-routine-editor')?.addEventListener('click', () => openDayEditor('routine'))
+  document.querySelectorAll('#open-boosters-editor, [data-open-boosters-editor]').forEach((button) => {
+    button.addEventListener('click', () => openDayEditor('boosters'))
+  })
 }
 
 // ---------- the runner: one card, one decision ----------
@@ -4181,10 +4582,12 @@ function renderDayRunner() {
     const parent = todo.parent_id ? getAnyTodo(todo.parent_id) : null
     const sprint = readSprint()
     const showStuck = deferCount >= 1 || revealedStuckKeys.has(key) || Boolean(sprint && sprint.key === key)
+    const label = powerActionLabel(todo)
+    const parentTitle = label.parentTitle || parent?.title || ''
     waitForStuck = !showStuck
     cardClass = 'day-step-card-todo'
     cardBody = `
-      <div class="day-step-parent">Todo${isAutoPicked(todo.id) ? ' <span>picked for you</span>' : ''}${parent ? ` <span>step of: ${escapeHtml(shorten(parent.title, 28))}</span>` : ''}</div>
+      <div class="day-step-parent">${escapeHtml(label.text)}${parentTitle ? ` <span>${label.parentTitle ? '' : 'step of: '}${escapeHtml(shorten(parentTitle, 28))}</span>` : ''}</div>
       <h2>${escapeHtml(todo.title)}</h2>
       ${deferCount >= DEFER_NUDGE_AT ? renderDeferNudge(deferCount, 'todo') : ''}
       <div id="stuck-slot">${showStuck ? renderStuckTools(action) : ''}</div>
@@ -4229,14 +4632,10 @@ function renderDayRunner() {
           <div class="day-runner-tools">
             ${renderRunnerMedsPill()}
             <button type="button" class="day-runner-capture" id="runner-capture" aria-label="Capture a thought">+</button>
-            <details class="day-runner-menu">
-              <summary aria-label="Day options">&bull;&bull;&bull;</summary>
-              <div class="day-runner-menu-popover">
-                <button type="button" class="text-button" id="exit-day-runner">Plan / edit day</button>
-                ${hasCoreSteps() ? `<button type="button" class="text-button" id="runner-toggle-energy">${low ? 'Back to full day' : 'Low-energy: core only'}</button>` : ''}
-                ${actionEngineAvailable ? '<button type="button" class="text-button" id="runner-wrap-up">Wrap up day</button>' : ''}
-              </div>
-            </details>
+            <button type="button" class="runner-today-button" id="runner-today" aria-label="See all of today">
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 4h12M2 8h12M2 12h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <span>Today</span>
+            </button>
           </div>
         </div>
         <div class="runner-progress" aria-hidden="true"><span style="width:${score.percent}%"></span></div>
@@ -4252,7 +4651,7 @@ function renderDayRunner() {
         <button type="button" class="day-primary-action" id="primary-current-action">${escapeHtml(primaryLabel)} <span aria-hidden="true">&rarr;</span></button>
       </div>
     </div>`,
-    { title: 'Day', showAccount: false, showTimer: false, showHeader: false, view: 'day-runner' })
+    { title: 'Day', showAccount: false, showTimer: false, showHeader: false, navTab: 'day', view: 'day-runner', shellClass: 'runner-shell' })
 
   lastRunnerKey = key
   syncSprintWithAction(action)
@@ -4265,16 +4664,11 @@ function renderDayRunner() {
 
   document.querySelector('#runner-capture')?.addEventListener('click', showRunnerCapture)
   document.querySelector('#runner-meds')?.addEventListener('click', showMedsSheet)
-  document.querySelector('#exit-day-runner')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
-  document.querySelector('#runner-toggle-energy')?.addEventListener('click', () => {
-    toggleEnergyMode()
-    renderDayRunner()
-  })
+  document.querySelector('#runner-today')?.addEventListener('click', openDayOverview)
   document.querySelector('#rough-day')?.addEventListener('click', () => {
     toggleEnergyMode()
     renderDayRunner()
   })
-  document.querySelector('#runner-wrap-up')?.addEventListener('click', wrapUpDay)
   document.querySelector('#gym-choose-other')?.addEventListener('click', () => renderWorkouts())
 
   const primary = document.querySelector('#primary-current-action')
@@ -4416,10 +4810,10 @@ function showShrinkSheet(todo) {
 // Ranking a whole list is the hard part. Deciding about one item at a time is easy, so the inbox
 // is served like the runner: one card, three answers, and it stops when you have enough for today.
 
-function openTriage(options = {}) {
+function openTriage() {
   if (!powerActionsAvailable) return
   closeSheet()
-  triageSession = { returnTo: options.returnTo || 'overview', passedIds: new Set(), picked: 0, decided: 0, keepGoing: getPendingPowerPlans().length >= TODAY_TODO_TARGET }
+  triageSession = { passedIds: new Set(), picked: 0, decided: 0, keepGoing: getPendingPowerPlans().length >= TODAY_TODO_TARGET }
   renderTriage()
 }
 
@@ -4471,7 +4865,7 @@ function renderTriage() {
     </div>`,
     { title: 'Sort inbox', showAccount: false, showTimer: false, showHeader: false, view: 'triage' })
 
-  document.querySelector('#triage-exit')?.addEventListener('click', () => exitTriage(false))
+  document.querySelector('#triage-exit')?.addEventListener('click', exitTriage)
   document.querySelector('#triage-today')?.addEventListener('click', () => triageToday(todo.id))
   document.querySelector('#triage-not-today')?.addEventListener('click', () => triageNotToday(todo.id))
   document.querySelector('#triage-drop')?.addEventListener('click', () => triageDrop(todo.id))
@@ -4480,7 +4874,6 @@ function renderTriage() {
 
 function renderTriageSummary(queue, capReached) {
   const picked = getPendingPowerPlans().map((plan) => getPowerTodo(plan.todo_id)).filter(Boolean)
-  const backToDay = triageSession.returnTo === 'runner' || Boolean(currentDailyProgress().started_at)
   const title = capReached ? `That's your ${TODAY_TODO_TARGET}.` : 'Inbox sorted.'
   const copy = capReached
     ? 'A short list you finish beats a long list you avoid. Everything else is safe in Inbox.'
@@ -4492,14 +4885,14 @@ function renderTriageSummary(queue, capReached) {
         <div class="runner-progress" aria-hidden="true"><span style="width:100%"></span></div>
       </header>
       <section class="day-step-card triage-card is-summary" id="day-step-card">
-        <div class="day-step-parent">Plan</div>
+        <div class="day-step-parent">Today</div>
         <h2>${escapeHtml(title)}</h2>
         <p>${escapeHtml(copy)}</p>
         ${picked.length ? `<ol class="triage-picked">${picked.map((todo) => `<li>${escapeHtml(todo.title)}</li>`).join('')}</ol>` : ''}
       </section>
       <div class="day-action-controls">
         ${capReached && queue.length ? `<div class="day-secondary-actions"><button type="button" class="day-option-button" id="triage-keep-going">Keep sorting · ${queue.length} left</button></div>` : ''}
-        <button type="button" class="day-primary-action" id="triage-finish">${backToDay ? 'BACK TO YOUR DAY' : 'START DAY'} <span aria-hidden="true">&rarr;</span></button>
+        <button type="button" class="day-primary-action" id="triage-finish">BACK TO YOUR DAY <span aria-hidden="true">&rarr;</span></button>
       </div>
     </div>`,
     { title: 'Sort inbox', showAccount: false, showTimer: false, showHeader: false, view: 'triage' })
@@ -4509,14 +4902,12 @@ function renderTriageSummary(queue, capReached) {
     triageSession.keepGoing = true
     renderTriage()
   })
-  document.querySelector('#triage-finish')?.addEventListener('click', () => exitTriage(true))
+  document.querySelector('#triage-finish')?.addEventListener('click', exitTriage)
 }
 
-function exitTriage(startDay = false) {
-  const session = triageSession
+function exitTriage() {
   triageSession = null
-  if ((startDay || session?.returnTo === 'runner') && startDailySystem()) return
-  renderDay('', { forceOverview: true })
+  openDayOverview()
 }
 
 function rerenderTriage() {
@@ -4797,7 +5188,7 @@ function renderMore(errorMessage = '') {
       <button type="button" class="secondary-button full-button" id="sign-out">Sign out</button>
       <div id="backup-status" class="status-line backup-status" aria-live="polite"></div>
       <div class="app-version">battle angel v${APP_VERSION}</div>
-      ${actionEngineAvailable ? '' : '<div class="db-upgrade-note">Database: run <strong>supabase/action_engine_upgrade.sql</strong> once to turn on core steps, snooze, sizes, and wrap-up.</div>'}
+      ${actionEngineAvailable ? '' : '<div class="db-upgrade-note">Database: run <strong>supabase/action_engine_upgrade.sql</strong> once to turn on core steps, snooze, and wrap-up.</div>'}
     </section>`, { title: 'More', showAccount: false, showTimer: false, navTab: 'more' })
 
   document.querySelector('#toggle-done-sound')?.addEventListener('click', toggleDoneSound)
@@ -6975,6 +7366,8 @@ function handleDayRollover() {
   const progressStale = Boolean(dailyProgress && dailyProgress.progress_date !== today)
   if (!progressStale && dailyMedsDate === today && powerActionsDate === today) return
   triageSession = null
+  powerPrompt = null
+  dayUi = { reorder: false, inboxEdit: false, inboxAll: false }
   revealedStuckKeys.clear()
   clearUndo()
   hideToast(true)
@@ -7062,6 +7455,7 @@ function readStoredAuthUser() {
 }
 
 async function boot() {
+  clearLegacyAutoPickMarkers()
   const storedUser = readStoredAuthUser()
   const canStartFromSnapshot = Boolean(storedUser && readJson(`battle-angel-snapshot-${storedUser.id}`, null))
   let sessionCheck = null
@@ -7109,10 +7503,11 @@ async function boot() {
         await loadFolders()
         const saved = await syncWorkoutStateFromCloud()
         const cloudChangedWorkout = (saved?.updatedAt || 0) > localUpdatedAt
-        if (viewVersion === version && ['day', 'home', 'day-runner'].includes(currentView) && (dataSignature() !== before || cloudChangedWorkout)) {
+        if (viewVersion === version && ['day', 'home', 'day-runner', 'day-prompt'].includes(currentView) && (dataSignature() !== before || cloudChangedWorkout)) {
           if (cloudChangedWorkout && shouldAutoResume(saved)) await routeAfterLoad(saved)
           else if (currentView === 'day') renderDay()
           else if (currentView === 'day-runner') refreshRunnerIfChanged()
+          else if (currentView === 'day-prompt') refreshPowerPromptIfIdle()
           else renderHome()
         }
       } catch (error) {
@@ -7173,6 +7568,8 @@ async function handleSessionChange(session) {
   powerActionsAvailable = true
   actionEngineAvailable = true
   triageSession = null
+  powerPrompt = null
+  dayUi = { reorder: false, inboxEdit: false, inboxAll: false }
   lastRunnerKey = ''
   stopSprintTicker()
   closeSheet()

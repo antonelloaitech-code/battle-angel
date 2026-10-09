@@ -8,7 +8,7 @@ battle angel is a low-friction daily-system + gym app built for an ADHD brain: s
 
 The app is split into four simple tabs so the screen stays quiet:
 
-- **Day** — open it and you're on the next action. Your routine plus up to 3 todos, served one card at a time. Planning and editing live behind •••.
+- **Day** — each morning it asks which power actions you're getting done today, then serves your routine and those power actions one card at a time. **Today** (top right) opens the whole day: power actions, boosters, today's order, Inbox, and setup.
 - **Gym** — today's planned gym modules, resume, offline video prep, and access to all workouts.
 - **Plan** — calendar, recurring weekly plan, and repeat-last-week.
 - **More** — motivation videos and photos, theme, backup, and sign out.
@@ -93,8 +93,8 @@ Your existing Netlify environment variables remain:
 - Completed-workout markers: `workout_history`
 - Daily routine steps: `daily_steps`
 - Daily routine progress by date: `daily_progress`
-- Daily medication list: `daily_meds`
-- Daily medication checkmarks by date: `daily_med_log`
+- Boosters list: `daily_meds` (shown as Boosters in the app)
+- Boosters checkmarks by date: `daily_med_log`
 - Master todo list: `power_todos`
 - Today's Power Action selections/status: `power_action_plan`
 - v1.18 additions: core flag on `daily_steps`; energy mode, Later counts, and wrap-up time on `daily_progress`; size, snooze, and first-step link on `power_todos`
@@ -110,7 +110,7 @@ Videos over 12 MB are compressed on the phone before uploading (H.264 MP4, up to
 
 ## backup
 
-Open **More -> Backup library** to create a ZIP containing the workout library, planning data, Daily System, meds, Power Actions/todos, motivation references, and uploaded videos. Save the ZIP somewhere independent such as iCloud Drive or your computer.
+Open **More -> Backup library** to create a ZIP containing the workout library, planning data, Daily System, boosters, Power Actions/todos, motivation references, and uploaded videos. Save the ZIP somewhere independent such as iCloud Drive or your computer.
 
 ## v1.8 — multiple workouts per day + rest lock screen
 
@@ -419,3 +419,32 @@ The green accent is now neon pink (`#eb4ff6`) everywhere it appeared: DONE and o
 ## v1.18.3 — pinker
 
 The accent moves from violet-pink to hot pink: `#f651bf` in dark mode, `#ba1282` in light mode. No database changes.
+
+## v1.19 — morning power actions, Boosters, a Day tab you can find your way around
+
+No database changes. Everything you have stays as it is.
+
+### The morning question
+
+- The first time you open battle angel each day, it asks: **"What power actions are you getting done today to get to another place?"**
+- Tap your todos **in order of importance**: the first tap is #1, the next #2, then #3. Type a new one straight into the next open slot. **↑** moves a pick up, **×** takes it out.
+- Three is the limit, so the day stays winnable. Things you skipped recently rest in a separate list, one tap away.
+- **Lock in and start** puts them after your routine, in your order, and starts the day. Each card says **Power action 1 of 3**. **Skip and start with my routine** is always there.
+- Changed your mind? **Change** on the Day overview reopens the same picker; what's already done stays done.
+- This replaces v1.18.1's automatic "picked for you".
+
+### Meds are now Boosters
+
+- Same list, same checkmarks, new name everywhere: the runner pill, the sheet, the Day tab, the editor.
+
+### The Day tab, organized
+
+- In the runner, **Today** (top right) opens the whole day, and the tab bar stays visible. No more hidden ••• menu.
+- The overview reads top to bottom, one pattern for every section (title, count, one button on the right):
+  1. **Up now** with **Continue**, plus Low energy and Wrap up day
+  2. **Power actions** (Change)
+  3. **Boosters**, checked right there
+  4. **Today's order**, the next few (Reorder, Show all)
+  5. **Inbox**: dump a thought; your backlog, newest first, without today's picks repeated (Sort, Edit)
+  6. **Setup**: **Edit routine** and **Edit boosters**, two matching rows that each open their own screen with a back button
+- Editing never happens in the middle of the overview anymore, so the page stays about today.

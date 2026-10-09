@@ -4326,3 +4326,930 @@ body.day-runner-active #toast-host .day-undo-toast.is-hiding {
   .stuck-tools { animation: none; }
 }
 
+
+/* ==========================================================================
+   v1.19 Day tab: the morning question, one-pattern overview, setup screens
+   Pink = power actions and progress. Gold = boosters. Everything else stays quiet.
+   ========================================================================== */
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Pages without the brand header still leave room for the tab bar. */
+.shell.shell-no-header.has-bottom-nav {
+  padding-bottom: max(118px, calc(env(safe-area-inset-bottom, 0px) + 104px));
+}
+
+body.day-runner-active .shell-no-header.has-bottom-nav {
+  padding-bottom: max(80px, calc(env(safe-area-inset-bottom, 0px) + 72px));
+}
+
+/* ---- runner: a labeled way to the whole day, next to capture ---- */
+.runner-today-button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.runner-today-button svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.runner-today-button:active { background: var(--surface-soft); }
+
+@media (max-width: 359px) {
+  .runner-today-button { padding: 0 12px; }
+  .runner-today-button span { display: none; }
+}
+
+/* ---- morning: the question and three numbered slots ---- */
+/* A column as tall as the screen, so Lock in always sits in thumb reach at the bottom,
+   even when the list is short. */
+.prompt-screen {
+  min-height: calc(100dvh - max(10px, calc(env(safe-area-inset-top, 0px) + 8px)));
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding-top: 8px;
+}
+
+.prompt-screen > .prompt-actions { margin-top: auto; }
+
+.prompt-date {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.prompt-question {
+  margin: 8px 0 0;
+  font-size: clamp(1.9rem, 8.4vw, 2.7rem);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.prompt-slots {
+  display: grid;
+  gap: 10px;
+}
+
+.slot {
+  min-height: 66px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px;
+  border-radius: 20px;
+}
+
+.slot-num {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  font-size: 1.55rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.slot.is-filled {
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--surface);
+}
+
+.slot.is-filled .slot-num {
+  background: var(--accent);
+  color: #fff;
+}
+
+.slot.is-new .slot-num { animation: slot-pop 280ms cubic-bezier(0.2, 0.9, 0.3, 1.35); }
+
+@keyframes slot-pop {
+  from { transform: scale(0.55); }
+  to { transform: scale(1); }
+}
+
+.slot-title {
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.slot-tools {
+  display: flex;
+  gap: 2px;
+}
+
+.slot-tool {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.15rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.slot-tool:active {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.slot.is-open {
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: transparent;
+}
+
+.slot.is-open:focus-within {
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+.slot.is-open .slot-num {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.slot.is-open input {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.02rem;
+  font-weight: 700;
+  outline: none;
+}
+
+.slot-add {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--surface-strong);
+  color: var(--text);
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+
+.slot.is-done {
+  min-height: 54px;
+  border: 1px solid var(--border);
+  background: transparent;
+}
+
+.slot.is-done .slot-num {
+  height: 40px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 1.1rem;
+}
+
+.slot.is-done .slot-title {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.slot.is-empty {
+  min-height: 58px;
+  border: 1.5px dashed var(--border);
+  opacity: 0.5;
+}
+
+.slot.is-empty .slot-num {
+  height: 38px;
+  color: var(--muted);
+}
+
+.prompt-status {
+  margin: 2px 4px 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 750;
+}
+
+.prompt-status.is-flash {
+  color: var(--accent-dark);
+  animation: prompt-nudge 360ms ease;
+}
+
+@keyframes prompt-nudge {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+.prompt-section-title {
+  margin: 0 4px 10px;
+  font-size: 1.04rem;
+  font-weight: 850;
+}
+
+.prompt-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.prompt-row {
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.prompt-row + .prompt-row { border-top: 1px solid var(--border); }
+.prompt-row:active { background: var(--surface-soft); }
+
+.prompt-ring {
+  width: 26px;
+  height: 26px;
+  border: 2px solid color-mix(in srgb, var(--muted) 55%, var(--border));
+  border-radius: 50%;
+}
+
+.prompt-row:active .prompt-ring { border-color: var(--accent); }
+.prompt-row.is-full { opacity: 0.45; }
+
+.prompt-title {
+  min-width: 0;
+  font-weight: 750;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.prompt-meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.prompt-resting > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  list-style: none;
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.prompt-resting > summary::-webkit-details-marker { display: none; }
+
+.prompt-resting > summary::after {
+  content: '\203A';
+  margin-left: auto;
+  font-size: 1.4rem;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.prompt-resting[open] > summary { margin-bottom: 8px; }
+.prompt-resting[open] > summary::after { transform: rotate(90deg); }
+
+/* The question screen ends in its action bar. It stays pinned while the list scrolls underneath,
+   and its background runs down behind the tab bar so no list text shows through there. */
+.shell.shell-no-header.has-bottom-nav.prompt-shell { padding-bottom: 0; }
+
+.prompt-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 18px 0 max(78px, calc(env(safe-area-inset-bottom, 0px) + 70px));
+  background: linear-gradient(to bottom, transparent, var(--bg) 20px);
+}
+
+.prompt-lock {
+  min-height: 66px;
+  font-size: 1.12rem;
+}
+
+.prompt-lock:disabled {
+  background: var(--surface-strong);
+  color: var(--muted);
+  cursor: default;
+}
+
+.prompt-lock:disabled span { display: none; }
+
+/* ---- overview: hero, then sections that all work the same way ---- */
+.day-hero {
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  background: var(--surface);
+}
+
+.day-hero-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.day-hero-date,
+.day-hero-score,
+.day-hero-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.day-hero-score { font-variant-numeric: tabular-nums; }
+
+.day-hero-score strong {
+  color: var(--text);
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.day-hero-progress {
+  height: 6px;
+  margin: 12px 0 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-strong);
+}
+
+.day-hero-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.day-hero-now {
+  margin: 4px 0 16px;
+  font-size: clamp(1.45rem, 6.4vw, 1.9rem);
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+
+.day-hero-title { margin-top: 6px; }
+
+.day-hero-copy {
+  margin: 8px 0 18px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.day-hero-cta {
+  width: 100%;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.12rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.day-hero-cta:active { background: var(--accent-dark); }
+
+.day-hero-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.day-chip {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.day-chip:active {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.day-section { margin-top: 28px; }
+
+.day-section-head {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 2px 10px 4px;
+}
+
+.day-section-head h3 {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 850;
+  letter-spacing: -0.015em;
+}
+
+.day-section-count {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.day-section-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.day-section-action {
+  min-height: 38px;
+  padding: 0 15px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.day-section-action:active { background: var(--surface-soft); }
+
+.day-section-action.is-active {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.day-section-note {
+  margin: 10px 4px 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.day-panel {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  list-style: none;
+}
+
+.day-panel > li + li,
+.day-panel > .booster-row + .booster-row,
+.day-panel > .setup-row + .setup-row,
+.day-panel > .day-panel-link { border-top: 1px solid var(--border); }
+
+.day-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.day-panel-link {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-dark);
+  font-weight: 850;
+  cursor: pointer;
+}
+
+/* Power actions: the same pink numbers as this morning's slots. */
+.pa-row {
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px 10px 12px;
+}
+
+.pa-num {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.pa-title {
+  font-size: 1.04rem;
+  font-weight: 800;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.pa-row.is-done .pa-num {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-size: 1.05rem;
+}
+
+.pa-row.is-done .pa-title {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Boosters: gold everywhere (pill, sheet, Day tab). */
+.booster-list .booster-row {
+  min-height: 54px;
+  padding: 10px 14px;
+  border-radius: 0;
+}
+
+.booster-row .daily-med-check { border-color: color-mix(in srgb, var(--gold) 55%, var(--border)); }
+
+.booster-row.is-taken .daily-med-check {
+  border-color: transparent;
+  background: var(--gold);
+  color: #1d1606;
+}
+
+/* Today's order: what's left, top to bottom. */
+.order-row {
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px 9px 14px;
+}
+
+.order-mark {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  font-size: 0.82rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.order-mark.is-power {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.order-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.order-copy strong {
+  overflow: hidden;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-copy small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.order-row.is-now { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+
+.order-row.is-now .order-mark {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.order-row.is-now .order-mark.is-power { color: #fff; }
+
+.order-row.is-now .order-copy small {
+  color: var(--accent-dark);
+  font-weight: 850;
+}
+
+.order-move {
+  display: flex;
+  gap: 6px;
+}
+
+.order-move-button {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.order-move-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Inbox: capture on top, a quiet list below. */
+#inbox .day-capture-form { margin-bottom: 10px; }
+
+.inbox-row {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
+.inbox-title {
+  min-width: 0;
+  font-weight: 750;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.inbox-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.inbox-edit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.inbox-edit-row input,
+.inbox-edit-row .small-button { min-height: 44px; }
+
+.inbox-delete {
+  min-height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* Setup: the two editors, side by side in one list, same look, same behavior. */
+.setup-row {
+  width: 100%;
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.setup-row:active { background: var(--surface-soft); }
+
+.setup-row:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.setup-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.setup-copy strong {
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.setup-copy small {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
+.setup-chevron {
+  color: var(--muted);
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+/* ---- setup screens: routine and boosters ---- */
+.editor-back { margin-bottom: 14px; }
+
+.editor-intro {
+  margin: 0 4px 16px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.editor-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.editor-item + .editor-item { border-top: 1px solid var(--border); }
+.editor-item[open] { background: var(--surface-soft); }
+
+.editor-item > summary {
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px 10px 12px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.editor-item > summary::-webkit-details-marker { display: none; }
+
+.editor-item-num {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.editor-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.editor-item-copy strong {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.editor-item-copy small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.editor-item-open {
+  color: var(--accent-dark);
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
+.editor-item[open] .editor-item-open { color: var(--muted); }
+
+.editor-form {
+  display: grid;
+  gap: 12px;
+  padding: 2px 14px 16px;
+}
+
+.editor-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.field-label {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.editor-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 0.7fr)) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.editor-actions > * {
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+.editor-tip {
+  margin: 12px 4px 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.editor-add {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+  padding: 16px;
+  border: 1.5px dashed var(--border);
+  border-radius: 20px;
+}
+
+.editor-add-title {
+  margin: 0;
+  font-size: 1.04rem;
+  font-weight: 850;
+}
+
+.editor-add-more > summary {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.editor-add-more > * + * { margin-top: 10px; }
+
+.editor-add-more textarea { width: 100%; }
+
+.editor-reset {
+  margin-top: 20px;
+  padding-inline: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot.is-new .slot-num,
+  .prompt-status.is-flash { animation: none; }
+  .prompt-resting > summary::after { transition: none; }
+}
