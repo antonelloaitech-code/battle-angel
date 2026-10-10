@@ -3916,13 +3916,15 @@ body.day-runner-active {
   bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 74px);
 }
 
+/* In the runner the toast sits just above Later / Skip, over the quiet bottom of the card,
+   so it never covers the top bar or the Later strip (v1.25). */
 body.day-runner-active #toast-host .day-undo-toast {
-  top: calc(env(safe-area-inset-top, 0px) + 64px);
-  bottom: auto;
+  top: auto;
+  bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 216px);
 }
 
 body.day-runner-active #toast-host .day-undo-toast.is-hiding {
-  transform: translate(-50%, -8px);
+  transform: translate(-50%, 8px);
 }
 
 /* Day overview */
@@ -5515,6 +5517,135 @@ body.day-runner-active .shell-no-header.has-bottom-nav {
 /* Five slots fit the morning screen: the empty ones stay slim. */
 .slot.is-empty { min-height: 50px; }
 .slot.is-empty .slot-num { height: 32px; font-size: 1.3rem; }
+
+/* ---- v1.25: Later, pinned above the card ---- */
+.later-tray {
+  padding: 9px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+}
+
+.later-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 4px 8px;
+}
+
+.later-head span {
+  color: var(--accent-dark);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.later-head small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+/* Up to two rows show at once; more scroll inside the strip, so the card keeps its room. */
+.later-chips {
+  max-height: 100px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.later-chip {
+  max-width: 100%;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+/* The circle is the checkbox: a 44px tap target around a 28px ring. */
+.later-check {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  margin-right: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.later-mark {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 2px solid color-mix(in srgb, var(--muted) 60%, var(--border));
+  border-radius: 50%;
+  font-size: 0.8rem;
+  font-weight: 900;
+  line-height: 1;
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.later-chip.is-power .later-mark {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.later-check:active .later-mark { transform: scale(0.9); }
+
+.later-chip.is-checking .later-mark {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-accent);
+  transform: scale(1.08);
+}
+
+.later-name {
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px 0 6px;
+  border: 0;
+  border-radius: 0 999px 999px 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.88rem;
+  font-weight: 800;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.later-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.later-chip.is-armed {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-soft));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .later-chip,
+  .later-mark { transition: none; }
+}
 
 /* ---- v1.22: finish my day ---- */
 .finish-day-cta { margin-top: 18px; }

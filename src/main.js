@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.24.0'
+const APP_VERSION = '1.25.1'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -4938,12 +4938,13 @@ function glanceItems(progress = currentDailyProgress()) {
   getTodayStackEntries(progress).forEach((entry) => {
     if (entry.type === 'routine') {
       if (completed.has(entry.id) || skipped.has(entry.id)) return
-      todo.push({ key: entry.key, kind: 'routine', id: entry.id, title: entry.title, meta: glanceRoutineMeta(entry.step, progress), now: entry.key === currentKey })
+      const meta = glanceRoutineMeta(entry.step, progress)
+      todo.push({ key: entry.key, kind: 'routine', id: entry.id, title: entry.title, meta: isLaterKey(entry.key, progress) ? `Later · ${meta}` : meta, now: entry.key === currentKey })
       return
     }
     if (entry.plan?.status !== 'pending') return
     const label = powerActionLabel(entry.todo, list)
-    todo.push({ key: entry.key, kind: 'todo', id: entry.id, title: entry.title, meta: label.text, number: label.number, now: entry.key === currentKey })
+    todo.push({ key: entry.key, kind: 'todo', id: entry.id, title: entry.title, meta: isLaterKey(entry.key, progress) ? `Later · ${label.text}` : label.text, number: label.number, now: entry.key === currentKey })
   })
 
   const done = []
@@ -5131,6 +5132,136 @@ function toggleGlanceItem(key) {
   refreshGlanceSheet()
 }
 
+// ---------- Later: pinned at the top of the runner, tap the circle when done ----------
+// Everything you sent to Later today waits in a strip above the card, so you can finish it the moment
+// you get to it, in any order. The circle is a checkbox: one tap checks it off (with Undo). The name
+// needs a double tap, so brushing it never finishes anything.
+
+const LATER_DOUBLE_TAP_MS = 420
+
+function isLaterKey(key, progress = currentDailyProgress()) {
+  return Number(progress.defer_counts?.[key]) > 0
+}
+
+// Still open, sent to Later at least once today, and not the card on screen right now.
+// Power actions first in their order of importance, then routine steps in routine order.
+function getLaterItems(progress = currentDailyProgress(), currentKey = '') {
+  const resolved = dailyResolvedStepIds(progress)
+  const list = getPowerActionList()
+  const items = getTodayStackEntries(progress).filter((entry) => {
+    if (entry.key === currentKey || !isLaterKey(entry.key, progress)) return false
+    return entry.type === 'todo' ? entry.plan?.status === 'pending' : !resolved.has(entry.id)
+  }).map((entry) => {
+    if (entry.type === 'todo') {
+      const label = powerActionLabel(entry.todo, list)
+      return { key: entry.key, kind: 'todo', title: entry.title, number: label.number, order: label.number || 99 }
+    }
+    const index = dailySteps.findIndex((step) => step.id === entry.id)
+    return { key: entry.key, kind: 'routine', title: entry.title, number: 0, order: 100 + index }
+  })
+  return items.sort((a, b) => a.order - b.order)
+}
+
+function renderLaterTray(progress, currentKey) {
+  const items = getLaterItems(progress, currentKey)
+  if (!items.length) return ''
+  return `
+    <section class="later-tray" aria-label="Later today">
+      <div class="later-head"><span>Later</span><small id="later-hint">tap the circle when done</small></div>
+      <div class="later-chips">
+        ${items.map((item) => `
+          <div class="later-chip ${item.kind === 'todo' ? 'is-power' : ''}" data-later-key="${escapeHtml(item.key)}">
+            <button type="button" class="later-check" data-later-check="${escapeHtml(item.key)}" aria-label="${escapeHtml(`Mark ${item.title} done`)}">
+              <span class="later-mark" aria-hidden="true">${item.kind === 'todo' && item.number ? item.number : ''}</span>
+            </button>
+            <button type="button" class="later-name" data-later-name="${escapeHtml(item.key)}" aria-label="${escapeHtml(`${item.title}. Double-tap to mark done`)}">
+              <span class="later-title">${escapeHtml(item.title)}</span>
+            </button>
+          </div>`).join('')}
+      </div>
+    </section>`
+}
+
+function bindLaterTray() {
+  const hint = document.querySelector('#later-hint')
+  let hintTimer = null
+  const flashHint = (text) => {
+    if (!hint) return
+    hint.textContent = text
+    if (hintTimer) window.clearTimeout(hintTimer)
+    hintTimer = window.setTimeout(() => { hint.textContent = 'tap the circle when done' }, 1600)
+  }
+  // The circle is a checkbox: one tap, it fills with a check, then the item leaves the strip.
+  document.querySelectorAll('[data-later-check]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const chip = button.closest('.later-chip')
+      if (!chip || chip.classList.contains('is-checking')) return
+      chip.classList.add('is-checking')
+      const mark = button.querySelector('.later-mark')
+      if (mark) mark.innerHTML = '&#10003;'
+      vibrate(12)
+      window.setTimeout(() => completeLaterItem(button.dataset.laterCheck), prefersReducedMotion() ? 0 : 200)
+    })
+  })
+  // The name needs a double tap; one tap only highlights it and points at the circle.
+  document.querySelectorAll('[data-later-name]').forEach((button) => {
+    let lastTapAt = 0
+    let disarmTimer = null
+    button.addEventListener('click', () => {
+      const chip = button.closest('.later-chip')
+      const now = Date.now()
+      if (now - lastTapAt <= LATER_DOUBLE_TAP_MS) {
+        lastTapAt = 0
+        if (disarmTimer) window.clearTimeout(disarmTimer)
+        completeLaterItem(button.dataset.laterName)
+        return
+      }
+      lastTapAt = now
+      document.querySelectorAll('.later-chip.is-armed').forEach((other) => other.classList.remove('is-armed'))
+      chip?.classList.add('is-armed')
+      vibrate(6)
+      flashHint('tap the circle to check it off')
+      if (disarmTimer) window.clearTimeout(disarmTimer)
+      disarmTimer = window.setTimeout(() => chip?.classList.remove('is-armed'), 1600)
+    })
+  })
+}
+
+function completeLaterItem(key) {
+  const [kind, id] = String(key).split(':', 2)
+  const progressBefore = cloneDailyProgress()
+  let restoreTodo = null
+  let title = ''
+  if (kind === 'todo') {
+    const todo = getPowerTodo(id)
+    if (!todo) return
+    title = todo.title
+    restoreTodo = markTodoDone(id)
+    if (!restoreTodo) return
+  } else if (kind === 'routine') {
+    const step = dailySteps.find((item) => item.id === id)
+    const progress = currentDailyProgress()
+    // A second tap that lands after a redraw must not count it twice.
+    if (!step || (progress.completed_step_ids || []).includes(id)) return
+    title = step.title
+    const substeps = normalizeDailySubsteps(step.substeps)
+    progress.completed_step_ids = [...new Set([...(progress.completed_step_ids || []), id])]
+    progress.skipped_step_ids = (progress.skipped_step_ids || []).filter((item) => item !== id)
+    progress.later_step_ids = (progress.later_step_ids || []).filter((item) => item !== id)
+    if (substeps.length) progress.substep_positions = { ...(progress.substep_positions || {}), [id]: substeps.length }
+    progress.is_complete = false
+    saveDailyProgress(progress)
+  } else return
+  clearSprintFor(key)
+  unlockAudio()
+  playDoneTick()
+  if (currentView === 'day-runner') renderDayRunner()
+  rememberUndo(`Done: ${shorten(title, 24)}`, () => {
+    restoreTodo?.()
+    saveDailyProgress(progressBefore)
+  }, renderDayRunner)
+}
+
 // ---------- the runner: one card, one decision ----------
 
 function renderDeferNudge(count, type) {
@@ -5276,6 +5407,7 @@ function renderDayRunner() {
           </div>
         </div>
         <div class="runner-progress" aria-hidden="true"><span style="width:${score.percent}%"></span></div>
+        ${renderLaterTray(progress, action.key)}
       </header>
       <section class="day-step-card ${cardClass}" id="day-step-card" aria-label="Current action: ${escapeHtml(action.title)}">
         ${cardBody}
@@ -5302,6 +5434,7 @@ function renderDayRunner() {
   document.querySelector('#runner-capture')?.addEventListener('click', showRunnerCapture)
   document.querySelector('#runner-meds')?.addEventListener('click', showMedsSheet)
   document.querySelector('#runner-eye')?.addEventListener('click', openGlanceSheet)
+  bindLaterTray()
   document.querySelector('#rough-day')?.addEventListener('click', () => {
     toggleEnergyMode()
     renderDayRunner()

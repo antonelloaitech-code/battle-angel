@@ -538,3 +538,17 @@ A golden week now takes **4 different days** with at least one workout done that
 - Light mode uses a deeper blue (`#2cc3f2`) on cool, clean greys.
 - The phone's status bar matches (black in dark mode).
 - No database changes.
+
+## v1.25 — Later, pinned on top
+
+- Anything you send to **Later today** is pinned in a **Later** strip at the top of the card screen: power actions first (with their number), then routine steps in routine order.
+- **Double-tap** a pinned item to mark it done, whenever you get to it, in any order. A single tap only highlights it ("tap again to mark it done"), so nothing gets finished by accident. Every double-tap shows **Undo**.
+- The card on screen never shows twice; when a Later item comes back around as your card, it leaves the strip.
+- The eye tags these as *Later* too.
+- In the card screen, the Undo message now appears just above Later / Skip, so it never covers the top bar or the strip.
+- No database changes.
+
+## v1.25.1 — tap the circle
+
+- In the **Later** strip, the circle is a checkbox: **one tap on the circle checks the item off** (it fills with a ✓, then leaves the strip, with Undo).
+- A single tap on the name only highlights it, so brushing it never finishes anything; a double tap on the name still works.
