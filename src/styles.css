@@ -3874,3 +3874,284 @@ body.day-runner-active {
     grid-template-columns: minmax(0, 1fr) 38px;
   }
 }
+
+/* v1.21: I changed — compact gratitude board + weekly story reminder. */
+.bottom-nav {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.changed-week-card,
+.changed-board-card,
+.changed-story-add-card,
+.changed-story-list {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+}
+
+.changed-week-card {
+  margin-bottom: 12px;
+  padding: 13px 14px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.changed-week-card-static { cursor: default; }
+
+.changed-week-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.075em;
+}
+
+.changed-week-card p {
+  margin: 7px 0 5px;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--text);
+  font-size: 0.94rem;
+  font-weight: 760;
+  line-height: 1.36;
+}
+
+.changed-week-card span,
+.changed-week-empty {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 760;
+}
+
+.changed-board-card {
+  overflow: hidden;
+}
+
+.changed-board-head {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.changed-board-head h2 {
+  margin: 2px 0 0;
+  font-size: 1.1rem;
+}
+
+.changed-add-button {
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+  color: var(--text);
+  padding: 7px 10px;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.changed-board-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.changed-column {
+  min-width: 0;
+}
+
+.changed-column + .changed-column {
+  border-left: 1px solid var(--border);
+}
+
+.changed-column-heading {
+  display: grid;
+  gap: 1px;
+  padding: 9px 9px 7px;
+  border-bottom: 1px solid var(--border);
+}
+
+.changed-column-heading strong {
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+}
+
+.changed-column-heading small {
+  color: var(--muted);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.changed-entry-list {
+  display: grid;
+}
+
+.changed-entry-row {
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: transparent;
+  color: var(--text);
+  padding: 7px 9px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 720;
+  line-height: 1.2;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.changed-entry-row:active { background: var(--surface-soft); }
+
+.changed-column-empty {
+  padding: 16px 9px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.changed-subpage-head {
+  margin-bottom: 12px;
+}
+
+.changed-entry-form,
+.changed-story-add-form,
+.changed-story-edit-form {
+  display: grid;
+  gap: 11px;
+}
+
+.changed-entry-form {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+}
+
+.changed-entry-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.changed-side-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.changed-side-fieldset legend { margin-bottom: 7px; }
+
+.changed-side-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.changed-side-option {
+  position: relative;
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface-soft);
+  padding: 9px 11px;
+  cursor: pointer;
+}
+
+.changed-side-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.changed-side-option strong { font-size: 0.88rem; }
+.changed-side-option small { color: var(--muted); font-size: 0.68rem; }
+
+.changed-side-option.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--accent-soft);
+}
+
+.changed-delete-button {
+  justify-self: center;
+}
+
+.changed-story-add-card {
+  padding: 13px;
+}
+
+.changed-story-add-card > p {
+  margin: 5px 0 11px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.changed-story-list {
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.changed-story-item + .changed-story-item {
+  border-top: 1px solid var(--border);
+}
+
+.changed-story-item > summary {
+  min-height: 44px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 740;
+  line-height: 1.28;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.changed-story-edit-form {
+  padding: 0 10px 10px;
+}
+
+.changed-story-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.changed-story-empty {
+  margin-top: 12px;
+  padding: 20px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 430px) {
+  .bottom-nav-button {
+    min-height: 46px;
+    padding-inline: 2px;
+    font-size: 0.66rem;
+  }
+
+  .changed-week-card { padding: 11px 12px; }
+  .changed-entry-row { min-height: 36px; padding: 6px 7px; font-size: 0.72rem; }
+  .changed-column-heading { padding-inline: 7px; }
+}
+.bottom-nav-button { white-space: nowrap; }

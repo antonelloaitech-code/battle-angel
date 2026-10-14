@@ -6,7 +6,7 @@ battle angel is a low-friction daily-system + gym app: set your routine and work
 
 ## main tabs
 
-The app is split into four simple tabs so the screen stays quiet:
+The app uses five focused tabs:
 
 - **Day** — quick-capture todos, arrange today once, then run one combined routine + todo stack one action at a time.
 - **Gym** — today's planned gym modules, resume, offline video prep, and access to all workouts.
@@ -403,3 +403,22 @@ Booster display is also de-duplicated:
 - Only boosters set to **Anytime** appear on the Day overview, because they have no routine card to surface them.
 
 The old standalone Power Actions launch/list/runner UI and older duplicate inline Day planner/Inbox renderers were removed from the app code. The existing Supabase todo tables are kept so all existing todos and today's selections remain intact.
+
+## v1.21 — I changed
+
+**Database:** run `supabase/i_changed_upgrade.sql` once on an existing install (or run the full `supabase/schema.sql`). The upgrade is additive only.
+
+A fifth bottom tab, **I changed**, is a quiet reflection space kept separate from Day planning and Gym execution.
+
+- The main screen is a dense two-column gratitude board: **Present** (grateful it is here) and **Absent** (grateful it is gone).
+- Tap **+ Add**, write one thought, choose Present or Absent, and save. The board stays compact so many reminders fit on one iPhone screen.
+- Tap any board entry to edit it, move it to the other column, or remove it. Exact duplicates in the same column are blocked.
+- **My story** stores short or long pieces of your past. Add, edit, or delete them from one dedicated screen.
+- One stored story entry is automatically surfaced on the main **I changed** screen for the entire Monday-Sunday week, then the weekly reminder rotates. This gives you a recurring reminder of where you came from without another task to manage.
+- Gratitude and story entries persist; they do not reset daily. They are also included in Backup library.
+
+
+## v1.21.1 — label polish
+
+- The reflection tab/button and page title now read **i changed.** in lowercase with the period.
+- No database changes.

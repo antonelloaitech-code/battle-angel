@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.20.0'
+const APP_VERSION = '1.21.1'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -39,6 +39,8 @@ const DAILY_SUBSTEP_TITLE_MAX = 120
 const DAILY_SUBSTEP_MAX = 20
 const DAILY_MED_NAME_MAX = 120
 const POWER_TODO_TITLE_MAX = 160
+const CHANGED_BOARD_TEXT_MAX = 400
+const CHANGED_STORY_TEXT_MAX = 2000
 const ALL_ROUTINE_DAYS = [0, 1, 2, 3, 4, 5, 6]
 const ROUTINE_DAY_LABELS = [
   [1, 'Mo', 'Monday'],
@@ -127,6 +129,9 @@ let powerUndoLabel = ''
 let powerUndoExpiresAt = 0
 let powerUndoTimer = null
 let lastPowerTapAt = 0
+let changedBoardEntries = []
+let changedStoryEntries = []
+let changedSystemAvailable = true
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 12
 const MOTIVATION_SOUND_KEY = 'battle-angel-motivation-sound'
@@ -466,6 +471,58 @@ function isMissingDailyMedAnchorError(error) {
 function isMissingPowerActionsError(error) {
   const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
   return text.includes('42p01') || text.includes('pgrst205') || text.includes('power_todos') || text.includes('power_action_plan')
+}
+
+function isMissingChangedSystemError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('changed_board_entries') || text.includes('changed_story_entries')
+}
+
+async function loadChangedSystem() {
+  if (!currentUser || !changedSystemAvailable) {
+    changedBoardEntries = []
+    changedStoryEntries = []
+    return
+  }
+
+  const [boardResult, storyResult] = await Promise.all([
+    supabase
+      .from('changed_board_entries')
+      .select('id,side,body,sort_order,created_at,updated_at')
+      .order('side', { ascending: true })
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('changed_story_entries')
+      .select('id,body,sort_order,created_at,updated_at')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+  ])
+
+  const firstError = boardResult.error || storyResult.error
+  if (firstError) {
+    if (isMissingChangedSystemError(firstError)) {
+      changedSystemAvailable = false
+      changedBoardEntries = []
+      changedStoryEntries = []
+      return
+    }
+    throw firstError
+  }
+
+  changedBoardEntries = boardResult.data || []
+  changedStoryEntries = storyResult.data || []
+}
+
+function weeklyStoryEntry() {
+  if (!changedStoryEntries.length) return null
+  const monday = dateFromKey(startOfWeekKey(todayDateKey()))
+  const weekNumber = Math.floor(monday.getTime() / (7 * 24 * 60 * 60 * 1000))
+  return changedStoryEntries[Math.abs(weekNumber) % changedStoryEntries.length] || changedStoryEntries[0]
+}
+
+function changedSideLabel(side) {
+  return side === 'absent' ? 'Absent' : 'Present'
 }
 
 function normalizeDailySubsteps(value) {
@@ -1625,6 +1682,8 @@ async function downloadFullBackup() {
     let dailyMedLogBackupRows = []
     let powerTodoBackupRows = []
     let powerPlanBackupRows = []
+    let changedBoardBackupRows = []
+    let changedStoryBackupRows = []
     if (weightLogAvailable) {
       const { data: weightData, error: weightError } = await supabase
         .from('exercise_weight_log')
@@ -1667,9 +1726,18 @@ async function downloadFullBackup() {
       if (!powerPlanResult.error) powerPlanBackupRows = powerPlanResult.data || []
     }
 
+    if (changedSystemAvailable) {
+      const [changedBoardResult, changedStoryResult] = await Promise.all([
+        supabase.from('changed_board_entries').select('id,side,body,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
+        supabase.from('changed_story_entries').select('id,body,sort_order,created_at,updated_at').order('sort_order', { ascending: true })
+      ])
+      if (!changedBoardResult.error) changedBoardBackupRows = changedBoardResult.data || []
+      if (!changedStoryResult.error) changedStoryBackupRows = changedStoryResult.data || []
+    }
+
     const manifest = {
       format: 'battle-angel-backup',
-      version: 12,
+      version: 13,
       exported_at: new Date().toISOString(),
       account_email: currentUser.email || '',
       folders: folderRows.filter((folder) => folder.name !== MOTIVATION_FOLDER_NAME),
@@ -1684,7 +1752,9 @@ async function downloadFullBackup() {
       daily_meds: dailyMedBackupRows,
       daily_med_log: dailyMedLogBackupRows,
       power_todos: powerTodoBackupRows,
-      power_action_plan: powerPlanBackupRows
+      power_action_plan: powerPlanBackupRows,
+      changed_board_entries: changedBoardBackupRows,
+      changed_story_entries: changedStoryBackupRows
     }
 
     const parts = []
@@ -1888,7 +1958,8 @@ async function loadFolders() {
     loadSchedule(),
     loadDailySystem(),
     loadDailyMeds(),
-    loadPowerActions()
+    loadPowerActions(),
+    loadChangedSystem()
   ])
   if (countResult.error) throw countResult.error
 
@@ -1959,7 +2030,9 @@ function saveSnapshot() {
     dailyMedsDate,
     powerTodos,
     powerPlans,
-    powerActionsDate
+    powerActionsDate,
+    changedBoardEntries,
+    changedStoryEntries
   })
 }
 
@@ -1985,6 +2058,8 @@ async function restoreSnapshot() {
   const pendingPowerMerged = applyPendingPowerWrites(powerTodos, powerPlans, powerActionsDate)
   powerTodos = pendingPowerMerged.todos
   powerPlans = pendingPowerMerged.plans
+  changedBoardEntries = Array.isArray(snapshot.changedBoardEntries) ? snapshot.changedBoardEntries : []
+  changedStoryEntries = Array.isArray(snapshot.changedStoryEntries) ? snapshot.changedStoryEntries : []
   motivationVideos = await hydrateMotivationRows(snapshot.motivationRows || [])
   return true
 }
@@ -2256,7 +2331,9 @@ function dataSignature() {
     dailyMedsDate,
     dailyMedTakenIds,
     powerTodos.map((todo) => [todo.id, todo.title, todo.sort_order]),
-    powerPlans.map((plan) => [plan.id, plan.todo_id, plan.action_date, plan.status, plan.sort_order, plan.started_at])
+    powerPlans.map((plan) => [plan.id, plan.todo_id, plan.action_date, plan.status, plan.sort_order, plan.started_at]),
+    changedBoardEntries.map((entry) => [entry.id, entry.side, entry.body, entry.sort_order]),
+    changedStoryEntries.map((entry) => [entry.id, entry.body, entry.sort_order])
   ])
 }
 
@@ -2276,6 +2353,7 @@ async function refreshInBackground() {
   if (currentView === 'day') renderDay()
   else if (currentView === 'home') renderHome()
   else if (currentView === 'workouts') renderWorkouts()
+  else if (currentView === 'changed') renderChanged()
 }
 
 function requestPersistentStorage() {
@@ -2552,6 +2630,7 @@ function renderBottomNav(activeTab) {
   const tabs = [
     ['day', 'Day'],
     ['gym', 'Gym'],
+    ['changed', 'i changed.'],
     ['plan', 'Plan'],
     ['more', 'More']
   ]
@@ -2565,6 +2644,7 @@ function bindBottomNav() {
       const tab = button.dataset.navTab
       if (tab === 'day') renderDay()
       if (tab === 'gym') renderHome()
+      if (tab === 'changed') renderChanged()
       if (tab === 'plan') {
         plannerMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
         if (!plannerSelectedDate || plannerSelectedDate.slice(0, 7) !== todayDateKey().slice(0, 7)) plannerSelectedDate = todayDateKey()
@@ -3605,6 +3685,238 @@ function renderWorkouts(errorMessage = '') {
     button.addEventListener('click', () => openFolder(button.dataset.folderId))
   })
   document.querySelector('#add-folder-form')?.addEventListener('submit', addFolder)
+}
+
+function renderChanged(errorMessage = '') {
+  activeFolder = null
+  activeExerciseGroups = []
+  workoutMode = false
+  folderEditMode = false
+
+  if (!changedSystemAvailable) {
+    renderShell(`
+      <div class="notice error">i changed. needs the v1.21 Supabase upgrade once. Everything else in battle angel still works normally.</div>`,
+      { title: 'i changed.', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed' })
+    return
+  }
+
+  const present = changedBoardEntries.filter((entry) => entry.side === 'present')
+  const absent = changedBoardEntries.filter((entry) => entry.side === 'absent')
+  const weekly = weeklyStoryEntry()
+  const boardColumn = (side, entries) => `
+    <section class="changed-column changed-column-${side}">
+      <div class="changed-column-heading">
+        <strong>${side === 'present' ? 'Present' : 'Absent'}</strong>
+        <small>${side === 'present' ? "grateful it’s here" : "grateful it’s gone"}</small>
+      </div>
+      <div class="changed-entry-list">
+        ${entries.length ? entries.map((entry) => `
+          <button type="button" class="changed-entry-row" data-changed-entry="${entry.id}" title="${escapeHtml(entry.body)}">${escapeHtml(entry.body)}</button>`).join('') : '<div class="changed-column-empty">—</div>'}
+      </div>
+    </section>`
+
+  renderShell(`
+    ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
+    <section class="changed-week-card" id="open-changed-story" role="button" tabindex="0" aria-label="Open my story">
+      <div class="changed-week-label">THIS WEEK · WHERE I CAME FROM</div>
+      ${weekly ? `<p>${escapeHtml(weekly.body)}</p>` : '<p class="changed-week-empty">Add pieces of your story. One will come back each week.</p>'}
+      <span>My story →</span>
+    </section>
+    <section class="changed-board-card">
+      <div class="changed-board-head">
+        <div>
+          <div class="today-label">WHERE I AM</div>
+          <h2>Gratitude board</h2>
+        </div>
+        <button type="button" class="changed-add-button" id="add-changed-entry">+ Add</button>
+      </div>
+      <div class="changed-board-grid">
+        ${boardColumn('present', present)}
+        ${boardColumn('absent', absent)}
+      </div>
+    </section>`,
+    { title: 'i changed.', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed' })
+
+  document.querySelector('#add-changed-entry')?.addEventListener('click', () => renderChangedEntryScreen())
+  document.querySelectorAll('[data-changed-entry]').forEach((button) => {
+    button.addEventListener('click', () => renderChangedEntryScreen(button.dataset.changedEntry))
+  })
+  const storyCard = document.querySelector('#open-changed-story')
+  storyCard?.addEventListener('click', renderChangedStoryScreen)
+  storyCard?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      renderChangedStoryScreen()
+    }
+  })
+}
+
+function renderChangedEntryScreen(entryId = null) {
+  const entry = entryId ? changedBoardEntries.find((item) => item.id === entryId) : null
+  const side = entry?.side === 'absent' ? 'absent' : 'present'
+  renderShell(`
+    <div class="changed-subpage-head">
+      <button type="button" class="back-button" id="back-changed">Back</button>
+    </div>
+    <form id="changed-entry-form" class="changed-entry-form" data-entry-id="${entry?.id || ''}">
+      <label>
+        <span class="eyebrow">WHAT I WANT TO REMEMBER</span>
+        <textarea id="changed-entry-body" rows="5" maxlength="${CHANGED_BOARD_TEXT_MAX}" required placeholder="Write it simply...">${escapeHtml(entry?.body || '')}</textarea>
+      </label>
+      <fieldset class="changed-side-fieldset">
+        <legend class="eyebrow">PUT IT UNDER</legend>
+        <div class="changed-side-picker">
+          <label class="changed-side-option ${side === 'present' ? 'is-selected' : ''}">
+            <input type="radio" name="changed_side" value="present" ${side === 'present' ? 'checked' : ''} />
+            <strong>Present</strong><small>grateful it’s here</small>
+          </label>
+          <label class="changed-side-option ${side === 'absent' ? 'is-selected' : ''}">
+            <input type="radio" name="changed_side" value="absent" ${side === 'absent' ? 'checked' : ''} />
+            <strong>Absent</strong><small>grateful it’s gone</small>
+          </label>
+        </div>
+      </fieldset>
+      <button type="submit" class="primary-button full-button">${entry ? 'Save' : 'Add to board'}</button>
+      ${entry ? '<button type="button" class="text-button danger-text changed-delete-button" id="delete-changed-entry">Delete</button>' : ''}
+      <div id="changed-entry-status" class="status-line" aria-live="polite"></div>
+    </form>`,
+    { title: entry ? 'Edit' : 'Add', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed-entry' })
+
+  const form = document.querySelector('#changed-entry-form')
+  const syncSides = () => {
+    form?.querySelectorAll('.changed-side-option').forEach((label) => label.classList.toggle('is-selected', Boolean(label.querySelector('input')?.checked)))
+  }
+  form?.querySelectorAll('input[name="changed_side"]').forEach((input) => input.addEventListener('change', syncSides))
+  document.querySelector('#back-changed')?.addEventListener('click', renderChanged)
+  form?.addEventListener('submit', saveChangedBoardEntry)
+  document.querySelector('#delete-changed-entry')?.addEventListener('click', () => deleteChangedBoardEntry(entry.id))
+  window.setTimeout(() => document.querySelector('#changed-entry-body')?.focus(), 30)
+}
+
+async function saveChangedBoardEntry(event) {
+  event.preventDefault()
+  if (!currentUser || !changedSystemAvailable) return
+  const form = event.currentTarget
+  const entryId = form.dataset.entryId || null
+  const body = document.querySelector('#changed-entry-body')?.value.trim().slice(0, CHANGED_BOARD_TEXT_MAX) || ''
+  const side = form.querySelector('input[name="changed_side"]:checked')?.value === 'absent' ? 'absent' : 'present'
+  const status = document.querySelector('#changed-entry-status')
+  if (!body) return
+  if (status) status.textContent = 'Saving...'
+
+  let error
+  if (entryId) {
+    const existing = changedBoardEntries.find((entry) => entry.id === entryId)
+    const sideChanged = existing && existing.side !== side
+    const sortOrder = sideChanged ? Math.max(0, ...changedBoardEntries.filter((entry) => entry.side === side).map((entry) => Number(entry.sort_order) || 0)) + 1 : (Number(existing?.sort_order) || 0)
+    ;({ error } = await supabase.from('changed_board_entries').update({ body, side, sort_order: sortOrder, updated_at: new Date().toISOString() }).eq('id', entryId))
+  } else {
+    const nextOrder = Math.max(0, ...changedBoardEntries.filter((entry) => entry.side === side).map((entry) => Number(entry.sort_order) || 0)) + 1
+    ;({ error } = await supabase.from('changed_board_entries').insert({ user_id: currentUser.id, side, body, sort_order: nextOrder, updated_at: new Date().toISOString() }))
+  }
+
+  if (error) {
+    if (status) status.textContent = error.code === '23505' ? `Already saved under ${changedSideLabel(side)}.` : (isNetworkError(error) ? 'Connect to save this.' : error.message)
+    return
+  }
+  await loadChangedSystem()
+  saveSnapshot()
+  renderChanged()
+}
+
+async function deleteChangedBoardEntry(entryId) {
+  const entry = changedBoardEntries.find((item) => item.id === entryId)
+  if (!entry || !confirm('Remove this from the board?')) return
+  const { error } = await supabase.from('changed_board_entries').delete().eq('id', entryId)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to remove this.' : error.message)
+    return
+  }
+  await loadChangedSystem()
+  saveSnapshot()
+  renderChanged()
+}
+
+function renderChangedStoryScreen() {
+  const weekly = weeklyStoryEntry()
+  const rows = changedStoryEntries.map((entry) => `
+    <details class="changed-story-item">
+      <summary>${escapeHtml(entry.body)}</summary>
+      <form class="changed-story-edit-form" data-story-id="${entry.id}">
+        <textarea name="body" rows="5" maxlength="${CHANGED_STORY_TEXT_MAX}" required>${escapeHtml(entry.body)}</textarea>
+        <div class="changed-story-edit-actions">
+          <button type="submit" class="primary-button">Save</button>
+          <button type="button" class="text-button danger-text" data-story-delete="${entry.id}">Delete</button>
+        </div>
+      </form>
+    </details>`).join('')
+
+  renderShell(`
+    <div class="changed-subpage-head">
+      <button type="button" class="back-button" id="back-changed">Back</button>
+    </div>
+    ${weekly ? `<section class="changed-week-card changed-week-card-static"><div class="changed-week-label">THIS WEEK</div><p>${escapeHtml(weekly.body)}</p></section>` : ''}
+    <section class="changed-story-add-card">
+      <div class="today-label">MY STORY</div>
+      <p>Save pieces of your past. Battle Angel brings one back each week.</p>
+      <form id="add-changed-story" class="changed-story-add-form">
+        <textarea id="changed-story-body" rows="4" maxlength="${CHANGED_STORY_TEXT_MAX}" required placeholder="A part of my past I don’t want to forget..."></textarea>
+        <button type="submit" class="primary-button">Add to my story</button>
+      </form>
+      <div id="changed-story-status" class="status-line" aria-live="polite"></div>
+    </section>
+    ${rows ? `<section class="changed-story-list">${rows}</section>` : '<div class="changed-story-empty">Your story is empty.</div>'}`,
+    { title: 'My story', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed-story' })
+
+  document.querySelector('#back-changed')?.addEventListener('click', renderChanged)
+  document.querySelector('#add-changed-story')?.addEventListener('submit', addChangedStoryEntry)
+  document.querySelectorAll('[data-story-id]').forEach((form) => form.addEventListener('submit', updateChangedStoryEntry))
+  document.querySelectorAll('[data-story-delete]').forEach((button) => button.addEventListener('click', () => deleteChangedStoryEntry(button.dataset.storyDelete)))
+}
+
+async function addChangedStoryEntry(event) {
+  event.preventDefault()
+  if (!currentUser || !changedSystemAvailable) return
+  const body = document.querySelector('#changed-story-body')?.value.trim().slice(0, CHANGED_STORY_TEXT_MAX) || ''
+  const status = document.querySelector('#changed-story-status')
+  if (!body) return
+  if (status) status.textContent = 'Saving...'
+  const nextOrder = Math.max(0, ...changedStoryEntries.map((entry) => Number(entry.sort_order) || 0)) + 1
+  const { error } = await supabase.from('changed_story_entries').insert({ user_id: currentUser.id, body, sort_order: nextOrder, updated_at: new Date().toISOString() })
+  if (error) {
+    if (status) status.textContent = error.code === '23505' ? 'That is already in your story.' : (isNetworkError(error) ? 'Connect to save this.' : error.message)
+    return
+  }
+  await loadChangedSystem()
+  saveSnapshot()
+  renderChangedStoryScreen()
+}
+
+async function updateChangedStoryEntry(event) {
+  event.preventDefault()
+  const form = event.currentTarget
+  const body = form.elements.body.value.trim().slice(0, CHANGED_STORY_TEXT_MAX)
+  if (!body) return
+  const { error } = await supabase.from('changed_story_entries').update({ body, updated_at: new Date().toISOString() }).eq('id', form.dataset.storyId)
+  if (error) {
+    alert(error.code === '23505' ? 'That is already in your story.' : (isNetworkError(error) ? 'Connect to save this.' : error.message))
+    return
+  }
+  await loadChangedSystem()
+  saveSnapshot()
+  renderChangedStoryScreen()
+}
+
+async function deleteChangedStoryEntry(entryId) {
+  if (!confirm('Remove this from your story?')) return
+  const { error } = await supabase.from('changed_story_entries').delete().eq('id', entryId)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to remove this.' : error.message)
+    return
+  }
+  await loadChangedSystem()
+  saveSnapshot()
+  renderChangedStoryScreen()
 }
 
 function renderMore(errorMessage = '') {
