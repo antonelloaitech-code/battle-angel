@@ -4548,3 +4548,255 @@ h1, h2 {
 .workout-exit-menu > summary { letter-spacing: .12em; }
 .focus-prescription { font-weight: 850; letter-spacing: .035em; }
 .set-label { font-weight: 950; letter-spacing: .03em; }
+
+/* v1.23 COMMAND DAY — preview, 3–5 power gate, restrained gold, day finale */
+:root {
+  --gold-hint: #c9aa5d;
+}
+
+.day-hero-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.day-eye-button {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #292929;
+  border-radius: 2px;
+  background: #050505;
+  color: #fff;
+  padding: 0;
+}
+
+.day-eye-button svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+.day-runner-tools .day-eye-button,
+.day-runner-tools .day-runner-capture,
+.day-runner-tools .day-runner-menu > summary {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+}
+
+.power-gate-head {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.power-gate-count {
+  min-width: 52px;
+  padding-bottom: 4px;
+  text-align: right;
+  color: #666;
+  font-size: .78rem;
+  font-weight: 950;
+  letter-spacing: .08em;
+}
+
+.power-gate-count.is-ready { color: #fff; }
+
+.power-gate-list,
+.day-preview-list {
+  display: grid;
+  border-top: 1px solid #222;
+  margin-top: 12px;
+}
+
+.power-gate-row,
+.day-preview-row {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-bottom: 1px solid #181818;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  padding: 7px 2px;
+  text-align: left;
+}
+
+.power-gate-row:disabled,
+.day-preview-row:disabled { opacity: 1; }
+
+.power-gate-number,
+.day-preview-number {
+  color: #5f5f5f;
+  font-size: .68rem;
+  font-weight: 950;
+  text-align: center;
+}
+
+.power-gate-row strong,
+.day-preview-copy strong {
+  min-width: 0;
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: .88rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.power-gate-row.is-selected {
+  background: #090909;
+}
+
+.power-gate-row.is-selected .power-gate-number,
+.power-gate-mark {
+  color: #fff;
+}
+
+.power-gate-row:disabled:not(.is-selected) {
+  color: #4f4f4f;
+}
+
+.power-gate-row:disabled:not(.is-selected) .power-gate-number {
+  color: #333;
+}
+
+.day-preview-copy {
+  min-width: 0;
+}
+
+.day-preview-copy small {
+  display: block;
+  margin-top: 2px;
+  color: #555;
+  font-size: .56rem;
+  font-weight: 950;
+  letter-spacing: .12em;
+}
+
+.day-preview-state {
+  min-width: 24px;
+  color: #6d6d6d;
+  font-size: .72rem;
+  font-weight: 950;
+  text-align: center;
+}
+
+.day-preview-row.is-selected {
+  background: #fff;
+  color: #000;
+}
+
+.day-preview-row.is-selected .day-preview-number,
+.day-preview-row.is-selected .day-preview-copy small,
+.day-preview-row.is-selected .day-preview-state {
+  color: #000;
+}
+
+.day-preview-row.is-done .day-preview-copy strong {
+  color: #777;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.day-preview-row.is-done .day-preview-state {
+  color: var(--gold-hint);
+}
+
+.day-preview-row.is-skipped .day-preview-copy strong {
+  color: #4d4d4d;
+}
+
+.day-primary-footer:disabled {
+  background: #111 !important;
+  color: #444 !important;
+  border-color: #1a1a1a !important;
+}
+
+.gold-hint-toast {
+  position: fixed;
+  z-index: 500;
+  top: max(14px, calc(env(safe-area-inset-top, 0px) + 8px));
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  color: var(--gold-hint);
+  background: rgba(0,0,0,.9);
+  border: 1px solid color-mix(in srgb, var(--gold-hint) 48%, #000);
+  padding: 6px 10px;
+  font-size: .64rem;
+  font-weight: 950;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+
+.gold-hint-toast.is-leaving { opacity: 0; }
+
+/* Gold is now only a hint: a thin weekly edge + tiny status text. */
+.calendar-week.is-golden {
+  background: transparent;
+  box-shadow: inset 2px 0 0 var(--gold-hint);
+}
+
+.calendar-week.is-golden .calendar-day {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.calendar-week.is-golden .calendar-workout { color: inherit; }
+.calendar-week.is-golden .calendar-done,
+.week-progress.is-golden,
+.golden-streak { color: var(--gold-hint); }
+.week-pip.filled { background: var(--gold-hint); }
+
+.day-finale-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: #000;
+  overflow: hidden;
+}
+
+.day-finale-screen video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gold-hint-toast { transition: none; }
+}
+
+:root[data-theme="light"] .day-eye-button,
+:root[data-theme="light"] .power-gate-row,
+:root[data-theme="light"] .day-preview-row {
+  background: #fff;
+  color: #000;
+  border-color: #e5e5e5;
+}
+
+:root[data-theme="light"] .power-gate-row.is-selected,
+:root[data-theme="light"] .day-preview-row.is-selected {
+  background: #000;
+  color: #fff;
+}
+
+:root[data-theme="light"] .power-gate-row.is-selected .power-gate-number,
+:root[data-theme="light"] .day-preview-row.is-selected .day-preview-number,
+:root[data-theme="light"] .day-preview-row.is-selected .day-preview-copy small,
+:root[data-theme="light"] .day-preview-row.is-selected .day-preview-state {
+  color: #fff;
+}

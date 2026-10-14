@@ -4,6 +4,17 @@
 
 battle angel is a low-friction daily-system + gym app: set your routine and workouts once, then open the app and execute the next thing without deciding what comes next.
 
+## v1.23 — COMMAND DAY
+
+No database changes.
+
+- Starting a fresh Day now opens **POWER 3—5.** You must choose at least 3 and no more than 5 Inbox actions before the first **LOCK IN**. Resuming an already-started day does not ask again.
+- The Day home and Autopilot now have an eye button. It opens **FIELD VIEW.**, a compact full-day preview. Tap several unfinished rows, then **MARK N DONE** to close out multiple actions at once.
+- Todo cards selected for today are now labeled **POWER** inside the Day flow.
+- Golden weeks now count **distinct workout days**, not workout modules. Chest + Triceps on one date counts as one workout day. A week becomes golden only after 4 workout days.
+- Gold is reserved for restrained completion hints: a tiny flash after a Day action is completed and a small weekly gold cue when the fourth workout day is reached. The rest of the interface remains black and white.
+- When the final Day action is resolved, one saved motivation **video** plays full-screen. When it ends, the screen closes automatically and returns to the Day menu.
+
 ## v1.22 — LOCK IN cut
 
 - Removed nonessential instructional copy from the live app.
