@@ -4155,3 +4155,396 @@ body.day-runner-active {
   .changed-column-heading { padding-inline: 7px; }
 }
 .bottom-nav-button { white-space: nowrap; }
+
+
+/* v1.21.2: strict monochrome UI — white actions on black, no green/gold/red accents. */
+:root {
+  --bg: #050505;
+  --surface: #0d0d0d;
+  --surface-soft: #151515;
+  --surface-strong: #202020;
+  --text: #f7f7f5;
+  --muted: #a0a09d;
+  --border: #2b2b2b;
+  --accent: #f7f7f5;
+  --accent-dark: #ffffff;
+  --accent-soft: #181818;
+  --danger: #c8c8c5;
+  --danger-soft: #171717;
+  --gold: #f7f7f5;
+  --gold-text: #f7f7f5;
+  --gold-soft: #141414;
+  --gold-cell: #101010;
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f6f3;
+  --surface: #ffffff;
+  --surface-soft: #eeeeeb;
+  --surface-strong: #deded9;
+  --text: #090909;
+  --muted: #686864;
+  --border: #cececa;
+  --accent: #090909;
+  --accent-dark: #000000;
+  --accent-soft: #ecece8;
+  --danger: #333333;
+  --danger-soft: #eeeeeb;
+  --gold: #090909;
+  --gold-text: #090909;
+  --gold-soft: #eeeeeb;
+  --gold-cell: #f8f8f5;
+}
+
+/* Primary actions are deliberately high-contrast, not colorful. */
+:root:not([data-theme="light"]) .primary-button,
+:root:not([data-theme="light"]) .start-workout-button,
+:root:not([data-theme="light"]) .big-action,
+:root:not([data-theme="light"]) .day-primary-action,
+:root:not([data-theme="light"]) .day-primary-footer {
+  border-color: #f7f7f5;
+  background: #f7f7f5;
+  color: #050505;
+}
+
+:root:not([data-theme="light"]) .primary-button:active,
+:root:not([data-theme="light"]) .start-workout-button:active,
+:root:not([data-theme="light"]) .big-action:active,
+:root:not([data-theme="light"]) .day-primary-action:active,
+:root:not([data-theme="light"]) .day-primary-footer:active {
+  background: #d9d9d5;
+  color: #050505;
+}
+
+:root[data-theme="light"] .primary-button,
+:root[data-theme="light"] .start-workout-button,
+:root[data-theme="light"] .big-action,
+:root[data-theme="light"] .day-primary-action,
+:root[data-theme="light"] .day-primary-footer {
+  border-color: #090909;
+  background: #090909;
+  color: #ffffff;
+}
+
+:root[data-theme="light"] .primary-button:active,
+:root[data-theme="light"] .start-workout-button:active,
+:root[data-theme="light"] .big-action:active,
+:root[data-theme="light"] .day-primary-action:active,
+:root[data-theme="light"] .day-primary-footer:active {
+  background: #292929;
+  color: #ffffff;
+}
+
+/* Completed/check states inherit the same monochrome treatment. */
+:root:not([data-theme="light"]) .set-dot.done,
+:root:not([data-theme="light"]) .finish-check,
+:root:not([data-theme="light"]) .daily-med-row.is-taken .daily-med-check,
+:root:not([data-theme="light"]) .day-med-quick-row.is-taken .day-med-quick-check,
+:root:not([data-theme="light"]) .day-step-booster.is-taken .day-step-booster-check {
+  color: #050505;
+}
+
+:root[data-theme="light"] .set-dot.done,
+:root[data-theme="light"] .finish-check,
+:root[data-theme="light"] .daily-med-row.is-taken .daily-med-check,
+:root[data-theme="light"] .day-med-quick-row.is-taken .day-med-quick-check,
+:root[data-theme="light"] .day-step-booster.is-taken .day-step-booster-check {
+  color: #ffffff;
+}
+
+/* Tighter geometry: fewer oversized rounded cards, less visual noise. */
+.today-card,
+.day-hub,
+.day-primary-action,
+.day-primary-footer,
+.changed-week-card,
+.changed-board-card,
+.changed-entry-form,
+.changed-story-add-card,
+.changed-story-list,
+.account-menu,
+.motivation-library,
+.other-workouts,
+.focus-card,
+.finish-card {
+  border-radius: 14px;
+}
+
+.bottom-nav {
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.bottom-nav-button,
+.primary-button,
+.secondary-button,
+.back-button,
+.small-button,
+.timer-chip,
+.start-workout-button,
+.changed-add-button {
+  border-radius: 10px;
+}
+
+/* Golden weeks stay meaningful without introducing another color. */
+.calendar-week.is-golden {
+  background: var(--surface-soft);
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+
+.calendar-week.is-golden .calendar-day {
+  border-color: var(--border);
+  background: var(--surface);
+}
+\n\n/* v1.22: LOCK IN cut — zero-chatter, cinematic monochrome. */
+:root {
+  --bg: #000000;
+  --surface: #050505;
+  --surface-soft: #0b0b0b;
+  --surface-strong: #151515;
+  --text: #ffffff;
+  --muted: #777777;
+  --border: #222222;
+  --accent: #ffffff;
+  --accent-dark: #ffffff;
+  --accent-soft: #111111;
+}
+
+body { background: #000; }
+.shell { padding-top: max(18px, calc(env(safe-area-inset-top, 0px) + 10px)); }
+
+h1, h2 {
+  font-weight: 950;
+  letter-spacing: -0.055em;
+}
+
+.topbar { margin-bottom: 13px; }
+.topbar-title h1 {
+  text-transform: uppercase;
+  font-size: clamp(2rem, 9vw, 3rem);
+}
+
+.today-label,
+.eyebrow,
+.changed-week-label,
+.day-step-parent,
+.week-progress,
+.golden-streak {
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  font-weight: 950;
+}
+
+.day-home-hero {
+  padding: 22px 2px 20px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+.day-home-hero.is-complete { background: transparent; }
+.day-home-hero h2 {
+  margin-top: 7px;
+  font-size: clamp(2.8rem, 15vw, 4.8rem);
+  line-height: .9;
+  text-transform: uppercase;
+}
+.day-home-hero p { display: none; }
+.day-lock-count {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 950;
+  letter-spacing: .16em;
+}
+.day-home-hero .day-start-button { margin-top: 18px; }
+
+.start-workout-button,
+.day-primary-action,
+.day-primary-footer,
+.primary-button {
+  min-height: 56px;
+  border-radius: 2px !important;
+  font-weight: 950;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.day-capture-card { margin: 12px 0 8px; }
+.day-capture-form { gap: 5px; }
+.day-capture-form input,
+.day-capture-button,
+.day-runner-capture,
+.day-subview-back,
+.small-button,
+.secondary-button,
+.back-button,
+.changed-add-button,
+.day-option-button {
+  border-radius: 2px !important;
+}
+.day-capture-form input { background: #050505; border-color: #202020; }
+.day-capture-button { background: #fff; color: #000; font-weight: 950; }
+
+.day-hub,
+.day-med-quick-card,
+.day-plan-card,
+.day-plan-inbox,
+.day-inbox-card-flat,
+.day-setup-section,
+.changed-week-card,
+.changed-board-card,
+.changed-entry-form,
+.changed-story-add-card,
+.changed-story-list,
+.today-card,
+.week-card,
+.missed-card,
+.folder-card,
+.more-card,
+.motivation-library {
+  border-radius: 2px !important;
+  box-shadow: none !important;
+}
+
+.day-hub { margin-top: 8px; }
+.day-hub-row {
+  min-height: 54px;
+  padding: 9px 11px;
+}
+.day-hub-copy strong,
+.day-compact-head strong {
+  font-weight: 950;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.day-hub-copy small { display: none; }
+.day-hub-chevron { color: #fff; }
+.day-hub-count { border-radius: 2px; background: #111; }
+
+.day-subview-top { margin: 2px 0 12px; align-items: flex-end; }
+.day-subview-top h2 {
+  font-size: clamp(2.4rem, 12vw, 4rem);
+  line-height: .9;
+  text-transform: uppercase;
+}
+.day-subview-intro,
+.day-setup-help { display: none !important; }
+
+.day-plan-row { min-height: 49px; }
+.day-plan-number { border-radius: 2px; }
+.day-plan-copy small { letter-spacing: .09em; }
+.day-plan-controls button { border-radius: 2px; }
+.day-plan-inbox-row strong { color: #fff; font-size: 1.1rem; }
+.day-plan-empty { padding: 11px 12px; }
+
+.day-step-card {
+  border-radius: 2px !important;
+  border-width: 1px;
+  background: #050505;
+}
+.day-step-card h2 {
+  font-size: clamp(3rem, 16vw, 5.4rem);
+  line-height: .9;
+  letter-spacing: -.065em;
+}
+.day-step-card p { color: #8a8a8a; }
+.day-runner-position {
+  color: #fff;
+  font-weight: 950;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.day-option-button {
+  min-height: 44px;
+  border: 1px solid #222;
+  background: #050505;
+  color: #8a8a8a;
+  font-weight: 900;
+  letter-spacing: .07em;
+}
+.day-primary-action { min-height: 66px; font-size: 1rem; }
+.day-step-boosters-label { letter-spacing: .14em; }
+
+.bottom-nav {
+  bottom: 0;
+  width: min(780px, 100%);
+  padding: 0 max(4px, env(safe-area-inset-right, 0px)) max(6px, env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px));
+  gap: 0;
+  border: 0;
+  border-top: 1px solid #202020;
+  border-radius: 0 !important;
+  background: rgba(0,0,0,.96);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.bottom-nav-button {
+  min-height: 54px;
+  border-radius: 0 !important;
+  color: #686868;
+  font-size: .66rem;
+  font-weight: 950;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.bottom-nav-button.active {
+  background: transparent;
+  color: #fff;
+  box-shadow: inset 0 2px 0 #fff;
+}
+.bottom-nav-button[data-nav-tab="changed"] { text-transform: lowercase; letter-spacing: 0; }
+
+.changed-week-card,
+.changed-board-card { background: #030303; }
+.changed-week-label { color: #777; }
+.changed-week-card p { font-size: 1rem; font-weight: 820; }
+.changed-board-head { min-height: 64px; }
+.changed-board-head h2 {
+  font-size: 2.2rem;
+  line-height: .9;
+  text-transform: uppercase;
+}
+.changed-column-heading { padding: 10px 8px; }
+.changed-column-heading strong { font-size: .72rem; letter-spacing: .14em; }
+.changed-column-heading small { display: none; }
+.changed-entry-row { min-height: 34px; font-size: .72rem; }
+.changed-side-option { border-radius: 2px; min-height: 52px; }
+.changed-side-option small { display: none; }
+
+.today-card { padding-top: 15px; }
+.today-empty { font-weight: 950; letter-spacing: .08em; }
+.week-progress, .golden-streak { font-size: .7rem; }
+.calendar-hint { display: none !important; }
+
+.more-card .secondary-button,
+.motivation-library > summary,
+.compact-editor > summary {
+  font-weight: 900;
+  letter-spacing: .05em;
+}
+
+.notice { border-radius: 2px; font-weight: 850; }
+.status-line, .micro-status { color: #777; }
+
+:root[data-theme="light"] body { background: #fff; }
+:root[data-theme="light"] .bottom-nav { background: rgba(255,255,255,.96); border-top-color: #d8d8d8; }
+:root[data-theme="light"] .bottom-nav-button { color: #8a8a8a; }
+:root[data-theme="light"] .bottom-nav-button.active { color: #000; box-shadow: inset 0 2px 0 #000; }
+:root[data-theme="light"] .day-capture-button { background: #000; color: #fff; }
+\n/* v1.22 compact control language */
+.daily-edit-actions .primary-button,
+.daily-edit-actions .secondary-button,
+.daily-edit-actions .ghost-danger,
+.edit-actions .primary-button,
+.edit-actions .secondary-button,
+.edit-actions .danger-button,
+.text-button,
+.ghost-danger,
+.danger-button {
+  font-weight: 900;
+  letter-spacing: .04em;
+}
+.workout-exit-menu > summary { letter-spacing: .12em; }
+.focus-prescription { font-weight: 850; letter-spacing: .035em; }
+.set-label { font-weight: 950; letter-spacing: .03em; }

@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.21.1'
+const APP_VERSION = '1.22.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -559,7 +559,7 @@ function routineStepsForDate(dateKey = todayDateKey()) {
 
 function routineDaysLabel(days) {
   const normalized = normalizeRoutineDays(days)
-  if (normalized.length === 7) return 'Every day'
+  if (normalized.length === 7) return 'EVERY DAY'
   return ROUTINE_DAY_LABELS.filter(([day]) => normalized.includes(day)).map(([, short]) => short).join(' · ')
 }
 
@@ -567,7 +567,7 @@ function routineDayPickerHtml(days, name = 'active_days') {
   const selected = new Set(normalizeRoutineDays(days))
   return `
     <div class="routine-days-field">
-      <div class="routine-days-head"><span class="eyebrow">RUNS ON</span><button type="button" class="routine-days-all" data-routine-days-all>Every day</button></div>
+      <div class="routine-days-head"><span class="eyebrow">DAYS</span><button type="button" class="routine-days-all" data-routine-days-all>ALL</button></div>
       <div class="routine-days-picker">
         ${ROUTINE_DAY_LABELS.map(([day, short, full]) => `
           <label class="routine-day-chip ${selected.has(day) ? 'is-selected' : ''}" title="${full}">
@@ -1101,8 +1101,8 @@ function boostersForRoutineStep(stepId) {
 function routineStepOptionsHtml(selectedStepId = '') {
   const selected = selectedStepId || ''
   return [
-    `<option value="" ${selected ? '' : 'selected'}>Anytime / no activity</option>`,
-    ...dailySteps.map((step) => `<option value="${escapeHtml(step.id)}" ${step.id === selected ? 'selected' : ''}>With ${escapeHtml(step.title)}</option>`)
+    `<option value="" ${selected ? '' : 'selected'}>ANYTIME</option>`,
+    ...dailySteps.map((step) => `<option value="${escapeHtml(step.id)}" ${step.id === selected ? 'selected' : ''}>${escapeHtml(step.title)}</option>`)
   ].join('')
 }
 
@@ -1825,14 +1825,13 @@ function renderLogin(message = '') {
       <section class="login-card" aria-labelledby="login-title">
         <div class="brand-name">battle angel</div>
         <div class="brand-slogan">a warrior's spirit needs a warrior's body</div>
-        <h1 id="login-title">Open. Train. Done.</h1>
-        <p>Sign in once on this phone. battle angel keeps you signed in so your normal gym flow stays friction-free.</p>
+        <h1 id="login-title">ENTER.</h1>
         <form class="login-form" id="login-form">
           <label for="email" class="eyebrow">EMAIL</label>
           <input id="email" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required placeholder="you@example.com" />
           <label for="password" class="eyebrow">PASSWORD</label>
           <input id="password" type="password" autocomplete="current-password" required minlength="6" placeholder="your battle angel password" />
-          <button class="primary-button" type="submit">Sign in</button>
+          <button class="primary-button" type="submit">ENTER</button>
         </form>
         <div id="login-status" class="status-line" aria-live="polite">${escapeHtml(message)}</div>
       </section>
@@ -1846,7 +1845,7 @@ function renderLogin(message = '') {
     const password = document.querySelector('#password').value
     const button = form.querySelector('button')
     button.disabled = true
-    button.textContent = 'Signing in...'
+    button.textContent = 'ENTERING...'
     status.textContent = ''
 
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -2628,11 +2627,11 @@ function returnFromRestScreen() {
 
 function renderBottomNav(activeTab) {
   const tabs = [
-    ['day', 'Day'],
-    ['gym', 'Gym'],
+    ['day', 'DAY'],
+    ['gym', 'GYM'],
     ['changed', 'i changed.'],
-    ['plan', 'Plan'],
-    ['more', 'More']
+    ['plan', 'PLAN'],
+    ['more', 'MORE']
   ]
   return `<nav class="bottom-nav" aria-label="Main navigation">${tabs.map(([id, label]) => `
     <button type="button" class="bottom-nav-button ${activeTab === id ? 'active' : ''}" data-nav-tab="${id}" aria-current="${activeTab === id ? 'page' : 'false'}">${label}</button>`).join('')}</nav>`
@@ -2682,7 +2681,7 @@ function renderShell(content, options = {}) {
         <div class="account-panel">
           <div class="account-email">${escapeHtml(currentUser?.email || '')}</div>
           <div class="account-actions">
-            <button type="button" class="secondary-button" id="theme-toggle">${getTheme() === 'dark' ? 'Light mode' : 'Dark mode'}</button>
+            <button type="button" class="secondary-button" id="theme-toggle">${getTheme() === 'dark' ? 'LIGHT' : 'DARK'}</button>
             <button type="button" class="secondary-button" id="backup-library">Backup</button>
             <button type="button" class="secondary-button" id="sign-out">Sign out</button>
           </div>
@@ -2718,20 +2717,19 @@ function renderMotivationLibrary() {
         : `<video controls playsinline webkit-playsinline preload="metadata" src="${escapeHtml(video.signedUrl)}" aria-label="${escapeHtml(video.name)}"></video>`}
       <div class="motivation-item-row">
         <div class="motivation-item-name">${escapeHtml(video.name)}</div>
-        <button type="button" class="text-button danger-text motivation-remove" data-remove-motivation="${video.id}" data-motivation-path="${escapeHtml(video.video_path)}">Remove</button>
+        <button type="button" class="text-button danger-text motivation-remove" data-remove-motivation="${video.id}" data-motivation-path="${escapeHtml(video.video_path)}">REMOVE</button>
       </div>
     </article>`).join('')
 
   return `
     <details class="motivation-library">
       <summary>
-        <span>Edit motivation</span>
+        <span>MOTIVATION</span>
         <span class="motivation-count">${motivationVideos.length}</span>
       </summary>
       <div class="motivation-editor-body">
         <label class="file-picker motivation-picker">
-          <span class="file-picker-button">Add videos or photos</span>
-          <span class="picked-files">Shuffled during rest · photos show ${MOTIVATION_IMAGE_SECONDS}s each</span>
+          <span class="file-picker-button">ADD MEDIA</span>
           <input id="motivation-videos" type="file" accept="video/*,image/*,.mp4,.mov,.m4v,.webm,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif" multiple aria-label="Choose motivation videos or photos" />
         </label>
         <div id="motivation-status" class="status-line motivation-status" aria-live="polite"></div>
@@ -2749,30 +2747,30 @@ function renderDailyEditor() {
       <details class="daily-edit-item">
         <summary>
           <span class="daily-edit-summary-copy"><strong>${escapeHtml(step.title)}</strong><small>${escapeHtml(routineDaysLabel(activeDays))}${substeps.length ? ` · ${substeps.length} substeps` : ''}</small></span>
-          <span class="daily-edit-more">Edit</span>
+          <span class="daily-edit-more">EDIT</span>
         </summary>
         <form class="daily-edit-form" data-daily-edit="${step.id}">
           <label>
-            <span class="eyebrow">STEP</span>
+            <span class="eyebrow">ACTION</span>
             <input name="title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required value="${escapeHtml(step.title)}" />
           </label>
           ${routineDayPickerHtml(activeDays)}
           <label>
-            <span class="eyebrow">SHORT NOTE · OPTIONAL</span>
-            <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only what helps you act">${escapeHtml(step.note || '')}</textarea>
+            <span class="eyebrow">NOTE</span>
+            <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="">${escapeHtml(step.note || '')}</textarea>
           </label>
           <details class="daily-substeps-editor" ${substeps.length ? 'open' : ''}>
-            <summary>Substeps${substeps.length ? ` · ${substeps.length}` : ' · optional'}</summary>
+            <summary>SUBSTEPS${substeps.length ? ` · ${substeps.length}` : ''}</summary>
             <label>
-              <span class="eyebrow">ONE PER LINE</span>
+              <span class="eyebrow">SUBSTEPS</span>
               <textarea name="substeps" rows="${Math.min(6, Math.max(3, substeps.length + 1))}" placeholder="Brush teeth\nSkincare\nGet dressed">${escapeHtml(dailySubstepsText(step))}</textarea>
             </label>
           </details>
           <div class="daily-edit-actions">
-            <button type="submit" class="primary-button">Save</button>
-            <button type="button" class="secondary-button" data-daily-move="up" data-daily-step-id="${step.id}" ${index === 0 ? 'disabled' : ''}>↑ Earlier</button>
-            <button type="button" class="secondary-button" data-daily-move="down" data-daily-step-id="${step.id}" ${index === dailySteps.length - 1 ? 'disabled' : ''}>↓ Later</button>
-            <button type="button" class="ghost-danger" data-daily-delete="${step.id}">Delete</button>
+            <button type="submit" class="primary-button">SAVE</button>
+            <button type="button" class="secondary-button" data-daily-move="up" data-daily-step-id="${step.id}" ${index === 0 ? 'disabled' : ''}>↑</button>
+            <button type="button" class="secondary-button" data-daily-move="down" data-daily-step-id="${step.id}" ${index === dailySteps.length - 1 ? 'disabled' : ''}>↓</button>
+            <button type="button" class="ghost-danger" data-daily-delete="${step.id}">DELETE</button>
           </div>
         </form>
       </details>`
@@ -2780,31 +2778,30 @@ function renderDailyEditor() {
 
   return `
     <section class="day-setup-section">
-      <p class="day-setup-help">Choose the days once. Only steps scheduled for today enter Autopilot.</p>
       <details class="day-setup-add" ${dailySteps.length ? '' : 'open'}>
-        <summary>+ Add routine step</summary>
+        <summary>+ ADD RITUAL</summary>
         <form id="add-daily-step" class="daily-add-form">
           <label>
-            <span class="eyebrow">STEP</span>
-            <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="e.g. Take out trash" />
+            <span class="eyebrow">ACTION</span>
+            <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="Action" />
           </label>
           ${routineDayPickerHtml(ALL_ROUTINE_DAYS)}
           <label>
-            <span class="eyebrow">SHORT NOTE · OPTIONAL</span>
-            <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only if it helps"></textarea>
+            <span class="eyebrow">NOTE</span>
+            <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder=""></textarea>
           </label>
           <details class="daily-substeps-editor">
-            <summary>Add substeps · optional</summary>
+            <summary>SUBSTEPS</summary>
             <label>
-              <span class="eyebrow">ONE PER LINE</span>
+              <span class="eyebrow">SUBSTEPS</span>
               <textarea id="daily-step-substeps" rows="4" placeholder="Brush teeth\nSkincare\nGet dressed"></textarea>
             </label>
           </details>
-          <button type="submit" class="primary-button">Add step</button>
+          <button type="submit" class="primary-button">ADD</button>
         </form>
       </details>
-      ${rows ? `<div class="daily-edit-list">${rows}</div>` : '<div class="daily-editor-empty">Add the repeating actions you want battle angel to serve automatically.</div>'}
-      ${progress.started_at ? '<button type="button" class="text-button danger-text daily-reset" id="reset-day-progress">Restart today\'s Autopilot</button>' : ''}
+      ${rows ? `<div class="daily-edit-list">${rows}</div>` : '<div class="daily-editor-empty">—</div>'}
+      ${progress.started_at ? '<button type="button" class="text-button danger-text daily-reset" id="reset-day-progress">RESET TODAY</button>' : ''}
       <div id="daily-editor-status" class="status-line" aria-live="polite"></div>
     </section>`
 }
@@ -2843,7 +2840,7 @@ async function addDailyMed(event) {
   const status = document.querySelector('#daily-meds-status')
   const name = input?.value.trim().slice(0, DAILY_MED_NAME_MAX)
   if (!name) return
-  if (status) status.textContent = 'Saving...'
+  if (status) status.textContent = 'SAVING...'
   const nextOrder = Math.max(0, ...dailyMeds.map((med) => Number(med.sort_order) || 0)) + 1
   const routineStepId = dailyMedAnchorsAvailable ? (document.querySelector('#daily-med-routine-step')?.value || null) : null
   const payload = {
@@ -2926,7 +2923,7 @@ function renderQuickCapture() {
   return `
     <section class="day-capture-card" aria-label="Quick todo capture">
       <form id="add-power-todo" class="day-capture-form">
-        <input id="power-todo-title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Dump a todo..." aria-label="Dump a todo into Inbox" autocomplete="off" />
+        <input id="power-todo-title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Capture..." aria-label="Capture to Inbox" autocomplete="off" />
         <button type="submit" class="day-capture-button" aria-label="Add to Inbox">+</button>
       </form>
       <div id="power-todos-status" class="micro-status day-capture-status" aria-live="polite"></div>
@@ -2966,11 +2963,11 @@ function showRunnerCapture() {
   sheet.className = 'runner-capture-sheet'
   sheet.innerHTML = `
     <form id="runner-capture-form" class="runner-capture-form">
-      <div class="runner-capture-title">Dump it. Keep moving.</div>
+      <div class="runner-capture-title">CAPTURE</div>
       <input id="runner-capture-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Todo" autocomplete="off" />
       <div class="runner-capture-actions">
-        <button type="button" class="secondary-button" id="runner-capture-cancel">Cancel</button>
-        <button type="submit" class="primary-button" id="runner-capture-save">Inbox</button>
+        <button type="button" class="secondary-button" id="runner-capture-cancel">CANCEL</button>
+        <button type="submit" class="primary-button" id="runner-capture-save">SAVE</button>
       </div>
       <div id="runner-capture-status" class="micro-status"></div>
     </form>`
@@ -2984,14 +2981,14 @@ function showRunnerCapture() {
     const button = sheet.querySelector('#runner-capture-save')
     const title = input?.value || ''
     button.disabled = true
-    if (status) status.textContent = 'Saving...'
+    if (status) status.textContent = 'SAVING...'
     const result = await createPowerTodo(title)
     if (result.error) {
       button.disabled = false
-      if (status) status.textContent = isNetworkError(result.error) ? 'Connect to save this todo.' : result.error.message
+      if (status) status.textContent = isNetworkError(result.error) ? 'OFFLINE.' : result.error.message
       return
     }
-    if (status) status.textContent = 'Saved to Inbox.'
+    if (status) status.textContent = 'SAVED.'
     window.setTimeout(() => sheet.remove(), 450)
   })
 }
@@ -3020,10 +3017,10 @@ async function addPowerTodo(event) {
   const status = document.querySelector('#power-todos-status')
   const title = input?.value || ''
   if (!title.trim()) return
-  if (status) status.textContent = 'Saving...'
+  if (status) status.textContent = 'SAVING...'
   const result = await createPowerTodo(title)
   if (result.error) {
-    if (status) status.textContent = isNetworkError(result.error) ? 'Connect to save this todo.' : result.error.message
+    if (status) status.textContent = isNetworkError(result.error) ? 'OFFLINE.' : result.error.message
     return
   }
   renderAfterTodoChange(returnView)
@@ -3085,7 +3082,7 @@ async function updatePowerTodo(event) {
   if (!title) return
   const { error } = await supabase.from('power_todos').update({ title, updated_at: new Date().toISOString() }).eq('id', id)
   if (error) {
-    alert(isNetworkError(error) ? 'Connect to edit todos.' : error.message)
+    alert(isNetworkError(error) ? 'OFFLINE.' : error.message)
     return
   }
   await loadPowerActions()
@@ -3099,7 +3096,7 @@ async function deletePowerTodo(todoId) {
   if (!todo || !confirm(`Delete "${todo.title}"?`)) return
   const { error } = await supabase.from('power_todos').delete().eq('id', todoId)
   if (error) {
-    alert(isNetworkError(error) ? 'Connect to edit todos.' : error.message)
+    alert(isNetworkError(error) ? 'OFFLINE.' : error.message)
     return
   }
   powerTodos = powerTodos.filter((item) => item.id !== todoId)
@@ -3130,7 +3127,7 @@ function renderDailyMedsQuick() {
   }).join('')
   return `
     <section class="day-med-quick-card day-anytime-boosters" aria-label="Anytime boosters">
-      <div class="day-compact-head"><strong>Anytime boosters</strong><span>${remaining ? `${remaining} left` : 'done ✓'}</span></div>
+      <div class="day-compact-head"><strong>ANYTIME</strong><span>${remaining ? `${remaining} LEFT` : 'CLEAR ✓'}</span></div>
       <div class="day-med-quick-list">${rows}</div>
     </section>`
 }
@@ -3139,8 +3136,8 @@ function renderDailyMedsSetup() {
   if (!dailyMedsAvailable) {
     return `
       <section class="day-setup-section">
-        <div class="day-setup-section-head"><div><div class="today-label">Boosters</div><h2>Boosters</h2></div></div>
-        <div class="daily-editor-empty">Run the latest Supabase SQL once to enable boosters.</div>
+        <div class="day-setup-section-head"><div><h2>BOOSTERS.</h2></div></div>
+        <div class="daily-editor-empty">SUPABASE UPDATE REQUIRED.</div>
       </section>`
   }
   const editRows = dailyMeds.map((med, index) => `
@@ -3150,16 +3147,15 @@ function renderDailyMedsSetup() {
         ${dailyMedAnchorsAvailable ? `<select name="routine_step_id" aria-label="Activity for ${escapeHtml(med.name)}">${routineStepOptionsHtml(med.routine_step_id)}</select>` : ''}
       </div>
       <div class="daily-med-edit-actions">
-        <button type="submit" class="small-button">Save</button>
+        <button type="submit" class="small-button">SAVE</button>
         <button type="button" class="small-button" data-daily-med-move="up" data-daily-med-id="${med.id}" ${index === 0 ? 'disabled' : ''}>↑</button>
         <button type="button" class="small-button" data-daily-med-move="down" data-daily-med-id="${med.id}" ${index === dailyMeds.length - 1 ? 'disabled' : ''}>↓</button>
-        <button type="button" class="text-button danger-text" data-daily-med-delete="${med.id}">Delete</button>
+        <button type="button" class="text-button danger-text" data-daily-med-delete="${med.id}">DELETE</button>
       </div>
     </form>`).join('')
   return `
     <section class="day-setup-section">
-      <p class="day-setup-help">Link each booster to the activity where it should appear, or leave it Anytime. Checkmarks reset every day.</p>
-      ${dailyMedAnchorsAvailable ? '' : '<div class="notice info">Run the v1.19 Supabase upgrade once to link boosters to routine activities.</div>'}
+      ${dailyMedAnchorsAvailable ? '' : '<div class="notice info">SUPABASE UPDATE REQUIRED.</div>'}
       <form id="add-daily-med" class="daily-med-add-form day-setup-med-add booster-add-form">
         <div class="booster-add-fields">
           <input id="daily-med-name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required placeholder="Add booster" aria-label="Booster name" />
@@ -3173,10 +3169,10 @@ function renderDailyMedsSetup() {
 }
 
 
-function renderDayHubRow(id, title, detail, count = '') {
+function renderDayHubRow(id, title, detail = '', count = '') {
   return `
     <button type="button" class="day-hub-row" id="${id}">
-      <span class="day-hub-copy"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></span>
+      <span class="day-hub-copy"><strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ''}</span>
       ${count !== '' ? `<span class="day-hub-count">${escapeHtml(String(count))}</span>` : ''}
       <span class="day-hub-chevron" aria-hidden="true">›</span>
     </button>`
@@ -3184,13 +3180,13 @@ function renderDayHubRow(id, title, detail, count = '') {
 
 function renderTodayPlanList() {
   const entries = getTodayStackEntries()
-  if (!entries.length) return '<div class="day-plan-empty">Nothing in today’s stack yet.</div>'
+  if (!entries.length) return '<div class="day-plan-empty">—</div>'
   return `<div class="day-plan-list">${entries.map((entry, index) => `
     <div class="day-plan-row ${entry.type === 'todo' ? 'is-todo' : ''}">
       <span class="day-plan-number">${index + 1}</span>
       <span class="day-plan-copy">
         <strong>${escapeHtml(entry.title)}</strong>
-        <small>${entry.type === 'todo' ? 'Todo' : 'Routine'}</small>
+        <small>${entry.type === 'todo' ? 'TASK' : 'RITUAL'}</small>
       </span>
       <span class="day-plan-controls">
         <button type="button" data-stack-move="up" data-stack-key="${escapeHtml(entry.key)}" ${index === 0 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} earlier">↑</button>
@@ -3207,23 +3203,22 @@ function renderDayPlannerScreen() {
   const dayName = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).format(new Date())
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-home">‹ Day</button>
-      <div><div class="today-label">${escapeHtml(dayName)}</div><h2>Arrange today</h2></div>
+      <button type="button" class="day-subview-back" id="back-day-home">‹ LOCK IN</button>
+      <div><div class="today-label">${escapeHtml(dayName)}</div><h2>THE ORDER.</h2></div>
     </div>
-    <p class="day-subview-intro">Arrange once. Then stop planning and let Autopilot serve the next action.</p>
     <section class="day-plan-card">
-      <div class="day-compact-head"><strong>Today</strong><span>${entries.length}</span></div>
+      <div class="day-compact-head"><strong>TODAY</strong><span>${entries.length}</span></div>
       ${renderTodayPlanList()}
     </section>
     <section class="day-plan-inbox">
-      <div class="day-compact-head"><strong>Add from Inbox</strong><span>${inboxChoices.length}</span></div>
+      <div class="day-compact-head"><strong>INBOX</strong><span>${inboxChoices.length}</span></div>
       ${inboxChoices.length ? `<div class="day-plan-inbox-list">${inboxChoices.map((todo) => `
         <button type="button" class="day-plan-inbox-row" data-power-today="${todo.id}">
-          <span>${escapeHtml(todo.title)}</span><strong>+ Today</strong>
-        </button>`).join('')}</div>` : '<div class="day-plan-empty">Inbox clear.</div>'}
+          <span>${escapeHtml(todo.title)}</span><strong>+</strong>
+        </button>`).join('')}</div>` : '<div class="day-plan-empty">—</div>'}
     </section>
-    <button type="button" class="day-primary-footer" id="plan-start-day" ${entries.length ? '' : 'disabled'}>${currentDailyProgress().started_at ? 'CONTINUE DAY' : 'START DAY'} <span aria-hidden="true">→</span></button>`,
-    { title: 'Arrange today', showAccount: false, showTimer: false, showHeader: false, view: 'day-plan' })
+    <button type="button" class="day-primary-footer" id="plan-start-day" ${entries.length ? '' : 'disabled'}>${currentDailyProgress().started_at ? 'RESUME' : 'LOCK IN'} <span aria-hidden="true">→</span></button>`,
+    { title: 'THE ORDER.', showAccount: false, showTimer: false, showHeader: false, view: 'day-plan' })
   document.querySelector('#back-day-home')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
   document.querySelector('#plan-start-day')?.addEventListener('click', startDailySystem)
   bindTodayPlanner()
@@ -3239,24 +3234,23 @@ function renderDayInboxScreen() {
           <form data-power-todo-edit="${todo.id}">
             <input name="title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required value="${escapeHtml(todo.title)}" aria-label="Todo title" />
             <div class="day-inbox-edit-actions">
-              <button type="submit" class="small-button">Save</button>
-              <button type="button" class="text-button danger-text" data-power-todo-delete="${todo.id}">Delete</button>
+              <button type="submit" class="small-button">SAVE</button>
+              <button type="button" class="text-button danger-text" data-power-todo-delete="${todo.id}">DELETE</button>
             </div>
           </form>
         </details>
       </div>`).join('')
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-home">‹ Day</button>
-      <div><div class="today-label">Capture</div><h2>Inbox</h2></div>
+      <button type="button" class="day-subview-back" id="back-day-home">‹ LOCK IN</button>
+      <div><h2>INBOX.</h2></div>
     </div>
-    <p class="day-subview-intro">Dump it here. Choose what belongs today only from Arrange today.</p>
     ${renderQuickCapture()}
     <section class="day-inbox-card-flat">
-      <div class="day-compact-head"><strong>Waiting</strong><span>${powerTodos.length}</span></div>
-      ${rows ? `<div class="day-inbox-list-flat">${rows}</div>` : '<div class="day-plan-empty">Nothing waiting.</div>'}
+      <div class="day-compact-head"><strong>OPEN</strong><span>${powerTodos.length}</span></div>
+      ${rows ? `<div class="day-inbox-list-flat">${rows}</div>` : '<div class="day-plan-empty">—</div>'}
     </section>`,
-    { title: 'Inbox', showAccount: false, showTimer: false, showHeader: false, view: 'day-inbox' })
+    { title: 'INBOX.', showAccount: false, showTimer: false, showHeader: false, view: 'day-inbox' })
   document.querySelector('#back-day-home')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
   bindPowerTodos()
 }
@@ -3264,14 +3258,14 @@ function renderDayInboxScreen() {
 function renderDaySetupScreen() {
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-home">‹ Day</button>
-      <div><div class="today-label">Set once</div><h2>Setup</h2></div>
+      <button type="button" class="day-subview-back" id="back-day-home">‹ LOCK IN</button>
+      <div><h2>SYSTEM.</h2></div>
     </div>
     <section class="day-hub day-setup-hub" aria-label="Day setup">
-      ${renderDayHubRow('open-routine-setup', 'Routine', 'Steps, substeps & weekdays', dailySteps.length)}
-      ${renderDayHubRow('open-booster-setup', 'Boosters', 'What to take & where it appears', dailyMeds.length)}
+      ${renderDayHubRow('open-routine-setup', 'RITUAL', '', dailySteps.length)}
+      ${renderDayHubRow('open-booster-setup', 'BOOSTERS', '', dailyMeds.length)}
     </section>`,
-    { title: 'Setup', showAccount: false, showTimer: false, showHeader: false, view: 'day-setup' })
+    { title: 'SYSTEM.', showAccount: false, showTimer: false, showHeader: false, view: 'day-setup' })
   document.querySelector('#back-day-home')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
   document.querySelector('#open-routine-setup')?.addEventListener('click', renderRoutineSetupScreen)
   document.querySelector('#open-booster-setup')?.addEventListener('click', renderBoosterSetupScreen)
@@ -3280,12 +3274,11 @@ function renderDaySetupScreen() {
 function renderRoutineSetupScreen() {
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-setup">‹ Setup</button>
-      <div><div class="today-label">Day setup</div><h2>Routine</h2></div>
+      <button type="button" class="day-subview-back" id="back-day-setup">‹ SYSTEM</button>
+      <div><h2>RITUAL.</h2></div>
     </div>
-    <p class="day-subview-intro">Build the repeating actions once. Choose the weekdays each action belongs to.</p>
     ${renderDailyEditor()}`,
-    { title: 'Routine', showAccount: false, showTimer: false, showHeader: false, view: 'day-routine-setup' })
+    { title: 'RITUAL.', showAccount: false, showTimer: false, showHeader: false, view: 'day-routine-setup' })
   document.querySelector('#back-day-setup')?.addEventListener('click', renderDaySetupScreen)
   bindDailyEditor()
 }
@@ -3293,12 +3286,11 @@ function renderRoutineSetupScreen() {
 function renderBoosterSetupScreen() {
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-setup">‹ Setup</button>
-      <div><div class="today-label">Day setup</div><h2>Boosters</h2></div>
+      <button type="button" class="day-subview-back" id="back-day-setup">‹ SYSTEM</button>
+      <div><h2>BOOSTERS.</h2></div>
     </div>
-    <p class="day-subview-intro">Attach each booster to one routine activity, or leave it Anytime.</p>
     ${renderDailyMedsSetup()}`,
-    { title: 'Boosters', showAccount: false, showTimer: false, showHeader: false, view: 'day-booster-setup' })
+    { title: 'BOOSTERS.', showAccount: false, showTimer: false, showHeader: false, view: 'day-booster-setup' })
   document.querySelector('#back-day-setup')?.addEventListener('click', renderDaySetupScreen)
   bindDailyMeds()
 }
@@ -3311,8 +3303,8 @@ function renderDay(errorMessage = '', options = {}) {
 
   if (!dailySystemAvailable) {
     renderShell(`
-      <div class="notice error">Day needs the latest Supabase schema once. Your gym data is untouched.</div>`,
-      { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: 'day' })
+      <div class="notice error">DAY · SUPABASE UPDATE REQUIRED.</div>`,
+      { title: 'LOCK IN.', showAccount: false, showTimer: false, navTab: 'day', view: 'day' })
     return
   }
 
@@ -3332,41 +3324,39 @@ function renderDay(errorMessage = '', options = {}) {
   if (!entries.length) {
     hero = `
       <section class="day-home-hero">
-        <div class="today-label">Today</div>
-        <h2>Nothing queued.</h2>
-        <p>Set up a routine or pull something from Inbox.</p>
-        <button type="button" class="start-workout-button day-start-button" id="empty-plan-day">Arrange today <span aria-hidden="true">→</span></button>
+        <div class="today-label">TODAY</div>
+        <h2>NO ORDERS.</h2>
+        <button type="button" class="start-workout-button day-start-button" id="empty-plan-day">BUILD DAY <span aria-hidden="true">→</span></button>
       </section>`
   } else if (complete) {
     hero = `
       <section class="day-home-hero is-complete">
-        <div class="today-label">Today</div>
-        <h2>Day complete.</h2>
-        <p>You can still capture anything that comes up.</p>
+        <div class="today-label">TODAY</div>
+        <h2>COMPLETE.</h2>
       </section>`
   } else {
-    const helper = `${remaining} action${remaining === 1 ? '' : 's'} left`
+    const helper = `${remaining} LEFT`
     hero = `
       <section class="day-home-hero">
-        <div class="today-label">${started ? 'In progress' : 'Today'}</div>
-        <h2>${started ? 'Keep moving.' : 'Ready when you are.'}</h2>
-        <p>${escapeHtml(helper)}</p>
-        <button type="button" class="start-workout-button day-start-button" id="start-day">${started ? 'Continue day' : 'Start day'} <span aria-hidden="true">→</span></button>
+        <div class="today-label">TODAY</div>
+        <h2>${started ? 'LOCKED IN.' : 'LOCK IN.'}</h2>
+        <div class="day-lock-count">${escapeHtml(helper)}</div>
+        <button type="button" class="start-workout-button day-start-button" id="start-day">${started ? 'RESUME' : 'BEGIN'} <span aria-hidden="true">→</span></button>
       </section>`
   }
 
   renderShell(`
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
-    ${usingCachedData ? '<div class="offline-note">Offline · saved day available</div>' : ''}
+    ${usingCachedData ? '<div class="offline-note">OFFLINE</div>' : ''}
     ${hero}
     ${renderQuickCapture()}
     ${renderDailyMedsQuick()}
     <section class="day-hub" aria-label="Day controls">
-      ${renderDayHubRow('open-day-plan', 'Arrange today', 'Choose and order today', entries.length)}
-      ${renderDayHubRow('open-day-inbox', 'Inbox', 'Capture & manage todos', powerTodos.length)}
-      ${renderDayHubRow('open-day-setup', 'Setup', 'Routine & boosters')}
+      ${renderDayHubRow('open-day-plan', 'THE ORDER', '', entries.length)}
+      ${renderDayHubRow('open-day-inbox', 'INBOX', '', powerTodos.length)}
+      ${renderDayHubRow('open-day-setup', 'SYSTEM')}
     </section>`,
-    { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
+    { title: 'LOCK IN.', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
 
   document.querySelector('#start-day')?.addEventListener('click', startDailySystem)
   document.querySelector('#empty-plan-day')?.addEventListener('click', renderDayPlannerScreen)
@@ -3399,7 +3389,7 @@ function renderDayRunner() {
 
   if (action.type === 'todo') {
     cardBody = `
-      <div class="day-step-parent">Todo</div>
+      <div class="day-step-parent">TASK</div>
       <h2>${escapeHtml(action.title)}</h2>`
   } else {
     const { step, substeps, substepIndex, title, isSubstep } = action
@@ -3414,15 +3404,15 @@ function renderDayRunner() {
       const nextFolder = gymState.remaining[0] || null
       primaryLabel = nextFolder ? 'START WORKOUT' : 'CHOOSE WORKOUT'
       cardBody = `
-        <div class="day-step-parent">Routine · Gym</div>
+        <div class="day-step-parent">RITUAL · GYM</div>
         <h2>${escapeHtml(plannedNames || 'Gym')}</h2>
         ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
         ${renderRoutineBoosters(step.id)}
-        ${gymState.planned.length ? '' : '<p class="day-gym-empty">No workout planned today.</p>'}`
+        ${gymState.planned.length ? '' : '<p class="day-gym-empty">NO WORKOUT.</p>'}`
     } else {
       const substepMeta = isSubstep ? `${substepIndex + 1} of ${substeps.length}` : ''
       cardBody = `
-        <div class="day-step-parent">${isSubstep ? `${escapeHtml(step.title)} <span>${escapeHtml(substepMeta)}</span>` : 'Routine'}</div>
+        <div class="day-step-parent">${isSubstep ? `${escapeHtml(step.title)} <span>${escapeHtml(substepMeta)}</span>` : 'RITUAL'}</div>
         <h2>${escapeHtml(title)}</h2>
         ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
         ${renderRoutineBoosters(step.id)}`
@@ -3444,7 +3434,7 @@ function renderDayRunner() {
           <details class="day-runner-menu">
             <summary aria-label="Daily options">•••</summary>
             <div class="day-runner-menu-popover">
-              <button type="button" class="text-button" id="exit-day-runner">Day overview</button>
+              <button type="button" class="text-button" id="exit-day-runner">EXIT</button>
             </div>
           </details>
         </div>
@@ -3454,14 +3444,14 @@ function renderDayRunner() {
       </section>
       <div class="day-action-controls" aria-label="Current action controls">
         <div class="day-secondary-actions">
-          ${canLater ? '<button type="button" class="day-option-button" id="later-current-action">Later today</button>' : ''}
-          <button type="button" class="day-option-button" id="skip-current-action">Skip today</button>
+          ${canLater ? '<button type="button" class="day-option-button" id="later-current-action">LATER</button>' : ''}
+          <button type="button" class="day-option-button" id="skip-current-action">SKIP</button>
         </div>
         <button type="button" class="day-primary-action" id="primary-current-action">${escapeHtml(primaryLabel)} <span aria-hidden="true">&rarr;</span></button>
       </div>
       ${undoHtml}
     </div>`,
-    { title: 'Day', showAccount: false, showTimer: false, showHeader: false, view: 'day-runner' })
+    { title: 'LOCK IN.', showAccount: false, showTimer: false, showHeader: false, view: 'day-runner' })
 
   document.querySelector('#runner-capture')?.addEventListener('click', showRunnerCapture)
   document.querySelector('#exit-day-runner')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
@@ -3491,10 +3481,10 @@ async function addDailyStep(event) {
   const status = document.querySelector('#daily-editor-status')
   if (!title) return
   if (!active_days.length) {
-    if (status) status.textContent = 'Choose at least one day.'
+    if (status) status.textContent = 'CHOOSE A DAY.'
     return
   }
-  if (status) status.textContent = 'Saving...'
+  if (status) status.textContent = 'SAVING...'
   const nextOrder = Math.max(0, ...dailySteps.map((step) => Number(step.sort_order) || 0)) + 1
   const { error } = await supabase.from('daily_steps').insert({
     user_id: currentUser.id,
@@ -3506,7 +3496,7 @@ async function addDailyStep(event) {
     updated_at: new Date().toISOString()
   })
   if (error) {
-    if (status) status.textContent = isNetworkError(error) ? 'Connect to edit your routine.' : error.message
+    if (status) status.textContent = isNetworkError(error) ? 'OFFLINE.' : error.message
     return
   }
   await loadDailySystem()
@@ -3524,7 +3514,7 @@ async function updateDailyStep(event) {
   const active_days = readRoutineDays(form)
   if (!title) return
   if (!active_days.length) {
-    alert('Choose at least one day for this routine step.')
+    alert('CHOOSE A DAY.')
     return
   }
   const { error } = await supabase.from('daily_steps').update({
@@ -3535,7 +3525,7 @@ async function updateDailyStep(event) {
     updated_at: new Date().toISOString()
   }).eq('id', id)
   if (error) {
-    alert(isNetworkError(error) ? 'Connect to edit your routine.' : error.message)
+    alert(isNetworkError(error) ? 'OFFLINE.' : error.message)
     return
   }
   await loadDailySystem()
@@ -3568,7 +3558,7 @@ async function deleteDailyStep(stepId) {
   if (!step || !confirm(`Delete "${step.title}"?`)) return
   const { error } = await supabase.from('daily_steps').delete().eq('id', stepId)
   if (error) {
-    alert(isNetworkError(error) ? 'Connect to edit your routine.' : error.message)
+    alert(isNetworkError(error) ? 'OFFLINE.' : error.message)
     return
   }
   const progress = currentDailyProgress()
@@ -3586,7 +3576,7 @@ async function deleteDailyStep(stepId) {
 }
 
 function resetTodayDailyProgress() {
-  if (!confirm('Restart today from step 1?')) return
+  if (!confirm('Reset today?')) return
   saveDailyProgress(emptyDailyProgress(todayDateKey()))
   renderDay('', { forceOverview: true })
 }
@@ -3606,7 +3596,7 @@ function renderHome(errorMessage = '') {
 
   const resumeCard = savedFolder && !todayIds.has(savedFolder.id) ? `
     <button type="button" class="resume-home" id="resume-home">
-      <span>Resume</span>
+      <span>RESUME</span>
       <strong>${escapeHtml(savedFolder.name)}</strong>
     </button>` : ''
 
@@ -3616,36 +3606,36 @@ function renderHome(errorMessage = '') {
     return `
       <div class="today-workout-row">
         <div class="today-workout-name">${escapeHtml(folder.name)}</div>
-        <button type="button" class="start-workout-button today-module-start" data-start-today="${folder.id}" ${isDone ? 'disabled' : ''}>${isDone ? 'Done' : (isSaved ? 'Resume' : 'Start')}</button>
+        <button type="button" class="start-workout-button today-module-start" data-start-today="${folder.id}" ${isDone ? 'disabled' : ''}>${isDone ? 'DONE' : (isSaved ? 'RESUME' : 'START')}</button>
       </div>`
   }).join('')
 
   const todayCard = `
     <section class="today-card">
-      <div class="today-label">Today</div>
+      <div class="today-label">TODAY</div>
       ${todayFolders.length ? `
         <div class="today-workout-list">${todayRows}</div>
-        <button type="button" class="quiet-action" id="preload-today">Save videos</button>
+        <button type="button" class="quiet-action" id="preload-today">OFFLINE</button>
         <div id="preload-status" class="micro-status" aria-live="polite"></div>` : `
-        <div class="today-empty">No workout planned</div>
-        <button type="button" class="secondary-button full-button today-choose" id="choose-workout">Choose workout</button>`}
+        <div class="today-empty">NO WORKOUT.</div>
+        <button type="button" class="secondary-button full-button today-choose" id="choose-workout">CHOOSE</button>`}
     </section>`
 
   const missedCard = missedFolders.length ? `
     <button type="button" class="missed-card" id="move-missed-today">
-      <span>Missed yesterday</span>
+      <span>YESTERDAY</span>
       <strong>${escapeHtml(missedFolders.map((folder) => folder.name).join(' + '))}</strong>
-      <small>Move to today</small>
+      <small>MOVE →</small>
     </button>` : ''
 
   renderShell(`
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
-    ${usingCachedData ? '<div class="offline-note">Offline · showing your saved plan</div>' : ''}
+    ${usingCachedData ? '<div class="offline-note">OFFLINE</div>' : ''}
     ${resumeCard}
     ${todayCard}
     ${missedCard}
     ${historyAvailable && planningUpgradeAvailable ? `<section class="week-card">${renderWeekProgress(todayKey, { streak: true })}</section>` : ''}
-    <button type="button" class="quiet-action gym-all-workouts" id="open-all-workouts">All workouts</button>`, { title: 'Gym', showAccount: false, showTimer: false, navTab: 'gym', view: 'home' })
+    <button type="button" class="quiet-action gym-all-workouts" id="open-all-workouts">WORKOUTS</button>`, { title: 'GYM.', showAccount: false, showTimer: false, navTab: 'gym', view: 'home' })
 
   document.querySelectorAll('[data-start-today]').forEach((button) => {
     button.addEventListener('click', () => openFolder(button.dataset.startToday, { mode: 'workout' }))
@@ -3673,13 +3663,13 @@ function renderWorkouts(errorMessage = '') {
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     <section class="folder-grid" aria-label="Workouts">${cards}</section>
     <details class="add-folder compact-editor">
-      <summary>Edit muscles</summary>
+      <summary>EDIT WORKOUTS</summary>
       <form id="add-folder-form">
-        <input id="folder-name" type="text" maxlength="28" required placeholder="Add a muscle" aria-label="Folder name" />
+        <input id="folder-name" type="text" maxlength="28" required placeholder="Workout" aria-label="Folder name" />
         <button class="primary-button" type="submit">Add</button>
       </form>
       <div id="folder-status" class="status-line inline-status" aria-live="polite"></div>
-    </details>`, { title: 'Workouts', showAccount: false, showTimer: false, navTab: 'gym', view: 'workouts' })
+    </details>`, { title: 'WORKOUTS.', showAccount: false, showTimer: false, navTab: 'gym', view: 'workouts' })
 
   document.querySelectorAll('[data-folder-id]').forEach((button) => {
     button.addEventListener('click', () => openFolder(button.dataset.folderId))
@@ -3695,7 +3685,7 @@ function renderChanged(errorMessage = '') {
 
   if (!changedSystemAvailable) {
     renderShell(`
-      <div class="notice error">i changed. needs the v1.21 Supabase upgrade once. Everything else in battle angel still works normally.</div>`,
+      <div class="notice error">i changed. · SUPABASE UPDATE REQUIRED.</div>`,
       { title: 'i changed.', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed' })
     return
   }
@@ -3706,8 +3696,7 @@ function renderChanged(errorMessage = '') {
   const boardColumn = (side, entries) => `
     <section class="changed-column changed-column-${side}">
       <div class="changed-column-heading">
-        <strong>${side === 'present' ? 'Present' : 'Absent'}</strong>
-        <small>${side === 'present' ? "grateful it’s here" : "grateful it’s gone"}</small>
+        <strong>${side === 'present' ? 'PRESENT' : 'ABSENT'}</strong>
       </div>
       <div class="changed-entry-list">
         ${entries.length ? entries.map((entry) => `
@@ -3718,17 +3707,17 @@ function renderChanged(errorMessage = '') {
   renderShell(`
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     <section class="changed-week-card" id="open-changed-story" role="button" tabindex="0" aria-label="Open my story">
-      <div class="changed-week-label">THIS WEEK · WHERE I CAME FROM</div>
-      ${weekly ? `<p>${escapeHtml(weekly.body)}</p>` : '<p class="changed-week-empty">Add pieces of your story. One will come back each week.</p>'}
-      <span>My story →</span>
+      <div class="changed-week-label">THEN · THIS WEEK</div>
+      ${weekly ? `<p>${escapeHtml(weekly.body)}</p>` : '<p class="changed-week-empty">—</p>'}
+      <span>PAST →</span>
     </section>
     <section class="changed-board-card">
       <div class="changed-board-head">
         <div>
-          <div class="today-label">WHERE I AM</div>
-          <h2>Gratitude board</h2>
+          <div class="today-label">GRATITUDE</div>
+          <h2>NOW.</h2>
         </div>
-        <button type="button" class="changed-add-button" id="add-changed-entry">+ Add</button>
+        <button type="button" class="changed-add-button" id="add-changed-entry">+</button>
       </div>
       <div class="changed-board-grid">
         ${boardColumn('present', present)}
@@ -3756,31 +3745,31 @@ function renderChangedEntryScreen(entryId = null) {
   const side = entry?.side === 'absent' ? 'absent' : 'present'
   renderShell(`
     <div class="changed-subpage-head">
-      <button type="button" class="back-button" id="back-changed">Back</button>
+      <button type="button" class="back-button" id="back-changed">‹ i changed.</button>
     </div>
     <form id="changed-entry-form" class="changed-entry-form" data-entry-id="${entry?.id || ''}">
       <label>
-        <span class="eyebrow">WHAT I WANT TO REMEMBER</span>
-        <textarea id="changed-entry-body" rows="5" maxlength="${CHANGED_BOARD_TEXT_MAX}" required placeholder="Write it simply...">${escapeHtml(entry?.body || '')}</textarea>
+        <span class="eyebrow">REMEMBER</span>
+        <textarea id="changed-entry-body" rows="5" maxlength="${CHANGED_BOARD_TEXT_MAX}" required placeholder="">${escapeHtml(entry?.body || '')}</textarea>
       </label>
       <fieldset class="changed-side-fieldset">
-        <legend class="eyebrow">PUT IT UNDER</legend>
+        <legend class="eyebrow">COLUMN</legend>
         <div class="changed-side-picker">
           <label class="changed-side-option ${side === 'present' ? 'is-selected' : ''}">
             <input type="radio" name="changed_side" value="present" ${side === 'present' ? 'checked' : ''} />
-            <strong>Present</strong><small>grateful it’s here</small>
+            <strong>PRESENT</strong>
           </label>
           <label class="changed-side-option ${side === 'absent' ? 'is-selected' : ''}">
             <input type="radio" name="changed_side" value="absent" ${side === 'absent' ? 'checked' : ''} />
-            <strong>Absent</strong><small>grateful it’s gone</small>
+            <strong>ABSENT</strong>
           </label>
         </div>
       </fieldset>
-      <button type="submit" class="primary-button full-button">${entry ? 'Save' : 'Add to board'}</button>
-      ${entry ? '<button type="button" class="text-button danger-text changed-delete-button" id="delete-changed-entry">Delete</button>' : ''}
+      <button type="submit" class="primary-button full-button">${entry ? 'SAVE' : 'ADD'}</button>
+      ${entry ? '<button type="button" class="text-button danger-text changed-delete-button" id="delete-changed-entry">DELETE</button>' : ''}
       <div id="changed-entry-status" class="status-line" aria-live="polite"></div>
     </form>`,
-    { title: entry ? 'Edit' : 'Add', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed-entry' })
+    { title: entry ? 'EDIT.' : 'ADD.', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed-entry' })
 
   const form = document.querySelector('#changed-entry-form')
   const syncSides = () => {
@@ -3802,7 +3791,7 @@ async function saveChangedBoardEntry(event) {
   const side = form.querySelector('input[name="changed_side"]:checked')?.value === 'absent' ? 'absent' : 'present'
   const status = document.querySelector('#changed-entry-status')
   if (!body) return
-  if (status) status.textContent = 'Saving...'
+  if (status) status.textContent = 'SAVING...'
 
   let error
   if (entryId) {
@@ -3845,28 +3834,27 @@ function renderChangedStoryScreen() {
       <form class="changed-story-edit-form" data-story-id="${entry.id}">
         <textarea name="body" rows="5" maxlength="${CHANGED_STORY_TEXT_MAX}" required>${escapeHtml(entry.body)}</textarea>
         <div class="changed-story-edit-actions">
-          <button type="submit" class="primary-button">Save</button>
-          <button type="button" class="text-button danger-text" data-story-delete="${entry.id}">Delete</button>
+          <button type="submit" class="primary-button">SAVE</button>
+          <button type="button" class="text-button danger-text" data-story-delete="${entry.id}">DELETE</button>
         </div>
       </form>
     </details>`).join('')
 
   renderShell(`
     <div class="changed-subpage-head">
-      <button type="button" class="back-button" id="back-changed">Back</button>
+      <button type="button" class="back-button" id="back-changed">‹ i changed.</button>
     </div>
     ${weekly ? `<section class="changed-week-card changed-week-card-static"><div class="changed-week-label">THIS WEEK</div><p>${escapeHtml(weekly.body)}</p></section>` : ''}
     <section class="changed-story-add-card">
-      <div class="today-label">MY STORY</div>
-      <p>Save pieces of your past. Battle Angel brings one back each week.</p>
+      <div class="today-label">PAST</div>
       <form id="add-changed-story" class="changed-story-add-form">
-        <textarea id="changed-story-body" rows="4" maxlength="${CHANGED_STORY_TEXT_MAX}" required placeholder="A part of my past I don’t want to forget..."></textarea>
-        <button type="submit" class="primary-button">Add to my story</button>
+        <textarea id="changed-story-body" rows="4" maxlength="${CHANGED_STORY_TEXT_MAX}" required placeholder=""></textarea>
+        <button type="submit" class="primary-button">ADD</button>
       </form>
       <div id="changed-story-status" class="status-line" aria-live="polite"></div>
     </section>
-    ${rows ? `<section class="changed-story-list">${rows}</section>` : '<div class="changed-story-empty">Your story is empty.</div>'}`,
-    { title: 'My story', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed-story' })
+    ${rows ? `<section class="changed-story-list">${rows}</section>` : '<div class="changed-story-empty">—</div>'}`,
+    { title: 'PAST.', showAccount: false, showTimer: false, navTab: 'changed', view: 'changed-story' })
 
   document.querySelector('#back-changed')?.addEventListener('click', renderChanged)
   document.querySelector('#add-changed-story')?.addEventListener('submit', addChangedStoryEntry)
@@ -3880,7 +3868,7 @@ async function addChangedStoryEntry(event) {
   const body = document.querySelector('#changed-story-body')?.value.trim().slice(0, CHANGED_STORY_TEXT_MAX) || ''
   const status = document.querySelector('#changed-story-status')
   if (!body) return
-  if (status) status.textContent = 'Saving...'
+  if (status) status.textContent = 'SAVING...'
   const nextOrder = Math.max(0, ...changedStoryEntries.map((entry) => Number(entry.sort_order) || 0)) + 1
   const { error } = await supabase.from('changed_story_entries').insert({ user_id: currentUser.id, body, sort_order: nextOrder, updated_at: new Date().toISOString() })
   if (error) {
@@ -3928,12 +3916,12 @@ function renderMore(errorMessage = '') {
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${renderMotivationLibrary()}
     <section class="more-card">
-      <button type="button" class="secondary-button full-button" id="theme-toggle">${getTheme() === 'dark' ? 'Light mode' : 'Dark mode'}</button>
-      <button type="button" class="secondary-button full-button" id="backup-library">Backup library</button>
-      <button type="button" class="secondary-button full-button" id="sign-out">Sign out</button>
+      <button type="button" class="secondary-button full-button" id="theme-toggle">${getTheme() === 'dark' ? 'LIGHT' : 'DARK'}</button>
+      <button type="button" class="secondary-button full-button" id="backup-library">BACKUP</button>
+      <button type="button" class="secondary-button full-button" id="sign-out">SIGN OUT</button>
       <div id="backup-status" class="status-line backup-status" aria-live="polite"></div>
       <div class="app-version">battle angel v${APP_VERSION}</div>
-    </section>`, { title: 'More', showAccount: false, showTimer: false, navTab: 'more' })
+    </section>`, { title: 'CONTROL.', showAccount: false, showTimer: false, navTab: 'more' })
 
   document.querySelector('#theme-toggle')?.addEventListener('click', () => { toggleTheme(); renderMore() })
   document.querySelector('#backup-library')?.addEventListener('click', downloadFullBackup)
@@ -4028,31 +4016,31 @@ function renderStreakLine() {
   const streak = goldenStreak()
   if (!streak) return ''
   const thisWeekGolden = isGoldenWeek(startOfWeekKey(todayDateKey()))
-  if (streak === 1) return thisWeekGolden ? '' : '<div class="golden-streak">Last week was golden. Keep it going.</div>'
-  return `<div class="golden-streak">${streak} golden weeks in a row</div>`
+  if (streak === 1) return thisWeekGolden ? '' : '<div class="golden-streak">1 WEEK STREAK</div>'
+  return `<div class="golden-streak">${streak} WEEK STREAK</div>`
 }
 
 function renderWeekProgress(dateKey, options = {}) {
   const done = weekDoneCount(startOfWeekKey(dateKey))
   const streak = options.streak ? renderStreakLine() : ''
   if (done >= GOLDEN_WEEK_TARGET) {
-    return `<div class="week-progress is-golden">Golden week · ${done} workouts done</div>${streak}`
+    return `<div class="week-progress is-golden">GOLDEN · ${done}</div>${streak}`
   }
   const pips = Array.from({ length: GOLDEN_WEEK_TARGET }, (_, i) => `<span class="week-pip ${i < done ? 'filled' : ''}"></span>`).join('')
-  return `<div class="week-progress"><span class="week-pips" aria-hidden="true">${pips}</span>${done} of ${GOLDEN_WEEK_TARGET} done this week</div>${streak}`
+  return `<div class="week-progress"><span class="week-pips" aria-hidden="true">${pips}</span>${done} / ${GOLDEN_WEEK_TARGET}</div>${streak}`
 }
 
 function renderDoneControls(dateKey) {
   if (dateKey > todayDateKey()) return ''
   const dayFolders = getDayFolders(dateKey)
-  if (!dayFolders.length) return '<div class="plan-done-empty">Tap the muscles you trained to mark them done.</div>'
-  if (!canMarkDone()) return '<div class="plan-done-empty">Run schema.sql in Supabase to turn on marking days done.</div>'
+  if (!dayFolders.length) return ''
+  if (!canMarkDone()) return '<div class="plan-done-empty">SUPABASE UPDATE REQUIRED.</div>'
   const rows = dayFolders.map((folder) => {
     const done = wasWorkoutCompleted(dateKey, folder.id)
     return `
       <div class="plan-done-row">
         <span class="plan-done-name">${escapeHtml(folder.name)}</span>
-        <button type="button" class="plan-done-toggle ${done ? 'done' : ''}" data-done-folder="${folder.id}" aria-pressed="${done}">${done ? '&#10003; Done' : 'Mark done'}</button>
+        <button type="button" class="plan-done-toggle ${done ? 'done' : ''}" data-done-folder="${folder.id}" aria-pressed="${done}">${done ? '&#10003; DONE' : 'DONE'}</button>
       </div>`
   }).join('')
   return `<div class="plan-done-list">${rows}</div>`
@@ -4080,18 +4068,18 @@ function renderPlanner(errorMessage = '') {
         <strong>${escapeHtml(formatMonthTitle(plannerMonthStart))}</strong>
         <button type="button" class="small-button" id="month-next" aria-label="Next month">&rarr;</button>
       </div>
-      <button type="button" class="small-button" id="weekly-plan">Weekly</button>
+      <button type="button" class="small-button" id="weekly-plan">WEEK</button>
     </div>
-    <button type="button" class="quiet-action planner-repeat" id="repeat-last-week">Repeat last week</button>
-    ${!scheduleAvailable ? `<div class="notice error">Planning is not enabled yet.</div>` : ''}
-    ${!planningUpgradeAvailable ? `<div class="notice info">Run the planning upgrade SQL once.</div>` : ''}
+    <button type="button" class="quiet-action planner-repeat" id="repeat-last-week">REPEAT</button>
+    ${!scheduleAvailable ? `<div class="notice error">PLAN · SUPABASE UPDATE REQUIRED.</div>` : ''}
+    ${!planningUpgradeAvailable ? `<div class="notice info">SUPABASE UPDATE REQUIRED.</div>` : ''}
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${plannerStatusMessage ? `<div class="status-line planner-status">${escapeHtml(plannerStatusMessage)}</div>` : ''}
     <div class="calendar-weekdays" aria-hidden="true">
       <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
     </div>
     <div class="calendar-grid" aria-label="Workout calendar">${calendarCells(plannerMonthStart)}</div>
-    ${canMarkDone() ? '<div class="calendar-hint">Hold a day to mark it done</div>' : ''}
+    
     <section class="plan-day-editor">
       <div class="plan-day-title">${escapeHtml(formatPlanDate(plannerSelectedDate))}</div>
       ${renderWeekProgress(plannerSelectedDate, { streak: startOfWeekKey(plannerSelectedDate) === startOfWeekKey(todayDateKey()) })}
@@ -4099,17 +4087,17 @@ function renderPlanner(errorMessage = '') {
       ${renderDoneControls(plannerSelectedDate)}
       ${selectedFolders.length ? `<div class="plan-day-actions">
         <details class="move-plan">
-          <summary>Move</summary>
+          <summary>MOVE</summary>
           <form id="move-plan-form" class="move-plan-form">
             ${selectedFolders.length > 1 ? `<select id="move-plan-folder" aria-label="Workout to move">${moveOptions}</select>` : `<input id="move-plan-folder" type="hidden" value="${selectedFolders[0].id}" />`}
             <input id="move-plan-date" type="date" value="${tomorrowKey}" aria-label="Move workout to date" />
             <button type="submit" class="secondary-button">Move</button>
           </form>
         </details>
-        <button type="button" class="text-button danger-text" id="clear-plan">Clear day</button>
-        ${hasDateScheduleOverride(plannerSelectedDate) && weeklyFolders.length ? '<button type="button" class="text-button" id="reset-weekly">Use weekly</button>' : ''}
+        <button type="button" class="text-button danger-text" id="clear-plan">CLEAR</button>
+        ${hasDateScheduleOverride(plannerSelectedDate) && weeklyFolders.length ? '<button type="button" class="text-button" id="reset-weekly">WEEKLY</button>' : ''}
       </div>` : ''}
-    </section>`, { title: 'Plan', showAccount: false, showTimer: false, navTab: 'plan' })
+    </section>`, { title: 'PLAN.', showAccount: false, showTimer: false, navTab: 'plan' })
 
   document.querySelector('#month-prev').addEventListener('click', () => {
     plannerMonthStart = new Date(plannerMonthStart.getFullYear(), plannerMonthStart.getMonth() - 1, 1)
@@ -4194,10 +4182,10 @@ function renderWeeklyPlan(errorMessage = '') {
   }).join('')
 
   renderShell(`
-    <button type="button" class="back-button" id="weekly-back">Back</button>
+    <button type="button" class="back-button" id="weekly-back">‹ PLAN</button>
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     <div class="weekly-plan-list">${rows}</div>
-    <div id="weekly-status" class="status-line planner-status" aria-live="polite"></div>`, { title: 'Weekly plan', showAccount: false, showTimer: false })
+    <div id="weekly-status" class="status-line planner-status" aria-live="polite"></div>`, { title: 'WEEKLY.', showAccount: false, showTimer: false })
   document.querySelector('#weekly-back').addEventListener('click', renderPlanner)
   document.querySelectorAll('[data-weekly-day][data-weekly-folder]').forEach((button) => {
     button.addEventListener('click', () => toggleWeeklyPlanDay(Number(button.dataset.weeklyDay), button.dataset.weeklyFolder))
@@ -4325,7 +4313,7 @@ async function repeatLastWeek() {
 async function toggleWeeklyPlanDay(weekday, folderId) {
   const status = document.querySelector('#weekly-status')
   const exists = weeklyPlanEntries.some((entry) => Number(entry.weekday) === weekday && entry.folder_id === folderId)
-  if (status) status.textContent = 'Saving...'
+  if (status) status.textContent = 'SAVING...'
   try {
     if (exists) {
       const { error } = await supabase.from('workout_weekly_plan').delete().eq('weekday', weekday).eq('folder_id', folderId)
@@ -4614,14 +4602,14 @@ function logWeight(group, dateKey = todayDateKey()) {
 }
 
 function renderWeightHistory(group) {
-  if (!weightLogAvailable) return '<div class="weight-history-empty">Weight history is off. Run schema.sql in Supabase to turn it on.</div>'
+  if (!weightLogAvailable) return '<div class="weight-history-empty">WEIGHT LOG · SUPABASE UPDATE REQUIRED.</div>'
   const history = getWeightHistory(group.id)
-  if (!history.length) return '<div class="weight-history-empty">Weight history: enter a weight and finish a set to start it.</div>'
+  if (!history.length) return '<div class="weight-history-empty">—</div>'
   const rows = history.slice(0, 8).map((row) => `
     <li><span>${escapeHtml(formatPlanDate(row.workout_date, { short: true }))}</span><strong>${escapeHtml(row.weight)}</strong></li>`).join('')
   return `
     <details class="weight-history">
-      <summary>Weight history <span class="weight-history-count">${history.length}</span></summary>
+      <summary>LOG <span class="weight-history-count">${history.length}</span></summary>
       <ol class="weight-history-list">${rows}</ol>
     </details>`
 }
@@ -4691,8 +4679,8 @@ function renderFolderError(folderId, options, error) {
   const offline = navigator.onLine === false || /fetch|network|abort|timeout/i.test(String(error?.message || error))
   renderShell(`
     <section class="load-error-card">
-      <div class="load-error-title">${offline ? 'No connection' : 'Could not load this workout'}</div>
-      <p>${offline ? 'This workout has not been opened on this phone yet, so there is no saved copy. Tap Save videos on Today while you have signal.' : escapeHtml(error?.message || 'Please try again.')}</p>
+      <div class="load-error-title">${offline ? 'OFFLINE.' : 'LOAD FAILED.'}</div>
+      <p>${offline ? 'NOT SAVED OFFLINE.' : escapeHtml(error?.message || 'RETRY.')}</p>
       <div class="load-error-actions">
         <button type="button" class="primary-button" id="retry-folder">Try again</button>
         <button type="button" class="secondary-button" id="error-back">Back</button>
@@ -4761,11 +4749,11 @@ function renderPlanCard(group, index, total, editing = false) {
           <label class="field-span-2"><span class="eyebrow">CUE 3</span><input name="cue_3" type="text" maxlength="100" value="${escapeHtml(group.cue_3)}" /></label>
           <label class="field-span-2"><span class="eyebrow">BACKUP</span><input name="backup_exercise" type="text" maxlength="100" value="${escapeHtml(group.backup_exercise)}" /></label>
           <div class="edit-actions field-span-2">
-            <button type="submit" class="primary-button">Save</button>
+            <button type="submit" class="primary-button">SAVE</button>
             <button type="button" class="secondary-button" data-move-group="${group.id}" data-direction="up" ${index === 0 ? 'disabled' : ''}>Up</button>
             <button type="button" class="secondary-button" data-move-group="${group.id}" data-direction="down" ${index === total - 1 ? 'disabled' : ''}>Down</button>
             ${canAddVideo ? `<label class="secondary-button add-reference">Add video ${nextReferenceNumber}<input type="file" accept="video/*,.mp4,.mov,.m4v,.webm" data-add-video="${group.id}" aria-label="Choose reference video ${nextReferenceNumber}" /></label>` : ''}
-            <button type="button" class="danger-button" data-delete-group="${group.id}">Delete</button>
+            <button type="button" class="danger-button" data-delete-group="${group.id}">DELETE</button>
           </div>
           <div class="status-line field-span-2" data-edit-status="${group.id}" aria-live="polite"></div>
         </form>
@@ -4781,19 +4769,19 @@ function renderFolder(groups, errorMessage = '', infoMessage = '') {
   const exerciseCards = groups.map((group, index) => renderPlanCard(group, index, groups.length, editing)).join('')
   const saved = getSavedWorkoutForFolder(activeFolder.id)
   const completedCount = saved?.completedGroupIds?.length || 0
-  const startLabel = saved ? `Resume workout${completedCount ? ` - ${completedCount}/${groups.length} done` : ''}` : 'Start workout'
+  const startLabel = saved ? `RESUME${completedCount ? ` · ${completedCount}/${groups.length}` : ''}` : 'START'
 
   renderShell(`
     <div class="folder-header">
-      <button type="button" class="back-button" id="back-home">Back</button>
-      ${editing ? `<button type="button" class="ghost-danger" id="delete-folder">Delete folder</button>` : ''}
+      <button type="button" class="back-button" id="back-home">‹ GYM</button>
+      ${editing ? `<button type="button" class="ghost-danger" id="delete-folder">DELETE</button>` : ''}
     </div>
     ${groups.length ? `<button type="button" class="start-workout-button" id="start-workout">${escapeHtml(startLabel)} <span aria-hidden="true">&rarr;</span></button>` : ''}
-    <button type="button" class="secondary-button full-button edit-workout-button ${editing ? 'editing' : ''}" id="toggle-edit-workout">${editing ? 'Done editing' : 'Edit workout'}</button>
+    <button type="button" class="secondary-button full-button edit-workout-button ${editing ? 'editing' : ''}" id="toggle-edit-workout">${editing ? 'DONE' : 'EDIT'}</button>
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${infoMessage ? `<div class="offline-note">${escapeHtml(infoMessage)}</div>` : ''}
     ${editing ? `<details class="add-exercise" id="add-exercise-box" ${groups.length ? '' : 'open'}>
-      <summary>+ Add exercise</summary>
+      <summary>+ EXERCISE</summary>
       <form id="add-exercise-form" class="add-exercise-form">
         <label class="field-span-2">
           <span class="eyebrow">EXERCISE</span>
@@ -4810,25 +4798,25 @@ function renderFolder(groups, errorMessage = '', infoMessage = '') {
         <div class="video-create-grid field-span-2">
           <label class="file-picker compact-file-picker">
             <span class="eyebrow">VIDEO 1</span>
-            <span class="file-picker-button">Choose video</span>
-            <span id="picked-video-1" class="picked-files">Required</span>
+            <span class="file-picker-button">CHOOSE</span>
+            <span id="picked-video-1" class="picked-files">REQUIRED</span>
             <input id="exercise-video-1" type="file" accept="video/*,.mp4,.mov,.m4v,.webm" required aria-label="Choose first reference video" />
           </label>
           <label class="file-picker compact-file-picker">
             <span class="eyebrow">VIDEO 2</span>
-            <span class="file-picker-button">Choose video</span>
-            <span id="picked-video-2" class="picked-files">Optional</span>
+            <span class="file-picker-button">CHOOSE</span>
+            <span id="picked-video-2" class="picked-files">OPTIONAL</span>
             <input id="exercise-video-2" type="file" accept="video/*,.mp4,.mov,.m4v,.webm" aria-label="Choose second reference video" />
           </label>
           <label class="file-picker compact-file-picker">
             <span class="eyebrow">VIDEO 3</span>
-            <span class="file-picker-button">Choose video</span>
-            <span id="picked-video-3" class="picked-files">Optional</span>
+            <span class="file-picker-button">CHOOSE</span>
+            <span id="picked-video-3" class="picked-files">OPTIONAL</span>
             <input id="exercise-video-3" type="file" accept="video/*,.mp4,.mov,.m4v,.webm" aria-label="Choose third reference video" />
           </label>
         </div>
         <details class="optional-details field-span-2">
-          <summary>+ Optional coaching details</summary>
+          <summary>+ DETAILS</summary>
           <div class="optional-grid">
             <label class="field-span-2">
               <span class="eyebrow">LAST WEIGHT</span>
@@ -4850,7 +4838,7 @@ function renderFolder(groups, errorMessage = '', infoMessage = '') {
     </div>` : ''}
     ${groups.length ? `<section class="exercise-list">${exerciseCards}</section>` : `
       <section class="empty-state">
-        <div class="empty-title">No exercises yet</div>
+        <div class="empty-title">EMPTY.</div>
       </section>`}`, { showAccount: false, showTimer: false })
 
   document.querySelector('#back-home').addEventListener('click', () => {
@@ -5660,10 +5648,10 @@ function renderWorkout() {
   const progress = activeExerciseGroups.length ? (completedCount / activeExerciseGroups.length) * 100 : 0
   const isLastExercise = activeExerciseGroups.every((item) => item.id === group.id || isGroupComplete(item.id))
   const isLastSet = setNumber >= group.sets_target
-  let actionLabel = `Set ${setNumber} done - rest 2:30`
-  if (isLastSet && !isLastExercise) actionLabel = 'Finish exercise - rest 2:30'
-  if (isLastSet && isLastExercise) actionLabel = 'Finish workout'
-  if (completed) actionLabel = allDone ? 'Finish workout' : 'Exercise complete'
+  let actionLabel = `SET ${setNumber} DONE → 2:30`
+  if (isLastSet && !isLastExercise) actionLabel = 'FINISH → 2:30'
+  if (isLastSet && isLastExercise) actionLabel = 'FINISH WORKOUT'
+  if (completed) actionLabel = allDone ? 'FINISH WORKOUT' : 'DONE'
   const actionDisabled = completed && !allDone
 
   const cues = [group.cue_1, group.cue_2, group.cue_3].filter(Boolean)
@@ -5676,10 +5664,10 @@ function renderWorkout() {
   renderShell(`
     <section class="workout-mode-header">
       <details class="workout-exit-menu">
-        <summary>Exit</summary>
+        <summary>•••</summary>
         <div class="workout-exit-actions">
-          <button type="button" class="secondary-button" id="exit-workout">Pause</button>
-          <button type="button" class="danger-button" id="cancel-workout">Cancel workout</button>
+          <button type="button" class="secondary-button" id="exit-workout">PAUSE</button>
+          <button type="button" class="danger-button" id="cancel-workout">CANCEL</button>
         </div>
       </details>
       <div class="workout-position">${workoutState.currentIndex + 1} / ${activeExerciseGroups.length}</div>
@@ -5688,7 +5676,7 @@ function renderWorkout() {
 
     <article class="focus-card">
       <h2>${escapeHtml(displayName)}</h2>
-      <div class="focus-prescription">${group.sets_target} sets x ${escapeHtml(group.reps_target)} reps${group.last_weight ? ` &middot; ${escapeHtml(group.last_weight)}` : ''}</div>
+      <div class="focus-prescription">${group.sets_target} × ${escapeHtml(group.reps_target)}${group.last_weight ? ` · ${escapeHtml(group.last_weight)}` : ''}</div>
 
       ${cues.length ? renderCueChips(group) : ''}
 
@@ -5696,18 +5684,18 @@ function renderWorkout() {
 
       ${notice ? `<div class="skip-notice" role="status">${escapeHtml(notice)}</div>` : ''}
 
-      ${group.backup_exercise ? `<button type="button" class="backup-toggle ${usingBackup ? 'active' : ''}" id="toggle-backup">${usingBackup ? `Using backup · ${escapeHtml(group.backup_exercise)}` : `Use backup · ${escapeHtml(group.backup_exercise)}`}</button>` : ''}
-      ${canSkip ? '<button type="button" class="skip-exercise" id="skip-exercise">Machine busy? Skip for now</button>' : ''}
+      ${group.backup_exercise ? `<button type="button" class="backup-toggle ${usingBackup ? 'active' : ''}" id="toggle-backup">${usingBackup ? `BACKUP · ${escapeHtml(group.backup_exercise)}` : `BACKUP · ${escapeHtml(group.backup_exercise)}`}</button>` : ''}
+      ${canSkip ? '<button type="button" class="skip-exercise" id="skip-exercise">SKIP MACHINE</button>' : ''}
 
       <div class="set-section">
         <div class="set-topline">
           <div>
             <div class="eyebrow">SETS</div>
-            <div class="set-label">${completed ? 'Done' : `Set ${setNumber} of ${group.sets_target}`}</div>
+            <div class="set-label">${completed ? 'DONE' : `SET ${setNumber} / ${group.sets_target}`}</div>
           </div>
           <label class="weight-inline">
-            <span>Weight</span>
-            <input id="workout-weight" type="text" maxlength="40" value="${escapeHtml(group.last_weight)}" placeholder="optional" inputmode="decimal" />
+            <span>WEIGHT</span>
+            <input id="workout-weight" type="text" maxlength="40" value="${escapeHtml(group.last_weight)}" placeholder="" inputmode="decimal" />
           </label>
         </div>
         <div class="set-dots">${renderSetDots(group, setsDone, completed)}</div>
@@ -5718,11 +5706,11 @@ function renderWorkout() {
       <button type="button" id="complete-set" class="big-action" ${actionDisabled ? 'disabled' : ''}>${escapeHtml(actionLabel)}</button>
 
       <div class="workout-nav">
-        <button type="button" class="secondary-button" id="previous-exercise" ${workoutState.currentIndex === 0 ? 'disabled' : ''}>&larr; Previous</button>
-        ${completed ? '<button type="button" class="secondary-button" id="reopen-exercise">Reopen</button>' : ''}
-        <button type="button" class="secondary-button" id="next-exercise" ${workoutState.currentIndex === activeExerciseGroups.length - 1 ? 'disabled' : ''}>Next &rarr;</button>
+        <button type="button" class="secondary-button" id="previous-exercise" ${workoutState.currentIndex === 0 ? 'disabled' : ''}>← PREV</button>
+        ${completed ? '<button type="button" class="secondary-button" id="reopen-exercise">REOPEN</button>' : ''}
+        <button type="button" class="secondary-button" id="next-exercise" ${workoutState.currentIndex === activeExerciseGroups.length - 1 ? 'disabled' : ''}>NEXT →</button>
       </div>
-    </article>`, { title: `${activeFolder.name} workout`, showAccount: false })
+    </article>`, { title: `${activeFolder.name}`, showAccount: false })
 
   document.querySelector('#exit-workout').addEventListener('click', pauseAndExitWorkout)
   document.querySelector('#cancel-workout').addEventListener('click', cancelWorkout)
@@ -5808,7 +5796,7 @@ async function saveWorkoutWeight(groupId, value) {
     if (status) status.textContent = 'Saved on this phone · syncs later'
     return
   }
-  if (status) status.textContent = 'Saving...'
+  if (status) status.textContent = 'SAVING...'
   let error = null
   try {
     const result = await raceTimeout(supabase.from('exercises').update({ last_weight: nextValue }).eq('exercise_group', groupId), NETWORK_FALLBACK_MS * 2)
@@ -5892,7 +5880,7 @@ function reopenCurrentExercise() {
 }
 
 function cancelWorkout() {
-  if (!confirm('Cancel this workout? Your workout plan and uploaded videos will stay saved. Only this in-progress session will be cleared.')) return
+  if (!confirm('Cancel workout?')) return
   clearWorkoutState()
   resetTimer()
   workoutMode = false
@@ -5942,7 +5930,7 @@ function finishWorkout() {
   renderShell(`
     <section class="finish-card">
       <div class="finish-check">&#10003;</div>
-      <h2>${escapeHtml(activeFolder.name)} done.</h2>
+      <h2>${escapeHtml(activeFolder.name)} · DONE.</h2>
       <button type="button" class="start-workout-button" id="finish-home">Done</button>
     </section>`, { title: 'Workout complete', showAccount: false, showTimer: false })
 

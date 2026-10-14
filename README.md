@@ -4,6 +4,16 @@
 
 battle angel is a low-friction daily-system + gym app: set your routine and workouts once, then open the app and execute the next thing without deciding what comes next.
 
+## v1.22 — LOCK IN cut
+
+- Removed nonessential instructional copy from the live app.
+- Day is now framed as **LOCK IN.** with **THE ORDER / INBOX / SYSTEM**.
+- Routine setup is **RITUAL.**; execution uses **TASK / RITUAL**, **LATER**, **SKIP**, **DONE**.
+- `i changed.` is reduced to **THEN / NOW / PRESENT / ABSENT**.
+- Monochrome styling is sharper, tighter, flatter, and more cinematic.
+- No database changes.
+
+
 ## main tabs
 
 The app uses five focused tabs:
@@ -421,4 +431,14 @@ A fifth bottom tab, **I changed**, is a quiet reflection space kept separate fro
 ## v1.21.1 — label polish
 
 - The reflection tab/button and page title now read **i changed.** in lowercase with the period.
+- No database changes.
+
+
+## v1.21.2 — monochrome cleanup
+
+- All green/gold/red accent styling is removed from the interface.
+- In dark mode, primary action buttons are white with black text.
+- Light mode stays strictly grayscale, using black primary actions on white.
+- Completed/check states, progress accents, selected controls, and golden-week treatment are monochrome.
+- Major cards and navigation use tighter corners and less shadow for a cleaner, denser iPhone UI.
 - No database changes.
