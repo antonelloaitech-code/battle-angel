@@ -2,15 +2,15 @@
 
 **a warrior's spirit needs a warrior's body**
 
-battle angel is a low-friction daily-system + gym app built for an ADHD brain: set your routine and workouts once, then open the app and execute the next thing without deciding what comes next. Prioritizing, starting, and finishing are all reduced to one small decision at a time.
+battle angel is a low-friction daily-system + gym app: set your routine and workouts once, then open the app and execute the next thing without deciding what comes next.
 
 ## main tabs
 
 The app is split into four simple tabs so the screen stays quiet:
 
-- **Gifts** (the day) — each morning it asks which power actions you're getting done today, then serves your routine and those power actions one card at a time. The **eye** (top left) shows every card of today; tap any to mark it done. **Open the full day** in there has power actions, boosters, today's order, Inbox, and setup.
-- **Forge** (the gym) — today's planned workouts, resume, offline video prep, and access to all workouts.
-- **Destiny** (the calendar) — calendar, recurring weekly plan, and repeat-last-week.
+- **Day** — quick-capture todos, arrange today once, then run one combined routine + todo stack one action at a time.
+- **Gym** — today's planned gym modules, resume, offline video prep, and access to all workouts.
+- **Plan** — calendar, recurring weekly plan, and repeat-last-week.
 - **More** — motivation videos and photos, theme, backup, and sign out.
 
 ## exercise creation
@@ -93,12 +93,10 @@ Your existing Netlify environment variables remain:
 - Completed-workout markers: `workout_history`
 - Daily routine steps: `daily_steps`
 - Daily routine progress by date: `daily_progress`
-- Routine steps: `daily_steps` (`weekdays` = the days a step runs, `opens_workout` = the step that opens today's workout)
-- Boosters list: `daily_meds` (shown as Boosters in the app)
-- Boosters checkmarks by date: `daily_med_log`
-- Master todo list: `power_todos`
-- Today's Power Action selections/status: `power_action_plan`
-- v1.18 additions: core flag on `daily_steps`; energy mode, Later counts, and wrap-up time on `daily_progress`; size, snooze, and first-step link on `power_todos`
+- Booster list and activity links: `daily_meds`
+- Daily booster checkmarks by date: `daily_med_log`
+- Todo Inbox: `power_todos`
+- Today's selected todos/status: `power_action_plan`
 - Videos: private `gym-videos` Supabase Storage bucket
 
 Row Level Security limits data and Storage objects to the signed-in account. Video playback uses temporary signed URLs.
@@ -111,7 +109,7 @@ Videos over 12 MB are compressed on the phone before uploading (H.264 MP4, up to
 
 ## backup
 
-Open **More -> Backup library** to create a ZIP containing the workout library, planning data, Daily System, boosters, Power Actions/todos, motivation references, and uploaded videos. Save the ZIP somewhere independent such as iCloud Drive or your computer.
+Open **More -> Backup library** to create a ZIP containing the workout library, planning data, Daily System, boosters, Todo Inbox/today selections, motivation references, and uploaded videos. Save the ZIP somewhere independent such as iCloud Drive or your computer.
 
 ## v1.8 — multiple workouts per day + rest lock screen
 
@@ -160,9 +158,9 @@ No new database changes. If you haven't run `supabase/multi_workout_upgrade.sql`
 Photos need the storage bucket to accept images. This is included in `supabase/schema.sql`.
 
 **Golden weeks**
-- When 4 or more different days have a workout done in a calendar week (Monday to Sunday, one row), that row turns gold. (Since v1.23.2; before that it counted workouts.)
-- Two workouts on the same day count as one day.
-- The selected day in Destiny shows how close the week is: "2 of 4 days trained this week".
+- When 4 or more workouts are marked done in a calendar week (Monday to Sunday, one row), that row turns gold.
+- Each module counts once, so Chest + Triceps on the same day counts as 2.
+- The selected day in Plan shows how close the week is: "2 of 4 done this week".
 - Days with a finished workout show a ✓ in the calendar.
 
 **Log past days**
@@ -350,205 +348,58 @@ Existing installs should run `supabase/day_stack_upgrade.sql` once. It adds the 
 - Adds a visible startup error fallback so a future runtime failure cannot leave a silent black screen.
 - No database changes from v1.17. If the v1.17 Day Stack SQL already ran successfully, do not run another migration for this fix.
 
+## v1.18 — organized Day + weekday routines
 
-## v1.18.1 — Action Engine: open → act
+**Database:** run `supabase/day_routine_schedule_upgrade.sql` once on an existing install (or run the full `supabase/schema.sql`). It only adds `active_days` to routine steps. Existing routine steps remain **Every day**.
 
-**Database:** run the whole `supabase/schema.sql` once (always safe), or run `supabase/action_engine_upgrade.sql` if v1.17's SQL already ran. It is additive only: it never deletes workouts, uploads, routines, meds, calendar data, history, or todos. The last query prints a row of checks that should all say `true`. (v1.18.1 has no database changes beyond v1.18.)
+The Day tab is now intentionally split by job instead of stacking editors and settings on one screen:
 
-battle angel keeps working before you run it. It detects the missing columns and switches off only the parts that need them (core steps, snooze, picks, wrap-up). More shows a small reminder until the SQL has run.
+- **Start / Continue day** — the only dominant action.
+- **Dump a todo...** — permanent quick capture into Inbox; no prioritizing required at capture time.
+- **Meds** — a compact tap-to-mark section only when meds exist.
+- **Today plan** — opens a dedicated planning screen where today's routine and chosen todos share one ordered stack.
+- **Inbox** — opens a dedicated capture/review screen. Unfinished todos stay here for future days.
+- **Routine & meds** — the single setup screen. Routine editing and medication editing no longer live scattered around the Day overview.
 
-**The rule for this version: zero decisions between opening the app and acting.** Every option that isn't needed in the moment stays out of sight until it is.
+### Routine days
 
-### Open → act
+Every routine step now has a simple **Runs on** selector: Mo, Tu, We, Th, Fr, Sa, Su. New and existing steps default to every day. For example, "Take out trash" can run only Tuesday and Friday, while "Brush teeth" can remain every day. Only steps scheduled for the current local weekday enter that day's stack.
 
-- Opening battle angel (or tapping **Day**) lands on the next action. There's no overview and no Start button. **Plan / edit day** is behind •••.
-- The top bar shows only what you've done (**✓ 7**) and a thin progress line. There's no "to go" number, so the day never looks like a wall.
-- **DONE** lands a check on the card with a short tick (More → Done sound) before the next card slides in. Undo stays available for a few seconds.
+### Daily reset
 
-### No morning planning
+At the local calendar-day boundary, battle angel resets today's routine progress, medication checkmarks, and today's selected todos. The permanent routine, medication list, and Todo Inbox remain. If the app was left open overnight, returning to it also forces the new-day reset instead of leaving yesterday's card on screen.
 
-- When the day starts with fewer than 3 todos chosen, battle angel **fills the gap from Inbox, oldest first**, and puts them after your routine, marked **picked for you**.
-- Don't want one today? **Skip today.** It stays in Inbox and comes back after a growing gap: tomorrow, then 3 days, then a week. Things you keep skipping fade out on their own.
-- Items you've passed on 3 times are no longer picked. They wait in **Sort inbox** (Inbox or Plan today), which asks one item at a time: Today, Not today, or Drop (with a gentle "dropping it is a real decision" note). It stops at 3.
-- Sorting and picking by hand are optional tools, never steps you must take.
+The execution model is unchanged: after you press **Start day**, battle angel serves exactly one action at a time with **Done**, **Later today**, and **Skip today**.
 
-### When you're stuck
+## v1.19 — boosters anchored to routine activities
 
-- Todo cards show only **DONE / Later / Skip**. Stay on one for 30 seconds, or see it again after a Later, and **Stuck? ▶ Just 5 minutes · Shrink it** appears.
-- **Just 5 minutes**: a countdown that keeps the screen on and chimes at the end ("Time's up. You started. +5 more?").
-- **Shrink it**: type the first tiny physical step. It goes in front of the big todo, linked to it ("step of: Do taxes").
-- Push the same card to Later twice and it says so without blame: shrink it, 5 minutes, or skip today. On the Gym card the deal is "just the first exercise".
+**Database:** run `supabase/booster_anchors_upgrade.sql` once on an existing install (or run the full `supabase/schema.sql`). The upgrade is additive only.
 
-### Rough days
+- The Day overview keeps **Boosters** collapsed by default, showing only the daily taken count until you open it.
+- In **Day -> Setup -> Boosters**, each booster can be linked to one routine activity or left as **Anytime / no activity**.
+- Example: link **Omega 3** and **Vitamin D** to **Breakfast**. When Breakfast reaches Autopilot, those boosters appear directly on the Breakfast card as tap-to-mark rows.
+- A booster linked to a routine with substeps stays visible through that routine block until you mark it taken, so you do not have to remember it between substeps.
+- Marking a booster never blocks the routine's **Done** button. battle angel only surfaces the pairing you configured; it does not decide medication/supplement timing for you.
+- Booster checkmarks are still tied to the local calendar date and reset every new day. The booster list and activity links persist.
+- Deleting a routine step safely returns linked boosters to **Anytime / no activity** instead of deleting them.
+- Backups now include the routine activity link for each booster.
 
-- Mark 3–5 routine steps as **Core** in Edit routine.
-- The first card of the day offers **Rough day? Core only**, one tap right when you'd decide. It's also in •••. Only core steps run; nothing is lost.
-- Finishing a core-only day says "Minimum day: done. That counts." and offers **Got energy left? Do the full day**.
-- **Wrap up day** (in •••) ends the day on purpose, shows your wins, and keeps anything unfinished safe in Inbox. **Reopen day** undoes it.
 
-### Capture
+## v1.20 — clean Day architecture
 
-- In the runner, **+** opens one field. Type, Enter, and you're back on the same card. Nothing to decide.
-- If it's urgent, the toast offers **Do next**, which puts it right after the current card.
-- The **Dump a thought...** field in Plan / edit day stays focused for brain-dumps, and each capture offers **Do today**.
-- Capture, Done, Skip, Later, and sorting all work **with no signal**. Everything saves on the phone instantly and syncs when you're back online.
+No database changes. If v1.19 is already working, upload this app version only.
 
-### Point of performance
+The Day tab now gives each decision one clear home:
 
-- A **Meds** pill sits in the runner's top bar until everything is checked. Tap it to check meds without leaving the card.
-- **Gym suggests a workout** when nothing is planned: the muscle you trained least recently, one tap to start. The Gym card in your day does the same.
-- Finishing a workout from your day returns you to the next card with a "done ✓" toast. Finishing one from the Gym tab shows this week's golden-week progress.
-- Optional **App icon count** (More): actions left today on the home-screen icon. On iPhone this needs notification permission; battle angel never sends notifications.
+- **Day home** — Start/Continue Day, quick capture, Anytime boosters, then only three destinations: Arrange today, Inbox, Setup.
+- **Arrange today** — the only place to choose todos for today and place them between routine actions.
+- **Inbox** — capture, rename, and delete only. It no longer has duplicate **+ Today** controls.
+- **Setup** — a small settings hub with two destinations: Routine and Boosters. Routine/weekday editing and booster/activity linking no longer share one long screen.
+- **Autopilot** — execution only. It still serves one routine action or selected todo at a time.
 
-### Fixes
+Booster display is also de-duplicated:
 
-- Leaving the app open overnight on a card no longer lets yesterday's card complete a step for the new day. A new day always opens fresh.
-- A background sync redraws the runner only when the current card actually changed (for example, finished on another device).
-- Editing the routine mid-day no longer throws you back into the runner, and open sections stay open after edits.
-- Undo replaces "Are you sure?" for todo deletes. Undo toasts no longer stack or vanish early.
-- A database error that isn't a missing table (no signal, a policy, a deleted row) can no longer switch the whole Day tab off.
-- Removed the unused v1.16 Power Actions runner and other dead code.
+- A booster linked to a routine activity appears on that activity's Autopilot card, not again on the Day overview.
+- Only boosters set to **Anytime** appear on the Day overview, because they have no routine card to surface them.
 
-### Not in this zip
-
-The app registers `/sw.js` for offline opening, but this project had no `public/` folder. If your GitHub repo already has `public/sw.js`, keep it. If it doesn't, offline *opening* isn't active (offline *saving* works either way).
-
-## v1.18.2 — pink
-
-The green accent is now neon pink (`#eb4ff6`) everywhere it appeared: DONE and other main buttons, progress bars, checks, highlights and the done glow. The light theme uses a deeper pink (`#ba12a3`) so white text on buttons stays readable. The colors live in the `--accent` variables at the top of `src/styles.css`. No database changes.
-
-## v1.18.3 — pinker
-
-The accent moves from violet-pink to hot pink: `#f651bf` in dark mode, `#ba1282` in light mode. No database changes.
-
-## v1.19 — morning power actions, Boosters, a Day tab you can find your way around
-
-No database changes. Everything you have stays as it is.
-
-### The morning question
-
-- The first time you open battle angel each day, it asks: **"What power actions are you getting done today to get to another place?"**
-- Tap your todos **in order of importance**: the first tap is #1, the next #2, then #3. Type a new one straight into the next open slot. **↑** moves a pick up, **×** takes it out.
-- Three is the limit, so the day stays winnable. Things you skipped recently rest in a separate list, one tap away.
-- **Lock in and start** puts them after your routine, in your order, and starts the day. Each card says **Power action 1 of 3**. **Skip and start with my routine** is always there.
-- Changed your mind? **Change** on the Day overview reopens the same picker; what's already done stays done.
-- This replaces v1.18.1's automatic "picked for you".
-
-### Meds are now Boosters
-
-- Same list, same checkmarks, new name everywhere: the runner pill, the sheet, the Day tab, the editor.
-
-### The Day tab, organized
-
-- In the runner, **Today** (top right) opens the whole day, and the tab bar stays visible. No more hidden ••• menu.
-- The overview reads top to bottom, one pattern for every section (title, count, one button on the right):
-  1. **Up now** with **Continue**, plus Low energy and Wrap up day
-  2. **Power actions** (Change)
-  3. **Boosters**, checked right there
-  4. **Today's order**, the next few (Reorder, Show all)
-  5. **Inbox**: dump a thought; your backlog, newest first, without today's picks repeated (Sort, Edit)
-  6. **Setup**: **Edit routine** and **Edit boosters**, two matching rows that each open their own screen with a back button
-- Editing never happens in the middle of the overview anymore, so the page stays about today.
-
-## v1.20 — routine steps on chosen days, a workout step that opens Train, new tab names
-
-**Database:** run `supabase/routine_upgrade.sql` once in the Supabase SQL editor (or the whole `supabase/schema.sql`, always safe). It only adds two columns to `daily_steps`; nothing is deleted or changed. The last query prints `true` twice. Until it runs, battle angel keeps working: every step runs every day, and steps with gym, workout or training in their name still open the workout. More shows a reminder.
-
-### Steps on chosen days
-
-- **Edit routine** → open a step → **Days**: seven buttons, Monday first. All on means every day. Turn off the days it shouldn't run. The last day can't be switched off.
-- New steps get the same buttons right under the name.
-- On days a step doesn't run, it's simply not in your autopilot. **Today's order** says so ("Not on Thursdays: Laundry."), so nothing looks lost.
-- The step list shows each step's days: Weekdays, Weekends, or Mon, Wed, Fri.
-
-### Your workout step opens Train
-
-- A routine step with **workout**, **gym** or **training** in its name (like "battle angel workout") is your workout card. Any step can be linked or unlinked with **Opens today's workout** in Edit routine.
-- On the card, **START BACK** (or whatever Calendar planned for today) goes straight into that workout. Nothing planned? It suggests the muscle you trained least recently, with **Choose another**.
-- A workout you paused shows **RESUME**.
-- Finish the workout and you're back on your day with the step checked off. Did the workout from Train first? The step is checked off there too, so you never do it twice.
-
-### New tab names
-
-- **Gifts** (was Day), **Forge** (was Gym), **Campaign** (was Plan), **More**. Page titles and back buttons match.
-
-### Fix
-
-- In Edit routine, the checkbox rows (Core step, Opens today's workout) sit on one line again.
-
-## v1.21 — the eye, Train and Calendar
-
-No database changes (v1.20's `routine_upgrade.sql` is still the latest).
-
-### The eye
-
-- A small **eye** sits at the top left of every card. Tap it to see every card of today: **To do** in the order they come up (the current one says *Up now*), then **Done**.
-- **Tap any card to mark it done**, in any order: a routine step (a step with substeps is done as a whole), a power action, a first step. Tap it again to undo; within the same look it goes back exactly where it was.
-- Skipped cards show under Done as skipped. Tap one to put it back on today.
-- Close it and the autopilot picks up at the next card that isn't done. If that was the last one, the day is complete.
-- The same view is on the day overview (**All cards**) and on the finished-day card (**See today's cards**), so a slip is always one tap to fix.
-- **Open the full day** at the bottom goes to power actions, boosters, inbox and setup. It replaces the Today button.
-
-### Tab names
-
-- **Gifts · Train · Calendar · More**. Train was Forge, Calendar was Campaign. A workout step's card says *battle angel workout · Train*.
-
-## v1.22 — Finish my day, Forge and Destiny
-
-No database changes.
-
-### Finish my day
-
-- When the day is done (every card, or **Wrap up day**), the finished-day card shows **Finish my day**.
-- It closes the day and plays your motivation videos and photos full screen for **5 minutes straight**: the same library as the rest timer, shuffled, looping until the time is up. The screen stays on.
-- Small controls at the top: a progress line with the time left, **Sound on/off**, and **Skip** if you ever need it.
-- Then black, and one question: **"Are you living life like the person you want to be?"**, signed **battle angel.** After a few seconds (or a tap) it exits back to Gifts.
-- No motivation saved yet? It goes straight to the question and tells you where to add some (More → Edit motivation).
-
-### Tab names
-
-- **Gifts · Forge · Destiny · More**. Forge is the gym, Destiny is the calendar. The workout card says *battle angel workout · Forge*.
-
-## v1.23 — log past workouts with one tap, up to 5 power actions
-
-No database changes.
-
-### Past workouts
-
-- In **Destiny**, tap any past day. It asks **What did you train?** and shows all your workouts.
-- **One tap marks a workout done** for that day (pink with a check), tap again to undo. No planning first. Planned workouts you didn't mark yet are outlined, so a missed one stands out.
-- The calendar day gets its check and golden weeks count it right away. Works offline too; it syncs when you're back online.
-- Today and future days still plan the way they did. Holding a day still marks its whole plan done.
-
-### Power actions
-
-- The morning question now takes **up to 5** power actions, still tapped in order of importance. The sixth tap is refused with a note, so the day stays winnable.
-
-## v1.23.1 — soft pastel pink
-
-The accent is now a soft pastel pink: `#f4a4cf` in dark mode, `#ea86bb` in light mode. Buttons and badges on pink use dark text so they stay easy to read. No database changes.
-
-## v1.23.2 — golden week = 4 days trained
-
-A golden week now takes **4 different days** with at least one workout done that week (Monday to Sunday). Two workouts on the same day count as one day. The week bar reads "2 of 4 days trained this week", a golden week reads "Golden week · 5 days trained", and streaks follow the same rule. No database changes.
-
-## v1.24 — black and light electric blue
-
-- Dark mode is now true black with neutral greys, and the accent is a light electric blue (`#5ce1ff`). Buttons and badges on blue use near-black text so they stay easy to read.
-- Light mode uses a deeper blue (`#2cc3f2`) on cool, clean greys.
-- The phone's status bar matches (black in dark mode).
-- No database changes.
-
-## v1.25 — Later, pinned on top
-
-- Anything you send to **Later today** is pinned in a **Later** strip at the top of the card screen: power actions first (with their number), then routine steps in routine order.
-- **Double-tap** a pinned item to mark it done, whenever you get to it, in any order. A single tap only highlights it ("tap again to mark it done"), so nothing gets finished by accident. Every double-tap shows **Undo**.
-- The card on screen never shows twice; when a Later item comes back around as your card, it leaves the strip.
-- The eye tags these as *Later* too.
-- In the card screen, the Undo message now appears just above Later / Skip, so it never covers the top bar or the strip.
-- No database changes.
-
-## v1.25.1 — tap the circle
-
-- In the **Later** strip, the circle is a checkbox: **one tap on the circle checks the item off** (it fills with a ✓, then leaves the strip, with Undo).
-- A single tap on the name only highlights it, so brushing it never finishes anything; a double tap on the name still works.
+The old standalone Power Actions launch/list/runner UI and older duplicate inline Day planner/Inbox renderers were removed from the app code. The existing Supabase todo tables are kept so all existing todos and today's selections remain intact.

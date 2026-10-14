@@ -1,23 +1,20 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #f2f5f7;
-  background: #000000;
+  color: #f3f5f4;
+  background: #0d0f10;
   color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  /* Black and light electric blue. */
-  --bg: #000000;
-  --surface: #0f1012;
-  --surface-soft: #16181b;
-  --surface-strong: #1f2226;
-  --text: #f2f5f7;
-  --muted: #9aa3ad;
-  --border: #26292e;
-  --accent: #5ce1ff;
-  --accent-dark: #9aeeff;
-  --accent-soft: #0b2530;
-  /* Text on the light blue is near-black, so it stays easy to read. */
-  --on-accent: #00141c;
+  --bg: #0d0f10;
+  --surface: #151819;
+  --surface-soft: #1b1f20;
+  --surface-strong: #24292a;
+  --text: #f3f5f4;
+  --muted: #9ca5a2;
+  --border: #2d3334;
+  --accent: #57b98d;
+  --accent-dark: #8ad2b2;
+  --accent-soft: #17352a;
   --danger: #f08a8a;
   --danger-soft: #3a1f21;
   --gold: #e2b84f;
@@ -27,20 +24,19 @@
 }
 
 :root[data-theme="light"] {
-  color: #0d1114;
-  background: #f3f5f7;
+  color: #161616;
+  background: #f5f5f2;
   color-scheme: light;
-  --bg: #f3f5f7;
+  --bg: #f5f5f2;
   --surface: #ffffff;
-  --surface-soft: #e9edf1;
-  --surface-strong: #e0e5ea;
-  --text: #0d1114;
-  --muted: #5f6b75;
-  --border: #d5dbe1;
-  --accent: #2cc3f2;
-  --accent-dark: #0a6a90;
-  --accent-soft: #dbf4fc;
-  --on-accent: #03222f;
+  --surface-soft: #edede8;
+  --surface-strong: #e5e5de;
+  --text: #161616;
+  --muted: #6e6e67;
+  --border: #dcdcd4;
+  --accent: #17684f;
+  --accent-dark: #0e4f3c;
+  --accent-soft: #dcece6;
   --danger: #a13d3d;
   --danger-soft: #f6e6e6;
   --gold: #b8871b;
@@ -217,7 +213,7 @@ h2 {
 .big-action {
   border: 1px solid transparent;
   background: var(--accent);
-  color: var(--on-accent);
+  color: #fff;
 }
 
 .primary-button {
@@ -227,7 +223,7 @@ h2 {
 .primary-button:active,
 .start-workout-button:active,
 .big-action:active {
-  background: color-mix(in srgb, var(--accent) 84%, #000);
+  background: var(--accent-dark);
 }
 
 .secondary-button,
@@ -1075,7 +1071,7 @@ input::placeholder { color: #97978f; }
 .set-dot.done {
   border-color: transparent;
   background: var(--accent);
-  color: var(--on-accent);
+  color: #fff;
 }
 
 .micro-status {
@@ -1123,7 +1119,7 @@ input::placeholder { color: #97978f; }
   margin: 0 auto 15px;
   border-radius: 50%;
   background: var(--accent);
-  color: var(--on-accent);
+  color: #fff;
   font-size: 1.8rem;
   font-weight: 900;
 }
@@ -2789,7 +2785,7 @@ textarea:focus-visible {
   border: 1px solid transparent;
   border-radius: 20px;
   background: var(--accent);
-  color: var(--on-accent);
+  color: #fff;
   padding: 14px 20px;
   display: flex;
   align-items: center;
@@ -2801,7 +2797,7 @@ textarea:focus-visible {
 }
 
 .day-primary-action:active {
-  background: color-mix(in srgb, var(--accent) 84%, #000);
+  background: var(--accent-dark);
   transform: scale(0.99);
 }
 
@@ -3094,210 +3090,7 @@ body.day-runner-active {
   }
 }
 
-/* v1.16: Power Actions — one-off todos chosen for today, run with the same autopilot card flow. */
-.power-launch-card {
-  width: 100%;
-  min-height: 62px;
-  margin: 10px 0 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--surface);
-  color: var(--text);
-  padding: 13px 15px;
-  text-align: left;
-}
-
-.power-launch-card:not(:disabled) {
-  cursor: pointer;
-}
-
-.power-launch-card:disabled {
-  opacity: 1;
-  cursor: default;
-}
-
-.power-launch-card.is-finished {
-  background: var(--surface-soft);
-}
-
-.power-launch-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.power-launch-copy strong {
-  font-size: 1rem;
-  font-weight: 880;
-}
-
-.power-launch-copy small,
-.power-launch-setup small {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.power-launch-arrow {
-  flex: 0 0 auto;
-  color: var(--accent-dark);
-  font-size: 1.35rem;
-  font-weight: 900;
-}
-
-.power-launch-setup {
-  cursor: default;
-}
-
-.power-todos-card {
-  margin-top: 10px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface);
-}
-
-.power-todos-card > summary {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 14px;
-  cursor: pointer;
-  font-weight: 850;
-}
-
-.power-todos-count {
-  min-width: 26px;
-  padding: 4px 7px;
-  border-radius: 99px;
-  background: var(--surface-soft);
-  color: var(--muted);
-  font-size: 0.74rem;
-  text-align: center;
-}
-
-.power-todos-body {
-  display: grid;
-  gap: 10px;
-  padding: 0 10px 10px;
-  border-top: 1px solid var(--border);
-}
-
-.power-todo-add-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  padding-top: 10px;
-}
-
-.power-todo-list {
-  display: grid;
-  gap: 1px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--border);
-}
-
-.power-todo-row {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  background: var(--surface);
-  padding: 8px 9px 8px 12px;
-}
-
-.power-todo-title {
-  min-width: 0;
-  flex: 1;
-  overflow-wrap: anywhere;
-  font-size: 0.92rem;
-  font-weight: 760;
-}
-
-.power-today-toggle {
-  min-height: 34px;
-  flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-soft);
-  color: var(--muted);
-  padding: 6px 10px;
-  cursor: pointer;
-  font-size: 0.75rem;
-  font-weight: 850;
-}
-
-.power-today-toggle.is-selected {
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-}
-
-.power-todo-manage {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--surface-soft);
-}
-
-.power-todo-manage > summary {
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  padding: 8px 11px;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 800;
-}
-
-.power-todo-edit-list {
-  display: grid;
-  gap: 8px;
-  padding: 0 9px 9px;
-}
-
-.power-todo-edit-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.power-todo-edit-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.power-step-card .day-step-parent {
-  color: var(--accent-dark);
-}
-
-@media (max-width: 430px) {
-  .power-todo-edit-row {
-    grid-template-columns: 1fr;
-  }
-
-  .power-todo-edit-actions {
-    justify-content: flex-end;
-  }
-}
-
 /* v1.17 — one Day Stack: capture -> plan -> execute */
-.day-stack-start-card {
-  margin-bottom: 10px;
-}
-
 .day-capture-card {
   margin: 10px 0;
 }
@@ -3327,204 +3120,6 @@ body.day-runner-active {
 
 .day-capture-button:active { background: var(--accent-soft); }
 .day-capture-status { min-height: 0; margin: 4px 4px 0; text-align: left; }
-
-.today-stack-planner,
-.todo-inbox-card {
-  margin-top: 10px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface);
-}
-
-.today-stack-planner > summary,
-.todo-inbox-card > summary {
-  min-height: 50px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 13px 15px;
-  cursor: pointer;
-  font-weight: 850;
-}
-
-.today-stack-planner > summary span:last-child,
-.todo-inbox-card > summary span:last-child {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.today-stack-body,
-.todo-inbox-body {
-  padding: 0 12px 12px;
-  border-top: 1px solid var(--border);
-}
-
-.today-stack-heading {
-  padding: 11px 2px 8px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 850;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.today-stack-list {
-  display: grid;
-  gap: 7px;
-}
-
-.today-stack-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  padding: 9px;
-  border-radius: 13px;
-  background: var(--surface-soft);
-}
-
-.today-stack-row.is-todo {
-  background: var(--accent-soft);
-}
-
-.today-stack-number {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 900;
-}
-
-.today-stack-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.today-stack-copy strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.92rem;
-}
-
-.today-stack-copy small {
-  color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.today-stack-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.stack-icon-button,
-.stack-remove-button {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--muted);
-  padding: 0;
-  cursor: pointer;
-  font-weight: 900;
-}
-
-.stack-remove-button { color: var(--danger); }
-.stack-icon-button:disabled { opacity: 0.25; }
-
-.today-inbox-picker {
-  margin-top: 10px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-}
-
-.today-inbox-picker > summary {
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  cursor: pointer;
-  font-size: 0.86rem;
-  font-weight: 850;
-}
-
-.today-inbox-picker > summary span {
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.today-inbox-choice-list {
-  display: grid;
-  gap: 1px;
-  border-top: 1px solid var(--border);
-  background: var(--border);
-}
-
-.today-inbox-choice {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 0;
-  background: var(--surface);
-  color: var(--text);
-  padding: 10px 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.today-inbox-choice span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.today-inbox-choice strong {
-  flex: 0 0 auto;
-  color: var(--accent-dark);
-  font-size: 0.78rem;
-}
-
-.today-stack-empty-inbox {
-  padding: 10px 2px 0;
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.todo-inbox-list {
-  display: grid;
-  gap: 8px;
-  padding-top: 11px;
-}
-
-.todo-inbox-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 6px;
-  align-items: center;
-}
-
-.todo-inbox-row input { min-height: 42px; }
-.todo-inbox-row .small-button,
-.todo-inbox-row .text-button { min-height: 42px; padding-inline: 9px; }
 
 .day-step-card-todo {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
@@ -3603,2164 +3198,679 @@ body.day-runner-active {
   }
 }
 
-/* v1.18 — Action Engine: triage, 5-minute start, momentum, low-energy days, wins */
-
-/* Runner head: running score + thin progress line */
-.runner-head {
-  display: grid;
-  gap: 8px;
-}
-
-.runner-score {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.runner-score strong {
-  color: var(--accent-dark);
-  font-size: 1.02rem;
-  font-weight: 900;
-}
-
-.runner-progress,
-.day-start-progress {
-  height: 4px;
-  overflow: hidden;
-  border-radius: 99px;
-  background: var(--surface-strong);
-}
-
-.runner-progress span,
-.day-start-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
-  transition: width 280ms ease;
-}
-
-.day-start-progress {
-  margin-top: 14px;
-}
-
-.runner-meds-pill {
-  min-height: 34px;
-  flex: 0 0 auto;
-  padding: 6px 11px;
-  border: 1px solid color-mix(in srgb, var(--gold) 55%, var(--border));
-  border-radius: 999px;
-  background: var(--gold-soft);
-  color: var(--gold-text);
-  font-size: 0.78rem;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-/* The DONE moment: a check lands on the card before the next one slides in. */
-.day-step-card > * {
-  transition: opacity 120ms ease;
-}
-
-.day-step-card.is-done {
-  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
-  background: var(--accent-soft);
-  animation: none;
-}
-
-.day-step-card.is-done > * {
-  opacity: 0.18;
-}
-
-.day-step-card.is-done::after {
-  content: "\2713";
-  position: absolute;
-  inset: 0;
-  width: 104px;
-  height: 104px;
-  margin: auto;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 3.2rem;
-  font-weight: 900;
-  box-shadow: 0 12px 40px color-mix(in srgb, var(--accent) 40%, transparent);
-  animation: done-pop 300ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
-}
-
-@keyframes done-pop {
-  from { transform: scale(0.35); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
-}
-
-/* Paralysis tools on the card */
-.card-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 16px;
-  margin-top: 2px;
-}
-
-.sprint-pill {
-  position: relative;
-  min-height: 46px;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  overflow: hidden;
-  padding: 10px 18px;
-  border: 1.5px solid color-mix(in srgb, var(--accent) 55%, var(--border));
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--accent-dark);
-  font-size: 0.95rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-
-.sprint-pill > span {
-  position: relative;
-  z-index: 1;
-}
-
-.sprint-pill .sprint-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  z-index: 0;
-  background: var(--accent-soft);
-  transition: width 500ms linear;
-}
-
-.sprint-pill .sprint-time {
-  font-size: 1.08rem;
-}
-
-.sprint-pill .sprint-label {
-  font-weight: 850;
-}
-
-.sprint-pill[data-state="running"] {
-  border-color: var(--accent);
-}
-
-.sprint-pill[data-state="ended"] {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.card-link {
-  min-height: 40px;
-  padding: 6px 2px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 800;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-
-.defer-nudge {
-  max-width: 34rem;
-  padding: 11px 13px;
-  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
-  border-radius: 14px;
-  background: var(--gold-soft);
-  color: var(--text);
-  font-size: 0.93rem;
-  line-height: 1.42;
-}
-
-.defer-nudge strong {
-  color: var(--gold-text);
-}
-
-/* Triage: same one-card screen as the runner */
-.triage-exit {
-  min-height: 40px;
-  flex: 0 0 auto;
-  padding: 7px 15px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font-weight: 850;
-  cursor: pointer;
-}
-
-.triage-card h2 {
-  font-size: clamp(1.9rem, 9vw, 3.3rem);
-}
-
-.triage-count-line {
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 800;
-  text-align: center;
-}
-
-.triage-picked {
-  display: grid;
-  gap: 7px;
-  margin: 0;
-  padding-left: 1.3em;
-  font-size: 1.05rem;
-  font-weight: 800;
-}
-
-/* Bottom sheets (capture, shrink it, meds) */
-.sheet-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  align-items: end;
-  background: color-mix(in srgb, #000 45%, transparent);
-  padding: 14px max(14px, env(safe-area-inset-right, 0px)) max(14px, calc(env(safe-area-inset-bottom, 0px) + 10px)) max(14px, env(safe-area-inset-left, 0px));
-  animation: sheet-fade 140ms ease-out;
-}
-
-.sheet {
-  width: min(560px, 100%);
-  max-height: calc(100dvh - 40px);
-  margin: 0 auto;
-  overflow-y: auto;
-  padding: 16px;
+/* v1.18: Day is a quiet action hub. Planning and setup live on dedicated screens. */
+.day-home-hero {
+  padding: 21px 18px;
   border: 1px solid var(--border);
   border-radius: 22px;
   background: var(--surface);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.3);
-  animation: sheet-up 180ms ease-out;
 }
 
-.sheet .runner-capture-form {
-  width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+.day-home-hero.is-complete {
+  background: var(--surface-soft);
 }
 
-.sheet-head {
+.day-home-hero h2 {
+  margin: 7px 0 0;
+  font-size: clamp(1.8rem, 8vw, 2.55rem);
+}
+
+.day-home-hero p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-weight: 720;
+}
+
+.day-home-hero .day-start-button {
+  margin-top: 16px;
+}
+
+.day-med-quick-card {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--surface);
+}
+
+.day-compact-head {
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-}
-
-.sheet-head strong {
-  font-size: 1rem;
-  font-weight: 900;
-}
-
-.sheet-close {
-  width: 38px;
-  height: 38px;
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: 50%;
-  background: var(--surface-soft);
-  color: var(--muted);
-  font-size: 1.35rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.sheet-copy {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.sheet-copy strong {
+  padding: 10px 13px;
   color: var(--text);
+  font-size: 0.88rem;
 }
 
-.sheet-hint {
+.day-compact-head strong { font-weight: 880; }
+.day-compact-head span {
   color: var(--muted);
   font-size: 0.76rem;
-  font-weight: 700;
-  line-height: 1.4;
+  font-weight: 820;
 }
 
-.meds-sheet-list {
-  padding: 8px 0 0;
+.day-med-quick-list {
+  display: grid;
+  gap: 1px;
+  border-top: 1px solid var(--border);
+  background: var(--border);
 }
 
-@keyframes sheet-up {
-  from { transform: translateY(18px); opacity: 0.6; }
-  to { transform: none; opacity: 1; }
-}
-
-@keyframes sheet-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* Toasts float above the bottom nav; in the full-screen runner they sit up top, away from the buttons. */
-#toast-host .day-undo-toast {
-  bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 74px);
-}
-
-/* In the runner the toast sits just above Later / Skip, over the quiet bottom of the card,
-   so it never covers the top bar or the Later strip (v1.25). */
-body.day-runner-active #toast-host .day-undo-toast {
-  top: auto;
-  bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 216px);
-}
-
-body.day-runner-active #toast-host .day-undo-toast.is-hiding {
-  transform: translate(-50%, 8px);
-}
-
-/* Day overview */
-.day-start-links {
-  display: flex;
-  flex-wrap: wrap;
+.day-med-quick-row {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 4px 16px;
-  margin-top: 8px;
-}
-
-.quiet-link {
-  min-height: 40px;
-  padding: 6px 0;
+  gap: 9px;
   border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.86rem;
-  font-weight: 800;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-
-.day-stack-start-card.is-low-energy {
-  border-color: color-mix(in srgb, var(--gold) 45%, var(--border));
-}
-
-.triage-launch {
-  width: 100%;
-  min-height: 56px;
-  margin-top: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--border));
-  border-radius: 14px;
-  background: var(--gold-soft);
+  background: var(--surface);
   color: var(--text);
+  padding: 8px 12px;
   text-align: left;
   cursor: pointer;
+  font-weight: 780;
 }
 
-.triage-launch-copy {
-  min-width: 0;
+.day-med-quick-row.is-taken {
+  color: var(--muted);
+}
+
+.day-med-quick-check {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.day-med-quick-row.is-taken .day-med-quick-check {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+.day-hub {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--border);
   display: grid;
   gap: 1px;
 }
 
-.triage-launch-copy strong {
-  font-weight: 900;
-}
-
-.triage-launch-copy small {
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 750;
-}
-
-.triage-launch-count {
-  min-width: 30px;
-  flex: 0 0 auto;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--gold-text);
-  font-size: 0.8rem;
-  font-weight: 900;
-  text-align: center;
-}
-
-.today-load-line {
-  padding: 10px 2px 0;
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 750;
-}
-
-.today-load-line.is-heavy {
-  color: var(--gold-text);
-  font-weight: 850;
-}
-
-.today-stack-row.is-done {
-  opacity: 0.5;
-}
-
-.today-stack-row.is-done strong {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-
-.today-inbox-choice small {
-  color: var(--muted);
-  font-weight: 700;
-}
-
-/* Inbox rows: title + Save on top, meta (age · size · snooze) and Delete underneath, so each line clearly belongs to its own item. */
-.todo-inbox-row.has-meta {
-  grid-template-columns: minmax(0, 1fr) auto;
-  row-gap: 2px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-
-.todo-inbox-row.has-meta:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
-.todo-inbox-row.has-meta .todo-inbox-meta {
-  grid-column: 1;
-  grid-row: 2;
-  align-self: center;
-  min-width: 0;
-  padding: 0 4px;
-  color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 750;
-  overflow-wrap: anywhere;
-}
-
-.todo-inbox-row.has-meta .text-button {
-  grid-column: 2;
-  grid-row: 2;
-  justify-self: end;
-  min-height: 36px;
-}
-
-/* Routine editor: core steps */
-.daily-add-form .core-check,
-.daily-edit-form .core-check,
-.core-check {
-  min-height: 46px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 0.86rem;
-  cursor: pointer;
-}
-
-.core-check input {
-  width: 20px;
-  min-width: 20px;
-  height: 20px;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  accent-color: var(--accent);
-}
-
-.core-check strong {
-  color: var(--text);
-}
-
-.core-badge {
-  margin-left: 7px;
-  padding: 2px 7px;
-  border-radius: 99px;
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-  font-size: 0.66rem;
-  font-style: normal;
-  font-weight: 850;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  vertical-align: 1px;
-}
-
-/* Wins */
-.day-complete-card .wins-summary {
-  color: var(--text);
-  font-weight: 800;
-}
-
-.win-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.win-chip {
-  padding: 7px 11px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-  font-size: 0.84rem;
-  font-weight: 850;
-  overflow-wrap: anywhere;
-}
-
-.win-chip.is-workout {
-  background: var(--gold-soft);
-  color: var(--gold-text);
-}
-
-.wins-list {
-  margin-top: 12px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
-}
-
-.wins-list summary {
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-  color: var(--muted);
-  font-size: 0.84rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.wins-list ul {
-  display: grid;
-  gap: 4px;
-  margin: 4px 0 0;
-  padding-left: 1.2em;
-  color: var(--muted);
-  font-size: 0.88rem;
-}
-
-.day-complete-card .wins-note {
-  font-size: 0.86rem;
-}
-
-.day-complete-card.is-celebrating {
-  animation: day-complete-pop 520ms cubic-bezier(0.2, 1.2, 0.4, 1);
-}
-
-.day-complete-card.is-celebrating .day-complete-mark {
-  animation: done-pop 420ms 120ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
-}
-
-@keyframes day-complete-pop {
-  from { transform: scale(0.96); opacity: 0.4; }
-  to { transform: none; opacity: 1; }
-}
-
-/* Gym: decide-for-me suggestion + finish card week progress */
-.gym-suggestion {
-  display: grid;
-  gap: 2px;
-  margin-top: 10px;
-  padding: 12px 14px;
-  border-radius: 15px;
-  background: var(--surface-soft);
-}
-
-.gym-suggestion span {
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 850;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.gym-suggestion strong {
-  font-size: 1.4rem;
-  font-weight: 900;
-  letter-spacing: -0.025em;
-}
-
-.gym-suggestion small {
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 750;
-}
-
-.gym-choose-other {
-  width: 100%;
-  text-align: center;
-}
-
-.finish-week {
-  display: grid;
-  justify-items: center;
-  margin: 2px 0 20px;
-}
-
-.finish-week .week-progress {
-  margin: 0;
-  justify-content: center;
-}
-
-/* More: feedback settings */
-.settings-row {
-  width: 100%;
-  min-height: 58px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--surface-soft);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.settings-row > span:first-child {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.settings-row strong {
-  font-weight: 850;
-}
-
-.settings-row small {
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 700;
-}
-
-.settings-state {
-  min-width: 46px;
-  flex: 0 0 auto;
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 900;
-  text-align: center;
-}
-
-.settings-row.is-on .settings-state {
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-}
-
-.db-upgrade-note {
-  margin-top: 6px;
-  padding: 9px 11px;
-  border: 1px dashed var(--border);
-  border-radius: 12px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.4;
-}
-
-@media (max-width: 380px) {
-  .runner-score { font-size: 0.76rem; gap: 6px; }
-  .runner-meds-pill { padding-inline: 9px; }
-  .sprint-pill { padding-inline: 14px; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .day-step-card.is-done::after,
-  .day-complete-card.is-celebrating,
-  .day-complete-card.is-celebrating .day-complete-mark,
-  .sheet,
-  .sheet-backdrop {
-    animation: none !important;
-  }
-
-  .runner-progress span,
-  .day-start-progress span,
-  .sprint-pill .sprint-fill {
-    transition: none;
-  }
-}
-
-/* The runner blocks text selection; typing in a sheet must still work everywhere. */
-.sheet input,
-.sheet textarea {
-  -webkit-user-select: text;
-  user-select: text;
-}
-
-/* v1.18.1 — zero-decision start: paralysis tools appear only when you're stuck */
-.stuck-tools {
-  animation: stuck-in 260ms ease-out;
-}
-
-.stuck-label {
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 850;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-@keyframes stuck-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .stuck-tools { animation: none; }
-}
-
-
-/* ==========================================================================
-   v1.19 Day tab: the morning question, one-pattern overview, setup screens
-   Pink = power actions and progress. Gold = boosters. Everything else stays quiet.
-   ========================================================================== */
-
-.visually-hidden {
-  position: absolute !important;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* Pages without the brand header still leave room for the tab bar. */
-.shell.shell-no-header.has-bottom-nav {
-  padding-bottom: max(118px, calc(env(safe-area-inset-bottom, 0px) + 104px));
-}
-
-body.day-runner-active .shell-no-header.has-bottom-nav {
-  padding-bottom: max(80px, calc(env(safe-area-inset-bottom, 0px) + 72px));
-}
-
-/* ---- runner: the eye (top left) opens every card of today ---- */
-.runner-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.runner-eye {
-  width: 44px;
-  height: 42px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.runner-eye svg {
-  width: 23px;
-  height: 23px;
-}
-
-.runner-eye:active {
-  background: var(--surface-soft);
-  color: var(--accent-dark);
-}
-
-/* ---- morning: the question and three numbered slots ---- */
-/* A column as tall as the screen, so Lock in always sits in thumb reach at the bottom,
-   even when the list is short. */
-.prompt-screen {
-  min-height: calc(100dvh - max(10px, calc(env(safe-area-inset-top, 0px) + 8px)));
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  padding-top: 8px;
-}
-
-.prompt-screen > .prompt-actions { margin-top: auto; }
-
-.prompt-date {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.95rem;
-  font-weight: 800;
-}
-
-.prompt-question {
-  margin: 8px 0 0;
-  font-size: clamp(1.9rem, 8.4vw, 2.7rem);
-  font-weight: 900;
-  line-height: 1.05;
-  letter-spacing: -0.04em;
-  text-wrap: balance;
-}
-
-.prompt-slots {
-  display: grid;
-  gap: 10px;
-}
-
-.slot {
-  min-height: 66px;
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 9px;
-  border-radius: 20px;
-}
-
-.slot-num {
-  width: 48px;
-  height: 48px;
-  display: grid;
-  place-items: center;
-  border-radius: 15px;
-  font-size: 1.55rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.slot.is-filled {
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: var(--surface);
-}
-
-.slot.is-filled .slot-num {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.slot.is-new .slot-num { animation: slot-pop 280ms cubic-bezier(0.2, 0.9, 0.3, 1.35); }
-
-@keyframes slot-pop {
-  from { transform: scale(0.55); }
-  to { transform: scale(1); }
-}
-
-.slot-title {
-  font-size: 1.05rem;
-  font-weight: 800;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.slot-tools {
-  display: flex;
-  gap: 2px;
-}
-
-.slot-tool {
-  width: 40px;
-  height: 40px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 1.15rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.slot-tool:active {
-  background: var(--surface-soft);
-  color: var(--text);
-}
-
-.slot.is-open {
-  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: transparent;
-}
-
-.slot.is-open:focus-within {
-  border-style: solid;
-  border-color: var(--accent);
-}
-
-.slot.is-open .slot-num {
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-}
-
-.slot.is-open input {
-  width: 100%;
-  min-width: 0;
-  min-height: 46px;
-  padding: 0 2px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 1.02rem;
-  font-weight: 700;
-  outline: none;
-}
-
-.slot-add {
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: 13px;
-  background: var(--surface-strong);
-  color: var(--text);
-  font-size: 1.4rem;
-  cursor: pointer;
-}
-
-.slot.is-done {
-  min-height: 54px;
-  border: 1px solid var(--border);
-  background: transparent;
-}
-
-.slot.is-done .slot-num {
-  height: 40px;
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-  font-size: 1.1rem;
-}
-
-.slot.is-done .slot-title {
-  color: var(--muted);
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-
-.slot.is-empty {
-  min-height: 58px;
-  border: 1.5px dashed var(--border);
-  opacity: 0.5;
-}
-
-.slot.is-empty .slot-num {
-  height: 38px;
-  color: var(--muted);
-}
-
-.prompt-status {
-  margin: 2px 4px 0;
-  color: var(--muted);
-  font-size: 0.92rem;
-  font-weight: 750;
-}
-
-.prompt-status.is-flash {
-  color: var(--accent-dark);
-  animation: prompt-nudge 360ms ease;
-}
-
-@keyframes prompt-nudge {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-5px); }
-  75% { transform: translateX(5px); }
-}
-
-.prompt-section-title {
-  margin: 0 4px 10px;
-  font-size: 1.04rem;
-  font-weight: 850;
-}
-
-.prompt-list {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--surface);
-}
-
-.prompt-row {
-  width: 100%;
-  min-height: 58px;
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px 10px 14px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.prompt-row + .prompt-row { border-top: 1px solid var(--border); }
-.prompt-row:active { background: var(--surface-soft); }
-
-.prompt-ring {
-  width: 26px;
-  height: 26px;
-  border: 2px solid color-mix(in srgb, var(--muted) 55%, var(--border));
-  border-radius: 50%;
-}
-
-.prompt-row:active .prompt-ring { border-color: var(--accent); }
-.prompt-row.is-full { opacity: 0.45; }
-
-.prompt-title {
-  min-width: 0;
-  font-weight: 750;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
-.prompt-meta {
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 750;
-}
-
-.prompt-resting > summary {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 4px;
-  list-style: none;
-  color: var(--muted);
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.prompt-resting > summary::-webkit-details-marker { display: none; }
-
-.prompt-resting > summary::after {
-  content: '\203A';
-  margin-left: auto;
-  font-size: 1.4rem;
-  line-height: 1;
-  transition: transform 160ms ease;
-}
-
-.prompt-resting[open] > summary { margin-bottom: 8px; }
-.prompt-resting[open] > summary::after { transform: rotate(90deg); }
-
-/* The question screen ends in its action bar. It stays pinned while the list scrolls underneath,
-   and its background runs down behind the tab bar so no list text shows through there. */
-.shell.shell-no-header.has-bottom-nav.prompt-shell { padding-bottom: 0; }
-
-.prompt-actions {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
-  display: grid;
-  justify-items: center;
-  gap: 2px;
-  padding: 18px 0 max(78px, calc(env(safe-area-inset-bottom, 0px) + 70px));
-  background: linear-gradient(to bottom, transparent, var(--bg) 20px);
-}
-
-.prompt-lock {
-  min-height: 66px;
-  font-size: 1.12rem;
-}
-
-.prompt-lock:disabled {
-  background: var(--surface-strong);
-  color: var(--muted);
-  cursor: default;
-}
-
-.prompt-lock:disabled span { display: none; }
-
-/* ---- overview: hero, then sections that all work the same way ---- */
-.day-hero {
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 26px;
-  background: var(--surface);
-}
-
-.day-hero-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.day-hero-date,
-.day-hero-score,
-.day-hero-label {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.92rem;
-  font-weight: 800;
-}
-
-.day-hero-score { font-variant-numeric: tabular-nums; }
-
-.day-hero-score strong {
-  color: var(--text);
-  font-size: 1.15rem;
-  font-weight: 900;
-}
-
-.day-hero-progress {
-  height: 6px;
-  margin: 12px 0 18px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--surface-strong);
-}
-
-.day-hero-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--accent);
-}
-
-.day-hero-now {
-  margin: 4px 0 16px;
-  font-size: clamp(1.45rem, 6.4vw, 1.9rem);
-  font-weight: 900;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-  overflow-wrap: anywhere;
-}
-
-.day-hero-title { margin-top: 6px; }
-
-.day-hero-copy {
-  margin: 8px 0 18px;
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.day-hero-cta {
-  width: 100%;
-  min-height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 20px;
-  border: 0;
-  border-radius: 18px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 1.12rem;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.day-hero-cta:active { background: color-mix(in srgb, var(--accent) 84%, #000); }
-
-.day-hero-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.day-chip {
-  min-height: 40px;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.86rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.day-chip:active {
-  background: var(--surface-soft);
-  color: var(--text);
-}
-
-.day-section { margin-top: 28px; }
-
-.day-section-head {
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 2px 10px 4px;
-}
-
-.day-section-head h3 {
-  margin: 0;
-  font-size: 1.12rem;
-  font-weight: 850;
-  letter-spacing: -0.015em;
-}
-
-.day-section-count {
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-}
-
-.day-section-actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-}
-
-.day-section-action {
-  min-height: 38px;
-  padding: 0 15px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 0.86rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.day-section-action:active { background: var(--surface-soft); }
-
-.day-section-action.is-active {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.day-section-note {
-  margin: 10px 4px 0;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.day-panel {
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--surface);
-  list-style: none;
-}
-
-.day-panel > li + li,
-.day-panel > .booster-row + .booster-row,
-.day-panel > .setup-row + .setup-row,
-.day-panel > .day-panel-link { border-top: 1px solid var(--border); }
-
-.day-empty {
-  margin: 0;
-  padding: 16px;
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.day-panel-link {
-  width: 100%;
-  min-height: 48px;
-  border: 0;
-  background: transparent;
-  color: var(--accent-dark);
-  font-weight: 850;
-  cursor: pointer;
-}
-
-/* Power actions: the same pink numbers as this morning's slots. */
-.pa-row {
-  min-height: 64px;
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-  padding: 10px 16px 10px 12px;
-}
-
-.pa-num {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 1.35rem;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.pa-title {
-  font-size: 1.04rem;
-  font-weight: 800;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
-.pa-row.is-done .pa-num {
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-  font-size: 1.05rem;
-}
-
-.pa-row.is-done .pa-title {
-  color: var(--muted);
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-
-/* Boosters: gold everywhere (pill, sheet, Day tab). */
-.booster-list .booster-row {
-  min-height: 54px;
-  padding: 10px 14px;
-  border-radius: 0;
-}
-
-.booster-row .daily-med-check { border-color: color-mix(in srgb, var(--gold) 55%, var(--border)); }
-
-.booster-row.is-taken .daily-med-check {
-  border-color: transparent;
-  background: var(--gold);
-  color: #1d1606;
-}
-
-/* Today's order: what's left, top to bottom. */
-.order-row {
-  min-height: 60px;
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 12px 9px 14px;
-}
-
-.order-mark {
-  width: 24px;
-  height: 24px;
-  display: grid;
-  place-items: center;
-  justify-self: center;
-  border: 2px solid var(--border);
-  border-radius: 50%;
-  font-size: 0.82rem;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.order-mark.is-power {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-}
-
-.order-copy {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.order-copy strong {
-  overflow: hidden;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.order-copy small {
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 750;
-}
-
-.order-row.is-now { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
-
-.order-row.is-now .order-mark {
-  border-color: var(--accent);
-  background: var(--accent);
-}
-
-.order-row.is-now .order-mark.is-power { color: var(--on-accent); }
-
-.order-row.is-now .order-copy small {
-  color: var(--accent-dark);
-  font-weight: 850;
-}
-
-.order-move {
-  display: flex;
-  gap: 6px;
-}
-
-.order-move-button {
-  width: 42px;
-  height: 42px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-soft);
-  color: var(--text);
-  font-size: 1rem;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.order-move-button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-/* Inbox: capture on top, a quiet list below. */
-#inbox .day-capture-form { margin-bottom: 10px; }
-
-.inbox-row {
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-}
-
-.inbox-title {
-  min-width: 0;
-  font-weight: 750;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-
-.inbox-meta {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 750;
-}
-
-.inbox-edit-row {
+.day-hub-row {
+  min-height: 62px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-}
-
-.inbox-edit-row input,
-.inbox-edit-row .small-button { min-height: 44px; }
-
-.inbox-delete {
-  min-height: 44px;
-  padding: 0 8px;
+  gap: 10px;
   border: 0;
-  background: transparent;
-  color: var(--danger);
-  font-weight: 800;
-  cursor: pointer;
-}
-
-/* Setup: the two editors, side by side in one list, same look, same behavior. */
-.setup-row {
-  width: 100%;
-  min-height: 66px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border: 0;
-  background: transparent;
+  background: var(--surface);
   color: var(--text);
+  padding: 10px 13px;
   text-align: left;
   cursor: pointer;
 }
 
-.setup-row:active { background: var(--surface-soft); }
+.day-hub-row:active { background: var(--surface-soft); }
 
-.setup-row:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.setup-copy {
-  display: grid;
-  gap: 3px;
-}
-
-.setup-copy strong {
-  font-size: 1rem;
-  font-weight: 850;
-}
-
-.setup-copy small {
-  color: var(--muted);
-  font-size: 0.84rem;
-  font-weight: 750;
-}
-
-.setup-chevron {
-  color: var(--muted);
-  font-size: 1.7rem;
-  line-height: 1;
-}
-
-/* ---- setup screens: routine and boosters ---- */
-.editor-back { margin-bottom: 14px; }
-
-.editor-intro {
-  margin: 0 4px 16px;
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.editor-list {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--surface);
-}
-
-.editor-item + .editor-item { border-top: 1px solid var(--border); }
-.editor-item[open] { background: var(--surface-soft); }
-
-.editor-item > summary {
-  min-height: 60px;
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px 10px 12px;
-  list-style: none;
-  cursor: pointer;
-}
-
-.editor-item > summary::-webkit-details-marker { display: none; }
-
-.editor-item-num {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--surface-strong);
-  color: var(--muted);
-  font-size: 0.88rem;
-  font-weight: 900;
-}
-
-.editor-item-copy {
+.day-hub-copy {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.editor-item-copy strong {
-  font-weight: 800;
-  overflow-wrap: anywhere;
+.day-hub-copy strong {
+  font-size: 0.96rem;
+  font-weight: 870;
 }
 
-.editor-item-copy small {
+.day-hub-copy small {
   color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 750;
+  font-size: 0.76rem;
+  line-height: 1.25;
 }
 
-.editor-item-open {
-  color: var(--accent-dark);
-  font-size: 0.88rem;
-  font-weight: 850;
-}
-
-.editor-item[open] .editor-item-open { color: var(--muted); }
-
-.editor-form {
-  display: grid;
-  gap: 12px;
-  padding: 2px 14px 16px;
-}
-
-/* Field labels stack; checkbox rows (core, workout link) stay one line: box, then text. */
-.editor-form label:not(.core-check) {
-  display: grid;
-  gap: 6px;
-}
-
-.field-label {
+.day-hub-count {
+  min-width: 28px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--surface-soft);
   color: var(--muted);
-  font-size: 0.84rem;
-  font-weight: 800;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-align: center;
 }
 
-.editor-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 0.7fr)) minmax(0, 1fr);
-  gap: 8px;
-}
-
-.editor-actions > * {
-  min-width: 0;
-  padding-inline: 8px;
-}
-
-.editor-tip {
-  margin: 12px 4px 0;
+.day-hub-chevron {
   color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.45;
+  font-size: 1.45rem;
+  line-height: 1;
 }
 
-.editor-add {
-  display: grid;
-  gap: 10px;
-  margin-top: 22px;
-  padding: 16px;
-  border: 1.5px dashed var(--border);
-  border-radius: 20px;
-}
-
-.editor-add-title {
-  margin: 0;
-  font-size: 1.04rem;
-  font-weight: 850;
-}
-
-.editor-add-more > summary {
-  min-height: 40px;
+.day-subview-top {
   display: flex;
   align-items: center;
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 800;
-  cursor: pointer;
+  gap: 12px;
+  margin-bottom: 5px;
 }
 
-.editor-add-more > * + * { margin-top: 10px; }
-
-.editor-add-more textarea { width: 100%; }
-
-.editor-reset {
-  margin-top: 20px;
-  padding-inline: 4px;
+.day-subview-top h2 {
+  margin: 2px 0 0;
+  font-size: clamp(1.75rem, 8vw, 2.35rem);
 }
 
-/* ---- v1.20: the days a routine step runs ---- */
-.day-picker {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.day-picker legend {
-  margin-bottom: 6px;
-  padding: 0;
-}
-
-.day-picker-row {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.day-toggle {
-  min-width: 0;
+.day-subview-back {
+  min-width: 62px;
   min-height: 44px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 0.95rem;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.day-toggle[aria-pressed="true"] {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.day-picker-summary {
-  margin: 6px 2px 0;
-  color: var(--muted);
-  font-size: 0.84rem;
-  font-weight: 750;
-}
-
-.day-picker-summary.is-flash {
-  color: var(--accent-dark);
-  animation: prompt-nudge 360ms ease;
-}
-
-.editor-add .day-picker { margin-top: 2px; }
-.editor-db-note { margin: -6px 4px 16px; }
-
-/* ---- v1.21: the eye sheet, today's cards with tap-to-done ---- */
-.day-chip-eye {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--surface-soft);
   color: var(--text);
+  padding: 8px 11px;
+  cursor: pointer;
+  font-weight: 850;
 }
 
-.day-chip-eye svg {
-  width: 18px;
-  height: 18px;
-}
-
-.glance-sheet { padding-bottom: 14px; }
-
-.glance-hint {
-  margin: 4px 2px 6px;
+.day-subview-intro {
+  margin: 8px 2px 14px;
   color: var(--muted);
-  font-size: 0.86rem;
+  font-size: 0.88rem;
   line-height: 1.4;
 }
 
-.glance-group {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 16px 4px 8px;
-  font-size: 0.98rem;
-  font-weight: 850;
-}
-
-.glance-group span {
-  color: var(--muted);
-  font-size: 0.86rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.glance-list {
+.day-plan-card,
+.day-plan-inbox,
+.day-inbox-card-flat,
+.day-setup-section {
+  margin-top: 10px;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--bg);
-}
-
-.glance-row {
-  width: 100%;
-  min-height: 58px;
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  padding: 9px 14px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.glance-row + .glance-row { border-top: 1px solid var(--border); }
-.glance-row:active { background: var(--surface-soft); }
-.glance-row.is-now { background: color-mix(in srgb, var(--accent) 10%, transparent); }
-
-.glance-mark {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 2px solid color-mix(in srgb, var(--muted) 55%, var(--border));
-  border-radius: 50%;
-  font-size: 0.86rem;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.glance-mark.is-power {
-  border: 0;
-  border-radius: 9px;
-  background: var(--accent-soft);
-  color: var(--accent-dark);
-}
-
-.glance-row.is-now .glance-mark { border-color: var(--accent); }
-.glance-row.is-now .glance-mark.is-power { background: var(--accent); color: var(--on-accent); }
-
-.glance-row.is-done .glance-mark {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.glance-row.is-skipped .glance-mark {
-  border-style: dashed;
-  color: var(--muted);
-}
-
-.glance-row.is-changed .glance-mark { animation: slot-pop 260ms cubic-bezier(0.2, 0.9, 0.3, 1.35); }
-
-.glance-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.glance-copy strong {
-  font-weight: 800;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.glance-copy small {
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 750;
-}
-
-.glance-row.is-now small { color: var(--accent-dark); }
-
-.glance-row.is-done strong,
-.glance-row.is-skipped strong { color: var(--muted); }
-
-.glance-row.is-done strong {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-
-.glance-empty {
-  margin: 0;
-  padding: 16px;
-  border: 1px dashed var(--border);
-  border-radius: 18px;
-  color: var(--muted);
-}
-
-.glance-note {
-  margin: 10px 4px 0;
-  color: var(--muted);
-  font-size: 0.84rem;
-}
-
-.glance-open-day {
-  width: 100%;
-  min-height: 58px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: 12px;
-  margin-top: 16px;
-  padding: 8px 16px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: transparent;
-  color: var(--text);
-  font-weight: 850;
-  text-align: left;
-  cursor: pointer;
-}
-
-.glance-open-day small {
-  grid-column: 1;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 750;
-}
-
-.glance-open-day span {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  color: var(--muted);
-  font-size: 1.6rem;
-  line-height: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .glance-row.is-changed .glance-mark { animation: none; }
-}
-
-/* ---- v1.23: log a past day's workouts with one tap ---- */
-.plan-log-head {
-  display: grid;
-  gap: 3px;
-  margin: 4px 0 10px;
-}
-
-.plan-log-head strong {
-  font-size: 0.98rem;
-  font-weight: 900;
-}
-
-.plan-log-head span {
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.plan-muscle-button.is-planned { border: 1.5px dashed var(--accent); }
-
-.plan-muscle-button.is-logged {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-/* Five slots fit the morning screen: the empty ones stay slim. */
-.slot.is-empty { min-height: 50px; }
-.slot.is-empty .slot-num { height: 32px; font-size: 1.3rem; }
-
-/* ---- v1.25: Later, pinned above the card ---- */
-.later-tray {
-  padding: 9px 10px 10px;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--surface);
 }
 
-.later-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin: 0 4px 8px;
+.day-plan-list,
+.day-plan-inbox-list,
+.day-inbox-list-flat {
+  display: grid;
+  gap: 1px;
+  border-top: 1px solid var(--border);
+  background: var(--border);
 }
 
-.later-head span {
-  color: var(--accent-dark);
-  font-size: 0.74rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.later-head small {
-  color: var(--muted);
-  font-size: 0.76rem;
-  font-weight: 750;
-}
-
-/* Up to two rows show at once; more scroll inside the strip, so the card keeps its room. */
-.later-chips {
-  max-height: 100px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.later-chip {
-  max-width: 100%;
-  min-height: 44px;
-  display: inline-flex;
+.day-plan-row {
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   align-items: center;
-  border: 1px solid var(--border);
+  gap: 9px;
+  background: var(--surface);
+  padding: 8px 9px;
+}
+
+.day-plan-row.is-todo {
+  background: color-mix(in srgb, var(--accent-soft) 58%, var(--surface));
+}
+
+.day-plan-number {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.day-plan-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.day-plan-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+
+.day-plan-copy small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.day-plan-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.day-plan-controls button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 0;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.day-plan-controls button:disabled { opacity: 0.25; }
+.day-plan-controls .is-remove { color: var(--danger); }
+
+.day-plan-inbox-row {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  background: var(--surface);
+  color: var(--text);
+  padding: 10px 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.day-plan-inbox-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 760;
+}
+
+.day-plan-inbox-row strong {
+  flex: 0 0 auto;
+  color: var(--accent-dark);
+  font-size: 0.78rem;
+}
+
+.day-plan-empty {
+  padding: 15px 13px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.day-primary-footer {
+  width: 100%;
+  min-height: 62px;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--accent);
+  color: #fff;
+  padding: 13px 17px;
+  font-weight: 920;
+  cursor: pointer;
+}
+
+.day-primary-footer:disabled { opacity: 0.45; }
+
+.day-inbox-row {
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 38px;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  padding: 8px 9px 8px 13px;
+}
+
+.day-inbox-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.92rem;
+  font-weight: 760;
+}
+
+.day-inbox-more {
+  position: relative;
+}
+
+.day-inbox-more > summary {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+  font-weight: 900;
+}
+
+.day-inbox-more > summary::-webkit-details-marker { display: none; }
+
+.day-inbox-more form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 7px;
+  margin-top: 7px;
+  padding: 9px;
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.day-inbox-more[open] {
+  grid-column: 1 / -1;
+}
+
+.day-inbox-more[open] > summary {
+  margin-left: auto;
+}
+
+.day-inbox-edit-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.day-setup-section {
+  padding: 13px;
+}
+
+.day-setup-section + .day-setup-section { margin-top: 12px; }
+
+.day-setup-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.day-setup-section-head h2 {
+  margin: 3px 0 0;
+  font-size: 1.35rem;
+}
+
+.day-setup-count {
+  min-width: 30px;
+  padding: 5px 8px;
   border-radius: 999px;
   background: var(--surface-soft);
-  color: var(--text);
-  transition: background 120ms ease, border-color 120ms ease;
-}
-
-/* The circle is the checkbox: a 44px tap target around a 28px ring. */
-.later-check {
-  width: 44px;
-  height: 44px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  margin-right: -6px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: inherit;
-  touch-action: manipulation;
-  cursor: pointer;
-}
-
-.later-mark {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 2px solid color-mix(in srgb, var(--muted) 60%, var(--border));
-  border-radius: 50%;
-  font-size: 0.8rem;
+  color: var(--muted);
+  font-size: 0.75rem;
   font-weight: 900;
-  line-height: 1;
-  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+  text-align: center;
 }
 
-.later-chip.is-power .later-mark {
-  border-color: var(--accent);
-  color: var(--accent-dark);
+.day-setup-help {
+  margin: 7px 0 12px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
-.later-check:active .later-mark { transform: scale(0.9); }
-
-.later-chip.is-checking .later-mark {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--on-accent);
-  transform: scale(1.08);
+.day-setup-add {
+  margin-bottom: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft);
 }
 
-.later-name {
-  min-width: 0;
-  min-height: 44px;
+.day-setup-add > summary {
+  min-height: 46px;
   display: flex;
   align-items: center;
-  padding: 0 14px 0 6px;
-  border: 0;
-  border-radius: 0 999px 999px 0;
-  background: transparent;
-  color: inherit;
-  font-size: 0.88rem;
-  font-weight: 800;
-  touch-action: manipulation;
+  padding: 10px 12px;
   cursor: pointer;
+  font-weight: 850;
 }
 
-.later-title {
+.day-setup-add .daily-add-form {
+  padding: 0 10px 10px;
+}
+
+.day-setup-med-add {
+  margin-bottom: 10px;
+}
+
+.daily-edit-summary-copy {
   min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.daily-edit-summary-copy strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.later-chip.is-armed {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface-soft));
+.daily-edit-summary-copy small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .later-chip,
-  .later-mark { transition: none; }
-}
-
-/* ---- v1.22: finish my day ---- */
-.finish-day-cta { margin-top: 18px; }
-.finish-day-note { margin-top: 8px; }
-
-.finish-reel-top {
-  grid-area: 1 / 1;
-  z-index: 2;
-  align-self: start;
+.routine-days-field {
   display: grid;
-  gap: 10px;
-  padding: 12px 14px 30px;
-  background: linear-gradient(rgba(0, 0, 0, 0.6), transparent);
+  gap: 7px;
 }
 
-.finish-reel-bar {
-  height: 4px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.finish-reel-bar span {
-  display: block;
-  width: 0;
-  height: 100%;
-  border-radius: inherit;
-  background: #5ce1ff;
-  transition: width 500ms linear;
-}
-
-.finish-reel-tools {
+.routine-days-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.finish-reel-button {
-  min-height: 36px;
-  padding: 0 14px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.35);
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 0.82rem;
-  font-weight: 800;
+.routine-days-all {
+  min-height: 30px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 5px 8px;
   cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 850;
 }
 
-.finish-reel-time {
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 0.92rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Black, one question, the signature. Always dark, whatever the theme. */
-.finish-question {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
+.routine-days-picker {
   display: grid;
-  align-content: center;
-  gap: 18px;
-  padding: max(32px, env(safe-area-inset-top, 0px)) max(28px, env(safe-area-inset-right, 0px)) max(32px, env(safe-area-inset-bottom, 0px)) max(28px, env(safe-area-inset-left, 0px));
-  background: #000;
-  color: #fff;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.routine-day-chip {
+  min-width: 0;
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--muted);
   cursor: pointer;
-  animation: finish-fade 1400ms ease both;
-  -webkit-user-select: none;
-  user-select: none;
+  font-size: 0.73rem;
+  font-weight: 860;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.finish-question-text {
-  max-width: 14ch;
-  margin: 0;
-  font-size: clamp(2.2rem, 10vw, 3.6rem);
-  font-weight: 900;
-  line-height: 1.04;
-  letter-spacing: -0.045em;
-  text-wrap: balance;
+.routine-day-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.finish-question-sign {
-  margin: 0;
-  color: #5ce1ff;
-  font-size: 1.25rem;
-  font-weight: 900;
-  letter-spacing: 0.01em;
-  animation: finish-fade 1400ms ease 900ms both;
+.routine-day-chip.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent-dark);
 }
 
-.finish-question-hint {
-  max-width: 32ch;
+@media (max-width: 430px) {
+  .day-plan-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    gap: 6px;
+    padding-inline: 7px;
+  }
+
+  .day-plan-controls button {
+    width: 31px;
+    height: 31px;
+  }
+
+  .routine-days-picker { gap: 4px; }
+  .routine-day-chip { min-height: 36px; font-size: 0.68rem; }
+}
+
+/* v1.19: boosters can be anchored to routine activities without adding Day-screen clutter. */
+.day-med-quick-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.day-med-quick-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+}
+
+.day-med-quick-copy small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+.booster-add-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.booster-add-fields,
+.booster-edit-fields {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.booster-add-fields select,
+.booster-edit-fields select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 9px 34px 9px 11px;
+  font: inherit;
+  font-size: 16px;
+}
+
+.booster-edit-row {
+  align-items: start;
+}
+
+.day-step-boosters {
   margin: 18px 0 0;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 0.92rem;
-  line-height: 1.45;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
 }
 
-@keyframes finish-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.day-step-boosters-label {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .finish-question,
-  .finish-question-sign { animation: none; }
-  .finish-reel-bar span { transition: none; }
+.day-step-boosters-list {
+  display: grid;
+  gap: 7px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .slot.is-new .slot-num,
-  .prompt-status.is-flash,
-  .day-picker-summary.is-flash { animation: none; }
-  .prompt-resting > summary::after { transition: none; }
+.day-step-booster {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface-soft);
+  color: var(--text);
+  padding: 9px 11px;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 820;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.day-step-booster.is-taken {
+  color: var(--muted);
+}
+
+.day-step-booster-check {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.day-step-booster.is-taken .day-step-booster-check {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (max-width: 520px) {
+  .booster-add-form { grid-template-columns: 1fr; }
+  .booster-add-form .primary-button { width: 100%; }
+}
+
+
+/* v1.20: one home for each decision — Inbox captures, Arrange plans, Setup configures. */
+.day-inbox-row-manage-only {
+  grid-template-columns: minmax(0, 1fr) 38px;
+}
+
+.day-setup-hub {
+  margin-top: 12px;
+}
+
+.day-anytime-boosters {
+  background: var(--surface);
+}
+
+.day-anytime-boosters .day-compact-head {
+  min-height: 42px;
+}
+
+@media (max-width: 430px) {
+  .day-inbox-row-manage-only {
+    grid-template-columns: minmax(0, 1fr) 38px;
+  }
 }

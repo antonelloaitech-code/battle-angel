@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.25.1'
+const APP_VERSION = '1.20.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -27,7 +27,6 @@ const IMAGE_JPEG_QUALITY = 0.82
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'm4v', 'webm'])
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'])
 const MOTIVATION_IMAGE_SECONDS = 6
-// A golden week is 4 days with at least one workout done (two workouts on one day is still one day).
 const GOLDEN_WEEK_TARGET = 4
 const HISTORY_LOOKBACK_DAYS = 400
 const AUTO_RESUME_WINDOW_MS = 12 * 60 * 60 * 1000
@@ -40,36 +39,16 @@ const DAILY_SUBSTEP_TITLE_MAX = 120
 const DAILY_SUBSTEP_MAX = 20
 const DAILY_MED_NAME_MAX = 120
 const POWER_TODO_TITLE_MAX = 160
-// v1.18 Action Engine
-// Up to five power actions a day, ranked by importance.
-const TODAY_TODO_TARGET = 5
-const SPRINT_MINUTES = 5
-const DEFER_NUDGE_AT = 2
-const SNOOZE_STEPS_DAYS = [1, 3, 7]
-const STALE_SNOOZE_COUNT = 3
-const UNDO_MS = 5000
-const STUCK_REVEAL_MS = 30000
-const DONE_SOUND_KEY = 'battle-angel-done-sound'
-const BADGE_KEY = 'battle-angel-app-badge'
-const V118_COLUMNS = ['is_core', 'energy_mode', 'defer_counts', 'closed_at', 'snoozed_until', 'snooze_count', 'parent_id', 'size']
-const DAILY_STEP_COLUMNS_LEGACY = 'id,title,note,substeps,sort_order,created_at,updated_at'
-const DAILY_PROGRESS_COLUMNS_LEGACY = 'progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,substep_positions,is_complete,started_at,updated_at'
-const DAILY_PROGRESS_COLUMNS = `${DAILY_PROGRESS_COLUMNS_LEGACY},energy_mode,defer_counts,closed_at`
-const POWER_TODO_COLUMNS_LEGACY = 'id,title,sort_order,completed_at,created_at,updated_at'
-const POWER_TODO_COLUMNS = `${POWER_TODO_COLUMNS_LEGACY},size,snoozed_until,snooze_count,parent_id`
-const POWER_PLAN_COLUMNS = 'id,todo_id,action_date,status,sort_order,started_at,created_at,updated_at'
-const DAY_VIEWS = ['day', 'day-overview', 'day-runner', 'triage', 'day-prompt', 'day-routine', 'day-boosters']
-// v1.19: the morning question, and how much of Inbox and Today's order the overview shows before "Show all"
-const POWER_PROMPT_QUESTION = 'What power actions are you getting done today to get to another place?'
-const INBOX_PREVIEW_COUNT = 5
-const ORDER_PREVIEW_COUNT = 5
-// v1.20: a routine step can run on chosen weekdays only. daily_steps.weekdays holds getDay() numbers
-// (0 = Sunday ... 6 = Saturday); null means every day. Shown Monday first, like the rest of the app.
-// daily_steps.opens_workout links a step to the Gym tab: true/false when set in Edit routine,
-// null = decided by the name (gym, workout or training in it).
-const V120_COLUMNS = ['weekdays', 'opens_workout']
-const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
-const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const ALL_ROUTINE_DAYS = [0, 1, 2, 3, 4, 5, 6]
+const ROUTINE_DAY_LABELS = [
+  [1, 'Mo', 'Monday'],
+  [2, 'Tu', 'Tuesday'],
+  [3, 'We', 'Wednesday'],
+  [4, 'Th', 'Thursday'],
+  [5, 'Fr', 'Friday'],
+  [6, 'Sa', 'Saturday'],
+  [0, 'Su', 'Sunday']
+]
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   document.querySelector('#app').innerHTML = `
@@ -134,28 +113,20 @@ let dailyMeds = []
 let dailyMedTakenIds = []
 let dailyMedsDate = todayDateKey()
 let dailyMedsAvailable = true
+let dailyMedAnchorsAvailable = true
+let dailyUndoSnapshot = null
+let dailyUndoLabel = ''
+let dailyUndoExpiresAt = 0
+let dailyUndoTimer = null
 let powerTodos = []
 let powerPlans = []
-let powerDoneToday = []
 let powerActionsDate = todayDateKey()
 let powerActionsAvailable = true
-// v1.18 Action Engine state
-let actionEngineAvailable = true
-// v1.20: false until supabase/routine_upgrade.sql has run
-let routineDaysAvailable = true
-let undoState = null
-let toastTimer = null
-let triageSession = null
-let sprintTicker = null
-let lastRunnerKey = ''
-let stuckRevealTimer = null
-const revealedStuckKeys = new Set()
-// v1.19 Day tab state: the morning picker, and the overview's edit modes
-let powerPrompt = null
-let dayUi = { reorder: false, orderAll: false, inboxEdit: false, inboxAll: false }
-// v1.21: what to do when you close a sheet yourself, and the eye view's memory for exact undo
-let sheetOnDismiss = null
-let glanceSession = null
+let powerUndoSnapshot = null
+let powerUndoLabel = ''
+let powerUndoExpiresAt = 0
+let powerUndoTimer = null
+let lastPowerTapAt = 0
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 12
 const MOTIVATION_SOUND_KEY = 'battle-angel-motivation-sound'
@@ -218,7 +189,7 @@ function applyTheme(theme) {
   const next = theme === 'light' ? 'light' : 'dark'
   document.documentElement.dataset.theme = next
   const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.setAttribute('content', next === 'dark' ? '#000000' : '#f3f5f7')
+  if (meta) meta.setAttribute('content', next === 'dark' ? '#0d0f10' : '#f5f5f2')
   try {
     window.localStorage.setItem(THEME_STORAGE_KEY, next)
   } catch {
@@ -333,6 +304,19 @@ function workoutStorageKey() {
 
 function timerStorageKey() {
   return currentUser ? `gymflow-timer-${currentUser.id}` : 'gymflow-timer'
+}
+
+function dayModeStorageKey() {
+  return currentUser ? `battle-angel-day-mode-${currentUser.id}` : 'battle-angel-day-mode'
+}
+
+function setActiveDayMode(mode) {
+  try {
+    if (mode === 'daily') window.localStorage.setItem(dayModeStorageKey(), mode)
+    else window.localStorage.removeItem(dayModeStorageKey())
+  } catch {
+    // The current screen still works if storage is unavailable.
+  }
 }
 
 function normalizeWorkoutStateValue(value, fallbackUpdatedAt = Date.now()) {
@@ -464,47 +448,24 @@ async function loadSchedule() {
   workoutHistory = mergePendingCompletions(nextHistory)
 }
 
-function errorText(error) {
-  return `${error?.code || ''} ${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase()
-}
-
-// v1.18 columns are optional. If schema.sql has not been re-run yet, battle angel keeps working
-// without them instead of switching the whole Day tab off.
-function isMissingColumnError(error, columns) {
-  if (!error) return false
-  const text = errorText(error)
-  const missingColumn = text.includes('42703') || text.includes('pgrst204') || (text.includes('column') && (text.includes('does not exist') || text.includes('could not find')))
-  return missingColumn && columns.some((column) => text.includes(column))
-}
-
-function isMissingV118ColumnError(error) {
-  return isMissingColumnError(error, V118_COLUMNS)
-}
-
-// v1.20 works the same way: without the weekdays column every step simply runs every day.
-function isMissingV120ColumnError(error) {
-  return isMissingColumnError(error, V120_COLUMNS)
-}
-
-// Only a genuinely missing table/column turns a feature off. Any other error (no signal, a policy,
-// a foreign key) is temporary and must never hide the day.
-function isMissingSchemaError(error, names) {
-  if (!error || isMissingV118ColumnError(error) || isMissingV120ColumnError(error)) return false
-  const text = errorText(error)
-  const missing = text.includes('42p01') || text.includes('pgrst205') || text.includes('42703') || text.includes('pgrst204') || text.includes('does not exist') || text.includes('could not find')
-  return missing && names.some((name) => text.includes(name))
-}
-
 function isMissingDailySystemError(error) {
-  return isMissingSchemaError(error, ['daily_steps', 'daily_progress', 'substeps', 'skipped_step_ids', 'substep_positions', 'later_step_ids', 'stack_order'])
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_steps') || text.includes('daily_progress') || text.includes('substeps') || text.includes('skipped_step_ids') || text.includes('substep_positions') || text.includes('later_step_ids') || text.includes('stack_order') || text.includes('active_days')
 }
 
 function isMissingDailyMedsError(error) {
-  return isMissingSchemaError(error, ['daily_meds', 'daily_med_log'])
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_meds') || text.includes('daily_med_log')
+}
+
+function isMissingDailyMedAnchorError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('routine_step_id') && (text.includes('column') || text.includes('schema cache') || text.includes('pgrst'))
 }
 
 function isMissingPowerActionsError(error) {
-  return isMissingSchemaError(error, ['power_todos', 'power_action_plan'])
+  const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('power_todos') || text.includes('power_action_plan')
 }
 
 function normalizeDailySubsteps(value) {
@@ -528,6 +489,59 @@ function dailySubstepsText(step) {
   return normalizeDailySubsteps(step?.substeps).join('\n')
 }
 
+function normalizeRoutineDays(value) {
+  const source = Array.isArray(value) ? value : ALL_ROUTINE_DAYS
+  const unique = [...new Set(source.map((day) => Number.parseInt(day, 10)).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
+  return unique.length ? unique.sort((a, b) => a - b) : [...ALL_ROUTINE_DAYS]
+}
+
+function routineStepsForDate(dateKey = todayDateKey()) {
+  const weekday = dateFromKey(dateKey).getDay()
+  return dailySteps.filter((step) => normalizeRoutineDays(step.active_days).includes(weekday))
+}
+
+function routineDaysLabel(days) {
+  const normalized = normalizeRoutineDays(days)
+  if (normalized.length === 7) return 'Every day'
+  return ROUTINE_DAY_LABELS.filter(([day]) => normalized.includes(day)).map(([, short]) => short).join(' · ')
+}
+
+function routineDayPickerHtml(days, name = 'active_days') {
+  const selected = new Set(normalizeRoutineDays(days))
+  return `
+    <div class="routine-days-field">
+      <div class="routine-days-head"><span class="eyebrow">RUNS ON</span><button type="button" class="routine-days-all" data-routine-days-all>Every day</button></div>
+      <div class="routine-days-picker">
+        ${ROUTINE_DAY_LABELS.map(([day, short, full]) => `
+          <label class="routine-day-chip ${selected.has(day) ? 'is-selected' : ''}" title="${full}">
+            <input type="checkbox" name="${name}" value="${day}" ${selected.has(day) ? 'checked' : ''} />
+            <span>${short}</span>
+          </label>`).join('')}
+      </div>
+    </div>`
+}
+
+function readRoutineDays(form) {
+  return [...form.querySelectorAll('input[name="active_days"]:checked')]
+    .map((input) => Number.parseInt(input.value, 10))
+    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+    .sort((a, b) => a - b)
+}
+
+function bindRoutineDayPickers(root = document) {
+  root.querySelectorAll('.routine-days-field').forEach((field) => {
+    const sync = () => {
+      field.querySelectorAll('.routine-day-chip').forEach((label) => label.classList.toggle('is-selected', Boolean(label.querySelector('input')?.checked)))
+    }
+    field.querySelectorAll('input[name="active_days"]').forEach((input) => input.addEventListener('change', sync))
+    field.querySelector('[data-routine-days-all]')?.addEventListener('click', () => {
+      field.querySelectorAll('input[name="active_days"]').forEach((input) => { input.checked = true })
+      sync()
+    })
+    sync()
+  })
+}
+
 function emptyDailyProgress(dateKey = todayDateKey()) {
   return {
     progress_date: dateKey,
@@ -538,22 +552,8 @@ function emptyDailyProgress(dateKey = todayDateKey()) {
     substep_positions: {},
     is_complete: false,
     started_at: null,
-    updated_at: null,
-    energy_mode: 'normal',
-    defer_counts: {},
-    closed_at: null
+    updated_at: null
   }
-}
-
-function uniqueStrings(value) {
-  return Array.isArray(value) ? [...new Set(value.filter((item) => typeof item === 'string'))] : []
-}
-
-function normalizeCountMap(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(Object.entries(value)
-    .filter(([key, count]) => typeof key === 'string' && Number(count) > 0)
-    .map(([key, count]) => [key, Math.min(99, Math.floor(Number(count)))]))
 }
 
 function normalizeDailyProgressValue(value, dateKey = todayDateKey()) {
@@ -563,62 +563,20 @@ function normalizeDailyProgressValue(value, dateKey = todayDateKey()) {
     : {}
   return {
     progress_date: dateKey,
-    completed_step_ids: uniqueStrings(value.completed_step_ids),
-    skipped_step_ids: uniqueStrings(value.skipped_step_ids),
-    later_step_ids: uniqueStrings(value.later_step_ids),
-    stack_order: uniqueStrings(value.stack_order).filter((key) => /^(routine|todo|system):/.test(key)),
+    completed_step_ids: Array.isArray(value.completed_step_ids) ? [...new Set(value.completed_step_ids.filter((id) => typeof id === 'string'))] : [],
+    skipped_step_ids: Array.isArray(value.skipped_step_ids) ? [...new Set(value.skipped_step_ids.filter((id) => typeof id === 'string'))] : [],
+    later_step_ids: Array.isArray(value.later_step_ids) ? [...new Set(value.later_step_ids.filter((id) => typeof id === 'string'))] : [],
+    stack_order: Array.isArray(value.stack_order) ? [...new Set(value.stack_order.filter((key) => typeof key === 'string' && /^(routine|todo):/.test(key)))] : [],
     substep_positions: positions,
     is_complete: Boolean(value.is_complete),
     started_at: value.started_at || null,
-    updated_at: value.updated_at || null,
-    energy_mode: value.energy_mode === 'low' ? 'low' : 'normal',
-    defer_counts: normalizeCountMap(value.defer_counts),
-    closed_at: value.closed_at || null
+    updated_at: value.updated_at || null
   }
 }
 
 function pendingDailyProgressFor(dateKey = todayDateKey()) {
   const value = readPending().dailyProgress
   return value?.progress_date === dateKey ? normalizeDailyProgressValue(value, dateKey) : null
-}
-
-function dailyStepColumns(v118 = actionEngineAvailable, v120 = routineDaysAvailable) {
-  return [DAILY_STEP_COLUMNS_LEGACY, v118 ? 'is_core' : '', v120 ? 'weekdays,opens_workout' : ''].filter(Boolean).join(',')
-}
-
-// Days a step runs on, as getDay() numbers. null = every day (also when all seven are picked).
-function normalizeWeekdays(value) {
-  if (!Array.isArray(value)) return null
-  const days = [...new Set(value.map((day) => Number(day)).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b)
-  return days.length && days.length < 7 ? days : null
-}
-
-function normalizeDailyStepRow(step) {
-  return {
-    ...step,
-    substeps: normalizeDailySubsteps(step.substeps),
-    is_core: Boolean(step.is_core),
-    weekdays: normalizeWeekdays(step.weekdays),
-    opens_workout: typeof step.opens_workout === 'boolean' ? step.opens_workout : null
-  }
-}
-
-function weekdayOf(dateKey = todayDateKey()) {
-  return dateFromKey(dateKey).getDay()
-}
-
-function stepScheduledOn(step, dateKey = todayDateKey()) {
-  return !Array.isArray(step?.weekdays) || step.weekdays.includes(weekdayOf(dateKey))
-}
-
-// "Every day", "Weekdays", "Weekends", or "Mon, Wed, Fri" (Monday first).
-function weekdaysLabel(weekdays) {
-  const days = normalizeWeekdays(weekdays)
-  if (!days) return 'Every day'
-  const key = days.join(',')
-  if (key === '1,2,3,4,5') return 'Weekdays'
-  if (key === '0,6') return 'Weekends'
-  return WEEKDAY_ORDER.filter((day) => days.includes(day)).map((day) => WEEKDAY_NAMES[day].slice(0, 3)).join(', ')
 }
 
 async function loadDailySystem() {
@@ -629,39 +587,18 @@ async function loadDailySystem() {
     return
   }
 
-  const fetchDay = (stepColumns, progressColumns) => Promise.all([
+  const [stepsResult, progressResult] = await Promise.all([
     supabase
       .from('daily_steps')
-      .select(stepColumns)
+      .select('id,title,note,substeps,active_days,sort_order,created_at,updated_at')
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true }),
     supabase
       .from('daily_progress')
-      .select(progressColumns)
+      .select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,substep_positions,is_complete,started_at,updated_at')
       .eq('progress_date', dateKey)
       .maybeSingle()
   ])
-
-  // Loaders run in parallel, so each one remembers which column set it actually asked for.
-  // The database reports one missing column at a time, so an older one can take two retries.
-  let askedV118 = actionEngineAvailable
-  let askedV120 = routineDaysAvailable
-  const fetchFor = () => fetchDay(dailyStepColumns(askedV118, askedV120), askedV118 ? DAILY_PROGRESS_COLUMNS : DAILY_PROGRESS_COLUMNS_LEGACY)
-  let [stepsResult, progressResult] = await fetchFor()
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const v120Missing = askedV120 && isMissingV120ColumnError(stepsResult.error)
-    const v118Missing = askedV118 && (isMissingV118ColumnError(stepsResult.error) || isMissingV118ColumnError(progressResult.error))
-    if (!v120Missing && !v118Missing) break
-    if (v120Missing) {
-      routineDaysAvailable = false
-      askedV120 = false
-    }
-    if (v118Missing) {
-      actionEngineAvailable = false
-      askedV118 = false
-    }
-    ;[stepsResult, progressResult] = await fetchFor()
-  }
 
   const firstError = stepsResult.error || progressResult.error
   if (firstError) {
@@ -674,7 +611,7 @@ async function loadDailySystem() {
     throw firstError
   }
 
-  dailySteps = (stepsResult.data || []).map(normalizeDailyStepRow)
+  dailySteps = (stepsResult.data || []).map((step) => ({ ...step, substeps: normalizeDailySubsteps(step.substeps), active_days: normalizeRoutineDays(step.active_days) }))
   const cloud = normalizeDailyProgressValue(progressResult.data, dateKey)
   const pending = pendingDailyProgressFor(dateKey)
   const cloudTime = Date.parse(cloud.updated_at || '') || 0
@@ -706,17 +643,27 @@ async function loadDailyMeds() {
     return
   }
 
-  const [medsResult, logResult] = await Promise.all([
-    supabase
+  let medsResult = await supabase
+    .from('daily_meds')
+    .select('id,name,routine_step_id,sort_order,created_at,updated_at')
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+
+  if (medsResult.error && isMissingDailyMedAnchorError(medsResult.error)) {
+    dailyMedAnchorsAvailable = false
+    medsResult = await supabase
       .from('daily_meds')
       .select('id,name,sort_order,created_at,updated_at')
       .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true }),
-    supabase
-      .from('daily_med_log')
-      .select('med_id,taken_date,taken_at')
-      .eq('taken_date', dateKey)
-  ])
+      .order('created_at', { ascending: true })
+  } else if (!medsResult.error) {
+    dailyMedAnchorsAvailable = true
+  }
+
+  const logResult = await supabase
+    .from('daily_med_log')
+    .select('med_id,taken_date,taken_at')
+    .eq('taken_date', dateKey)
 
   const firstError = medsResult.error || logResult.error
   if (firstError) {
@@ -730,102 +677,41 @@ async function loadDailyMeds() {
     throw firstError
   }
 
-  dailyMeds = medsResult.data || []
+  dailyMeds = (medsResult.data || []).map((med) => ({ ...med, routine_step_id: med.routine_step_id || null }))
   dailyMedsDate = dateKey
   dailyMedTakenIds = mergeDailyMedTakenIds((logResult.data || []).map((row) => row.med_id), dateKey)
 }
 
 
-// ---------- v1.18 todos: local-first ----------
-// Capturing, planning, finishing, and dropping a todo all land on this phone instantly (even with no
-// signal) and sync in the background. Today's plan rows are matched by todo + date, so ids created
-// offline never have to agree with the server's.
-
-function nowIso() {
-  return new Date().toISOString()
-}
-
-function sortBySortOrder(list) {
-  return list.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
-}
-
-function normalizeTodoRow(row = {}) {
-  const snoozedUntil = typeof row.snoozed_until === 'string' ? row.snoozed_until.slice(0, 10) : ''
-  return {
-    id: row.id,
-    title: String(row.title || '').trim().slice(0, POWER_TODO_TITLE_MAX),
-    sort_order: Number(row.sort_order) || 0,
-    completed_at: row.completed_at || null,
-    created_at: row.created_at || row.updated_at || nowIso(),
-    updated_at: row.updated_at || row.created_at || null,
-    size: row.size === 'quick' || row.size === 'big' ? row.size : null,
-    snoozed_until: /^\d{4}-\d{2}-\d{2}$/.test(snoozedUntil) ? snoozedUntil : null,
-    snooze_count: Math.max(0, Number.parseInt(row.snooze_count, 10) || 0),
-    parent_id: typeof row.parent_id === 'string' && row.parent_id ? row.parent_id : null
-  }
-}
-
-// Server rows + everything this phone changed that has not synced yet.
-function applyPendingPowerState(todoRows = [], planRows = [], doneRows = [], dateKey = todayDateKey()) {
-  const pending = readPending()
-  const todos = new Map()
-  ;[...todoRows, ...doneRows].forEach((row) => {
-    if (row?.id) todos.set(row.id, normalizeTodoRow(row))
+function applyPendingPowerWrites(todos, plans, dateKey = todayDateKey()) {
+  const writes = Object.values(readPending().powerPlanWrites || {}).filter((item) => item?.action_date === dateKey)
+  if (!writes.length) return { todos, plans }
+  const nextPlans = plans.map((plan) => {
+    const write = writes.find((item) => item.plan_id === plan.id)
+    return write ? { ...plan, status: write.status, sort_order: write.sort_order, started_at: write.started_at, updated_at: write.updated_at } : plan
   })
-  Object.values(pending.todoCreates).forEach((item) => {
-    if (item?.id && !todos.has(item.id)) todos.set(item.id, normalizeTodoRow(item))
-  })
-  Object.entries(pending.todoWrites).forEach(([id, item]) => {
-    const todo = todos.get(id)
-    if (todo && item?.patch) todos.set(id, normalizeTodoRow({ ...todo, ...item.patch }))
-  })
-  // v1.17 queue items carried the todo completion on the plan write.
-  Object.values(pending.powerPlanWrites).forEach((item) => {
-    if (!item || !Object.prototype.hasOwnProperty.call(item, 'todo_completed_at')) return
-    const todo = todos.get(item.todo_id)
-    if (todo) todos.set(todo.id, { ...todo, completed_at: item.todo_completed_at || null })
-    else if (!item.todo_completed_at && item.todo_title) {
-      todos.set(item.todo_id, normalizeTodoRow({ id: item.todo_id, title: item.todo_title, sort_order: item.todo_sort_order, created_at: item.todo_created_at }))
-    }
-  })
-  Object.keys(pending.todoDeletes).forEach((id) => todos.delete(id))
-
-  const dayStart = dateFromKey(dateKey).getTime()
-  const active = []
-  const doneToday = []
-  todos.forEach((todo) => {
-    if (!todo.completed_at) active.push(todo)
-    else if ((Date.parse(todo.completed_at) || 0) >= dayStart) doneToday.push(todo)
-  })
-
-  const plans = new Map()
-  planRows.forEach((plan) => {
-    if (plan?.action_date === dateKey && todos.has(plan.todo_id)) plans.set(plan.todo_id, { ...plan })
-  })
-  Object.values(pending.powerPlanWrites).forEach((item) => {
-    if (!item || item.action_date !== dateKey) return
-    if (item.status === 'removed' || !todos.has(item.todo_id)) {
-      plans.delete(item.todo_id)
+  const nextTodos = [...todos]
+  writes.forEach((write) => {
+    if (!Object.prototype.hasOwnProperty.call(write, 'todo_completed_at')) return
+    const existingIndex = nextTodos.findIndex((todo) => todo.id === write.todo_id)
+    if (write.todo_completed_at) {
+      if (existingIndex >= 0) nextTodos.splice(existingIndex, 1)
       return
     }
-    const existing = plans.get(item.todo_id)
-    plans.set(item.todo_id, {
-      id: existing?.id || item.plan_id || `local-${item.todo_id}-${dateKey}`,
-      todo_id: item.todo_id,
-      action_date: dateKey,
-      status: ['pending', 'done', 'skipped'].includes(item.status) ? item.status : 'pending',
-      sort_order: Number(item.sort_order) || 0,
-      started_at: item.started_at || null,
-      created_at: existing?.created_at || item.created_at || item.updated_at || nowIso(),
-      updated_at: item.updated_at || null
-    })
+    if (existingIndex < 0 && write.todo_title) {
+      nextTodos.push({
+        id: write.todo_id,
+        title: write.todo_title,
+        sort_order: Number(write.todo_sort_order) || 0,
+        completed_at: null,
+        created_at: write.todo_created_at || write.updated_at,
+        updated_at: write.updated_at
+      })
+    }
   })
-
-  return {
-    todos: sortBySortOrder(active),
-    doneToday: doneToday.sort((a, b) => String(a.completed_at).localeCompare(String(b.completed_at))),
-    plans: sortBySortOrder([...plans.values()])
-  }
+  nextTodos.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  nextPlans.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  return { todos: nextTodos, plans: nextPlans }
 }
 
 async function loadPowerActions() {
@@ -834,306 +720,60 @@ async function loadPowerActions() {
   if (!currentUser || !powerActionsAvailable) {
     powerTodos = []
     powerPlans = []
-    powerDoneToday = []
     return
   }
 
-  const dayStartIso = dateFromKey(dateKey).toISOString()
-  const fetchTodos = (todoColumns) => Promise.all([
+  const [todosResult, planResult] = await Promise.all([
     supabase
       .from('power_todos')
-      .select(todoColumns)
+      .select('id,title,sort_order,completed_at,created_at,updated_at')
       .is('completed_at', null)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true }),
     supabase
       .from('power_action_plan')
-      .select(POWER_PLAN_COLUMNS)
+      .select('id,todo_id,action_date,status,sort_order,started_at,created_at,updated_at')
       .eq('action_date', dateKey)
       .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true }),
-    // Todos finished today, for the wins list.
-    supabase
-      .from('power_todos')
-      .select(todoColumns)
-      .gte('completed_at', dayStartIso)
-      .order('completed_at', { ascending: true })
+      .order('created_at', { ascending: true })
   ])
 
-  const askedV118 = actionEngineAvailable
-  let results = await fetchTodos(askedV118 ? POWER_TODO_COLUMNS : POWER_TODO_COLUMNS_LEGACY)
-  if (askedV118 && results.some((result) => isMissingV118ColumnError(result.error))) {
-    actionEngineAvailable = false
-    results = await fetchTodos(POWER_TODO_COLUMNS_LEGACY)
-  }
-  const [todosResult, planResult, doneResult] = results
-  const firstError = todosResult.error || planResult.error || doneResult.error
+  const firstError = todosResult.error || planResult.error
   if (firstError) {
     if (isMissingPowerActionsError(firstError)) {
       powerActionsAvailable = false
       powerTodos = []
       powerPlans = []
-      powerDoneToday = []
       return
     }
     throw firstError
   }
 
-  const merged = applyPendingPowerState(todosResult.data || [], planResult.data || [], doneResult.data || [], dateKey)
+  const merged = applyPendingPowerWrites(todosResult.data || [], planResult.data || [], dateKey)
   powerTodos = merged.todos
   powerPlans = merged.plans
-  powerDoneToday = merged.doneToday
 }
 
 function getPowerTodo(todoId) {
   return powerTodos.find((todo) => todo.id === todoId) || null
 }
 
-function getAnyTodo(todoId) {
-  return getPowerTodo(todoId) || powerDoneToday.find((todo) => todo.id === todoId) || null
-}
-
-function ensurePowerDate() {
+function getTodayPowerPlans() {
   const dateKey = todayDateKey()
   if (powerActionsDate !== dateKey) {
     powerActionsDate = dateKey
     powerPlans = []
-    powerDoneToday = []
   }
-  return dateKey
-}
-
-function getTodayPowerPlans() {
-  const dateKey = ensurePowerDate()
   return powerPlans.filter((plan) => plan.action_date === dateKey)
 }
 
-function getTodayPlanForTodo(todoId) {
-  return getTodayPowerPlans().find((plan) => plan.todo_id === todoId) || null
-}
-
 function getPendingPowerPlans() {
-  return sortBySortOrder(getTodayPowerPlans().filter((plan) => plan.status === 'pending' && getPowerTodo(plan.todo_id)))
+  return getTodayPowerPlans()
+    .filter((plan) => plan.status === 'pending' && getPowerTodo(plan.todo_id))
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
 }
 
-function isTodoSnoozed(todo, dateKey = todayDateKey()) {
-  return Boolean(todo?.snoozed_until && todo.snoozed_until > dateKey)
-}
-
-// Inbox items that still need a decision today: not already in today, not snoozed, not passed in this sort.
-// Oldest first, so nothing rots at the bottom.
-function getTriageQueue() {
-  const dateKey = todayDateKey()
-  const planned = new Set(getTodayPowerPlans().map((plan) => plan.todo_id))
-  const passed = triageSession?.passedIds || new Set()
-  return powerTodos
-    .filter((todo) => !planned.has(todo.id) && !isTodoSnoozed(todo, dateKey) && !passed.has(todo.id))
-    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
-}
-
-function dueInboxCount() {
-  const dateKey = todayDateKey()
-  const planned = new Set(getTodayPowerPlans().map((plan) => plan.todo_id))
-  return powerTodos.filter((todo) => !planned.has(todo.id) && !isTodoSnoozed(todo, dateKey)).length
-}
-
-// ---------- sync queue for todos ----------
-
-function queueTodoCreate(todo) {
-  const pending = readPending()
-  pending.todoCreates[todo.id] = { ...normalizeTodoRow(todo), updated_at: nowIso(), attempts: 0 }
-  delete pending.todoDeletes[todo.id]
-  writePending(pending)
-  flushPendingWrites()
-}
-
-function queueTodoPatch(todoId, patch) {
-  const pending = readPending()
-  const stamp = nowIso()
-  if (pending.todoCreates[todoId]) {
-    pending.todoCreates[todoId] = { ...pending.todoCreates[todoId], ...patch, updated_at: stamp, attempts: 0 }
-  } else {
-    pending.todoWrites[todoId] = { patch: { ...(pending.todoWrites[todoId]?.patch || {}), ...patch }, updated_at: stamp, attempts: 0 }
-  }
-  writePending(pending)
-  flushPendingWrites()
-}
-
-function queueTodoDelete(todoId) {
-  const pending = readPending()
-  delete pending.todoCreates[todoId]
-  delete pending.todoWrites[todoId]
-  Object.keys(pending.powerPlanWrites).forEach((key) => {
-    if (pending.powerPlanWrites[key]?.todo_id === todoId) delete pending.powerPlanWrites[key]
-  })
-  // Always queue the delete, even for a todo that may never have reached the server: a create that
-  // was mid-flight when the todo was dropped would otherwise come back as a ghost.
-  pending.todoDeletes[todoId] = { updated_at: nowIso(), attempts: 0 }
-  writePending(pending)
-  flushPendingWrites()
-}
-
-function queuePlanWrite(plan) {
-  if (!plan?.todo_id || !plan?.action_date) return
-  const pending = readPending()
-  Object.keys(pending.powerPlanWrites).forEach((key) => {
-    const item = pending.powerPlanWrites[key]
-    if (item?.todo_id !== plan.todo_id || item?.action_date !== plan.action_date) return
-    // Keep a not-yet-synced v1.17 completion before replacing its queue entry.
-    if (Object.prototype.hasOwnProperty.call(item, 'todo_completed_at') && !pending.todoCreates[item.todo_id]) {
-      pending.todoWrites[item.todo_id] = {
-        patch: { completed_at: item.todo_completed_at || null, ...(pending.todoWrites[item.todo_id]?.patch || {}) },
-        updated_at: nowIso(),
-        attempts: 0
-      }
-    }
-    delete pending.powerPlanWrites[key]
-  })
-  pending.powerPlanWrites[`${plan.todo_id}|${plan.action_date}`] = {
-    todo_id: plan.todo_id,
-    action_date: plan.action_date,
-    status: plan.status,
-    sort_order: Number(plan.sort_order) || 0,
-    started_at: plan.started_at || null,
-    created_at: plan.created_at || nowIso(),
-    updated_at: nowIso(),
-    attempts: 0
-  }
-  writePending(pending)
-  flushPendingWrites()
-}
-
-// ---------- local todo changes ----------
-
-function createLocalTodo(title, extra = {}) {
-  const clean = String(title || '').trim().slice(0, POWER_TODO_TITLE_MAX)
-  if (!clean || !currentUser || !powerActionsAvailable) return null
-  const stamp = nowIso()
-  const todo = normalizeTodoRow({
-    id: crypto.randomUUID(),
-    title: clean,
-    sort_order: Math.max(0, ...powerTodos.map((item) => Number(item.sort_order) || 0)) + 1,
-    created_at: stamp,
-    updated_at: stamp,
-    size: extra.size || null,
-    parent_id: extra.parent_id || null
-  })
-  powerTodos = sortBySortOrder([...powerTodos, todo])
-  queueTodoCreate(todo)
-  saveSnapshot()
-  return todo
-}
-
-function patchLocalTodo(todoId, patch) {
-  let found = false
-  powerTodos = powerTodos.map((todo) => {
-    if (todo.id !== todoId) return todo
-    found = true
-    return normalizeTodoRow({ ...todo, ...patch, updated_at: nowIso() })
-  })
-  if (!found) return false
-  queueTodoPatch(todoId, patch)
-  saveSnapshot()
-  return true
-}
-
-function setLocalPowerPlan(todoId, patch) {
-  const dateKey = todayDateKey()
-  powerPlans = powerPlans.map((plan) => plan.todo_id === todoId && plan.action_date === dateKey ? { ...plan, ...patch } : plan)
-  return powerPlans.find((plan) => plan.todo_id === todoId && plan.action_date === dateKey) || null
-}
-
-// Put a todo into today's stack, or change its status for today.
-// position: 'end' (default) | 'next' (right after the current card) | 'before' (in front of the current card).
-function setTodoTodayStatus(todoId, status, options = {}) {
-  const todo = getPowerTodo(todoId)
-  if (!todo || !powerActionsAvailable) return null
-  const dateKey = ensurePowerDate()
-  const progress = currentDailyProgress()
-  const anchorKey = getCurrentStackAction(progress)?.key || null
-  const stamp = nowIso()
-  const plans = getTodayPowerPlans()
-  const nextOrder = Math.max(0, ...plans.map((plan) => Number(plan.sort_order) || 0)) + 1
-  let plan = plans.find((item) => item.todo_id === todoId) || null
-  if (!plan) {
-    plan = { id: `local-${todoId}-${dateKey}`, todo_id: todoId, action_date: dateKey, status, sort_order: nextOrder, started_at: null, created_at: stamp, updated_at: stamp }
-    powerPlans = [...powerPlans, plan]
-  } else {
-    const reopening = status === 'pending' && plan.status !== 'pending'
-    plan = setLocalPowerPlan(todoId, { status, sort_order: reopening ? nextOrder : plan.sort_order, started_at: null, updated_at: stamp })
-  }
-  queuePlanWrite(plan)
-
-  const key = todoStackKey(todoId)
-  const order = normalizeTodayStackOrder(progress).filter((item) => item !== key)
-  if (status === 'pending') {
-    const anchorIndex = anchorKey && anchorKey !== key ? order.indexOf(anchorKey) : -1
-    if (options.position === 'before' && anchorIndex >= 0) order.splice(anchorIndex, 0, key)
-    else if (options.position === 'next') order.splice(anchorIndex + 1, 0, key)
-    else order.push(key)
-    // Adding work to today reopens a wrapped-up day.
-    progress.is_complete = false
-    progress.closed_at = null
-  }
-  progress.stack_order = order
-  saveDailyProgress(progress)
-  saveSnapshot()
-  return plan
-}
-
-function removeTodayPlan(todoId) {
-  const dateKey = ensurePowerDate()
-  powerPlans = powerPlans.filter((plan) => !(plan.todo_id === todoId && plan.action_date === dateKey))
-  queuePlanWrite({ todo_id: todoId, action_date: dateKey, status: 'removed', sort_order: 0 })
-  const progress = currentDailyProgress()
-  progress.stack_order = normalizeTodayStackOrder(progress)
-  saveDailyProgress(progress)
-  saveSnapshot()
-}
-
-// Finishing a todo moves it to today's wins. Returns a function that puts everything back.
-function markTodoDone(todoId) {
-  const todo = getPowerTodo(todoId)
-  if (!todo) return null
-  const planBefore = getTodayPlanForTodo(todoId)
-  const stamp = nowIso()
-  powerTodos = powerTodos.filter((item) => item.id !== todoId)
-  powerDoneToday = [...powerDoneToday.filter((item) => item.id !== todoId), { ...todo, completed_at: stamp }]
-  queueTodoPatch(todoId, { completed_at: stamp })
-  if (planBefore) queuePlanWrite(setLocalPowerPlan(todoId, { status: 'done', updated_at: stamp }))
-  saveSnapshot()
-  return () => {
-    powerDoneToday = powerDoneToday.filter((item) => item.id !== todoId)
-    powerTodos = sortBySortOrder([...powerTodos.filter((item) => item.id !== todoId), { ...todo, completed_at: null }])
-    queueTodoPatch(todoId, { completed_at: null })
-    if (planBefore) queuePlanWrite(setLocalPowerPlan(todoId, { status: planBefore.status, sort_order: planBefore.sort_order, updated_at: nowIso() }))
-    saveSnapshot()
-  }
-}
-
-// Removes a todo for good (with a short undo window). Returns a function that restores it.
-function dropTodo(todoId) {
-  const todo = getPowerTodo(todoId)
-  if (!todo) return null
-  const plansBefore = powerPlans.filter((plan) => plan.todo_id === todoId)
-  powerTodos = powerTodos.filter((item) => item.id !== todoId)
-  powerPlans = powerPlans.filter((plan) => plan.todo_id !== todoId)
-  queueTodoDelete(todoId)
-  saveSnapshot()
-  return () => {
-    powerTodos = sortBySortOrder([...powerTodos.filter((item) => item.id !== todoId), todo])
-    queueTodoCreate(todo)
-    plansBefore.forEach((plan) => {
-      powerPlans = [...powerPlans.filter((item) => !(item.todo_id === plan.todo_id && item.action_date === plan.action_date)), plan]
-      if (plan.action_date === todayDateKey()) queuePlanWrite(plan)
-    })
-    saveSnapshot()
-  }
-}
-
-// ---------- Day Stack ----------
-// Routine steps and today's power actions share one ordered queue.
-
+// v1.17 Day Stack helpers. Routine steps and today's chosen todos share one ordered queue.
 function routineStackKey(stepId) {
   return `routine:${stepId}`
 }
@@ -1142,24 +782,10 @@ function todoStackKey(todoId) {
   return `todo:${todoId}`
 }
 
-function isLowEnergy(progress = currentDailyProgress()) {
-  return progress?.energy_mode === 'low'
-}
-
-function hasCoreSteps() {
-  return actionEngineAvailable && dailySteps.some((step) => step.is_core)
-}
-
-// A step runs today when today is one of its days. On a low-energy day only core steps run.
-// Nothing is skipped or lost: switch back and they return.
-function stepRunsToday(step, progress) {
-  if (!stepScheduledOn(step, progress?.progress_date || todayDateKey())) return false
-  return !isLowEnergy(progress) || !hasCoreSteps() || Boolean(step.is_core)
-}
-
 function normalizeTodayStackOrder(progress = currentDailyProgress()) {
   const existing = Array.isArray(progress?.stack_order) ? progress.stack_order : []
-  const routineKeys = dailySteps.map((step) => routineStackKey(step.id))
+  const todayRoutine = routineStepsForDate(todayDateKey())
+  const routineKeys = todayRoutine.map((step) => routineStackKey(step.id))
   const todoKeys = getPendingPowerPlans().map((plan) => todoStackKey(plan.todo_id))
   const valid = new Set([...routineKeys, ...todoKeys])
   const normalized = []
@@ -1178,7 +804,7 @@ function normalizeTodayStackOrder(progress = currentDailyProgress()) {
 
 function getTodayStackEntries(progress = currentDailyProgress()) {
   const order = normalizeTodayStackOrder(progress)
-  const stepById = new Map(dailySteps.map((step) => [step.id, step]))
+  const stepById = new Map(routineStepsForDate(todayDateKey()).map((step) => [step.id, step]))
   const planByTodoId = new Map(getPendingPowerPlans().map((plan) => [plan.todo_id, plan]))
   const entries = []
 
@@ -1187,7 +813,7 @@ function getTodayStackEntries(progress = currentDailyProgress()) {
     if (!id) return
     if (type === 'routine') {
       const step = stepById.get(id)
-      if (step && stepRunsToday(step, progress)) entries.push({ type: 'routine', id, key, title: step.title, step })
+      if (step) entries.push({ type: 'routine', id, key, title: step.title, step })
       return
     }
     if (type === 'todo') {
@@ -1238,47 +864,22 @@ function remainingTodayActionCount(progress = currentDailyProgress()) {
   return total
 }
 
-// Routine actions finished today (each substep counts once).
-function routineDoneCount(progress = currentDailyProgress()) {
-  const completed = new Set(progress.completed_step_ids || [])
-  return dailySteps.reduce((total, step) => {
-    const substeps = normalizeDailySubsteps(step.substeps)
-    const count = Math.max(1, substeps.length)
-    if (completed.has(step.id)) return total + count
-    if (!substeps.length) return total
-    return total + clamp(Number.parseInt(progress.substep_positions?.[step.id], 10) || 0, 0, count)
-  }, 0)
-}
-
-// The running score: it only ever goes up as you act, so it rewards doing, not planning.
-function todayScore(progress = currentDailyProgress()) {
-  const done = routineDoneCount(progress) + powerDoneToday.length
-  const remaining = remainingTodayActionCount(progress)
-  const total = done + remaining
-  return { done, remaining, total, percent: total ? Math.round((done / total) * 100) : 0 }
-}
-
 function moveTodayStackItem(key, direction) {
   const progress = currentDailyProgress()
   const order = normalizeTodayStackOrder(progress)
-  // Move among the rows you can see (what's left today), so a tap never looks like it did nothing.
-  const resolved = dailyResolvedStepIds(progress)
-  const visible = getTodayStackEntries(progress)
-    .filter((entry) => entry.type === 'todo' || !resolved.has(entry.id))
-    .map((entry) => entry.key)
-  const visibleIndex = visible.indexOf(key)
-  const targetKey = visibleIndex < 0 ? null : visible[direction === 'up' ? visibleIndex - 1 : visibleIndex + 1]
-  if (!targetKey) return
-  order.splice(order.indexOf(key), 1)
-  order.splice(order.indexOf(targetKey) + (direction === 'up' ? 0 : 1), 0, key)
+  const index = order.indexOf(key)
+  if (index < 0) return
+  const nextIndex = direction === 'up' ? index - 1 : index + 1
+  if (nextIndex < 0 || nextIndex >= order.length) return
+  ;[order[index], order[nextIndex]] = [order[nextIndex], order[index]]
   progress.stack_order = order
   progress.is_complete = false
   saveDailyProgress(progress)
-  rerenderOverview()
+  if (currentView === 'day-plan') renderDayPlannerScreen()
+  else renderDay('', { forceOverview: true })
 }
 
-// "Later today": send a card to the back of today's stack and count how often that happened.
-function deferStackKey(key) {
+function moveStackKeyToEnd(key) {
   const progress = currentDailyProgress()
   const order = normalizeTodayStackOrder(progress)
   const index = order.indexOf(key)
@@ -1286,10 +887,183 @@ function deferStackKey(key) {
   order.splice(index, 1)
   order.push(key)
   progress.stack_order = order
-  progress.defer_counts = { ...(progress.defer_counts || {}), [key]: (Number(progress.defer_counts?.[key]) || 0) + 1 }
   progress.is_complete = false
   saveDailyProgress(progress)
   return true
+}
+
+function queuePowerPlanWrite(plan, todo, todoCompletedAtMarker = 'unchanged') {
+  const pending = readPending()
+  const write = {
+    plan_id: plan.id,
+    todo_id: plan.todo_id,
+    action_date: plan.action_date,
+    status: plan.status,
+    sort_order: Number(plan.sort_order) || 0,
+    started_at: plan.started_at || null,
+    updated_at: new Date().toISOString(),
+    todo_title: todo?.title || '',
+    todo_sort_order: Number(todo?.sort_order) || 0,
+    todo_created_at: todo?.created_at || null
+  }
+  if (todoCompletedAtMarker !== 'unchanged') write.todo_completed_at = todoCompletedAtMarker
+  pending.powerPlanWrites[plan.id] = write
+  writePending(pending)
+  flushPendingWrites()
+}
+
+function clearPendingPowerWrite(planId) {
+  const pending = readPending()
+  if (pending.powerPlanWrites[planId]) {
+    delete pending.powerPlanWrites[planId]
+    writePending(pending)
+  }
+}
+
+function setLocalPowerPlan(planId, patch) {
+  powerPlans = powerPlans.map((plan) => plan.id === planId ? { ...plan, ...patch } : plan)
+  saveSnapshot()
+  return powerPlans.find((plan) => plan.id === planId) || null
+}
+
+function clearPowerUndo() {
+  if (powerUndoTimer) window.clearTimeout(powerUndoTimer)
+  powerUndoTimer = null
+  powerUndoSnapshot = null
+  powerUndoLabel = ''
+  powerUndoExpiresAt = 0
+}
+
+function rememberPowerUndo(plan, todo, label, todoCompletionChanged = false) {
+  if (powerUndoTimer) window.clearTimeout(powerUndoTimer)
+  powerUndoTimer = null
+  powerUndoSnapshot = {
+    plan: JSON.parse(JSON.stringify(plan)),
+    todo: todo ? JSON.parse(JSON.stringify(todo)) : null,
+    todoCompletionChanged,
+    dailyProgress: cloneDailyProgress()
+  }
+  powerUndoLabel = label
+  powerUndoExpiresAt = Date.now() + 5000
+}
+
+function renderPowerUndoToast() {
+  if (!powerUndoSnapshot || Date.now() >= powerUndoExpiresAt) return ''
+  return `
+    <div class="day-undo-toast" id="power-undo-toast" role="status">
+      <span>${escapeHtml(powerUndoLabel)}</span>
+      <button type="button" id="undo-power-action">Undo</button>
+    </div>`
+}
+
+function bindPowerUndoToast() {
+  const toast = document.querySelector('#power-undo-toast')
+  const undo = document.querySelector('#undo-power-action')
+  if (!toast || !undo || !powerUndoSnapshot) return
+  undo.addEventListener('click', () => {
+    const snapshot = powerUndoSnapshot
+    clearPowerUndo()
+    const restoredPlan = setLocalPowerPlan(snapshot.plan.id, snapshot.plan)
+    if (snapshot.todo && !powerTodos.some((todo) => todo.id === snapshot.todo.id)) {
+      powerTodos.push(snapshot.todo)
+      powerTodos.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0))
+    }
+    if (restoredPlan) queuePowerPlanWrite(restoredPlan, snapshot.todo, snapshot.todoCompletionChanged ? null : 'unchanged')
+    saveSnapshot()
+    if (snapshot.dailyProgress) saveDailyProgress(snapshot.dailyProgress)
+    renderDayRunner()
+  })
+  const delay = Math.max(0, powerUndoExpiresAt - Date.now())
+  powerUndoTimer = window.setTimeout(() => {
+    toast.classList.add('is-hiding')
+    window.setTimeout(() => {
+      toast.remove()
+      clearPowerUndo()
+    }, 180)
+  }, delay)
+}
+
+function completePowerAction(planId) {
+  const now = Date.now()
+  if (now - lastPowerTapAt < 900) return
+  lastPowerTapAt = now
+  const plan = powerPlans.find((item) => item.id === planId)
+  const todo = plan ? getPowerTodo(plan.todo_id) : null
+  if (!plan || !todo) return
+  rememberPowerUndo(plan, todo, 'Done', true)
+  const completedAt = new Date().toISOString()
+  const next = setLocalPowerPlan(plan.id, { status: 'done', updated_at: completedAt })
+  powerTodos = powerTodos.filter((item) => item.id !== todo.id)
+  if (next) queuePowerPlanWrite(next, todo, completedAt)
+  saveSnapshot()
+  renderDayRunner()
+}
+
+function skipPowerAction(planId) {
+  const now = Date.now()
+  if (now - lastPowerTapAt < 900) return
+  lastPowerTapAt = now
+  const plan = powerPlans.find((item) => item.id === planId)
+  const todo = plan ? getPowerTodo(plan.todo_id) : null
+  if (!plan || !todo) return
+  rememberPowerUndo(plan, todo, 'Skipped today', false)
+  const next = setLocalPowerPlan(plan.id, { status: 'skipped', updated_at: new Date().toISOString() })
+  if (next) queuePowerPlanWrite(next, todo)
+  renderDayRunner()
+}
+
+function deferPowerAction(planId) {
+  const now = Date.now()
+  if (now - lastPowerTapAt < 900) return
+  lastPowerTapAt = now
+  const plan = powerPlans.find((item) => item.id === planId)
+  const todo = plan ? getPowerTodo(plan.todo_id) : null
+  if (!plan || !todo) return
+  const key = todoStackKey(todo.id)
+  const order = normalizeTodayStackOrder(currentDailyProgress())
+  if (order.filter((item) => item !== key).length === 0) return
+  rememberPowerUndo(plan, todo, 'Moved to later', false)
+  if (!moveStackKeyToEnd(key)) return
+  const pendingPlans = getPendingPowerPlans()
+  const nextOrder = Math.max(0, ...pendingPlans.map((item) => Number(item.sort_order) || 0)) + 1
+  const next = setLocalPowerPlan(plan.id, { sort_order: nextOrder, updated_at: new Date().toISOString() })
+  if (next) queuePowerPlanWrite(next, todo)
+  renderDayRunner()
+}
+
+function routineStepForBooster(med) {
+  if (!med?.routine_step_id) return null
+  return dailySteps.find((step) => step.id === med.routine_step_id) || null
+}
+
+function boostersForRoutineStep(stepId) {
+  if (!stepId) return []
+  return dailyMeds.filter((med) => med.routine_step_id === stepId)
+}
+
+function routineStepOptionsHtml(selectedStepId = '') {
+  const selected = selectedStepId || ''
+  return [
+    `<option value="" ${selected ? '' : 'selected'}>Anytime / no activity</option>`,
+    ...dailySteps.map((step) => `<option value="${escapeHtml(step.id)}" ${step.id === selected ? 'selected' : ''}>With ${escapeHtml(step.title)}</option>`)
+  ].join('')
+}
+
+function renderRoutineBoosters(stepId) {
+  if (!dailyMedsAvailable || !dailyMedAnchorsAvailable) return ''
+  const boosters = boostersForRoutineStep(stepId)
+  if (!boosters.length) return ''
+  const taken = currentDailyMedTakenSet()
+  return `
+    <div class="day-step-boosters" aria-label="Boosters for this activity">
+      <div class="day-step-boosters-label">BOOSTERS</div>
+      <div class="day-step-boosters-list">
+        ${boosters.map((med) => {
+          const isTaken = taken.has(med.id)
+          return `<button type="button" class="day-step-booster ${isTaken ? 'is-taken' : ''}" data-daily-med-toggle="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}"><span class="day-step-booster-check" aria-hidden="true">${isTaken ? '✓' : ''}</span><span>${escapeHtml(med.name)}</span></button>`
+        }).join('')}
+      </div>
+    </div>`
 }
 
 function currentDailyMedTakenSet() {
@@ -1301,7 +1075,7 @@ function currentDailyMedTakenSet() {
   return new Set(dailyMedTakenIds)
 }
 
-function toggleDailyMed(medId, options = {}) {
+function toggleDailyMed(medId) {
   const med = dailyMeds.find((item) => item.id === medId)
   if (!med || !dailyMedsAvailable) return
   const dateKey = todayDateKey()
@@ -1322,12 +1096,14 @@ function toggleDailyMed(medId, options = {}) {
   writePending(pending)
   saveSnapshot()
   flushPendingWrites()
-  if (options.render !== false) rerenderOverview()
+  if (currentView === 'day-runner') renderDayRunner()
+  else if (currentView === 'day-booster-setup') renderBoosterSetupScreen()
+  else renderDay('', { forceOverview: true })
 }
 
 function currentDailyProgress() {
   const dateKey = todayDateKey()
-  if (!dailyProgress || dailyProgress.progress_date !== dateKey) dailyProgress = pendingDailyProgressFor(dateKey) || emptyDailyProgress(dateKey)
+  if (!dailyProgress || dailyProgress.progress_date !== dateKey) dailyProgress = emptyDailyProgress(dateKey)
   return dailyProgress
 }
 
@@ -1347,97 +1123,143 @@ function dailyResolvedStepIds(progress = currentDailyProgress()) {
   return new Set([...(progress.completed_step_ids || []), ...(progress.skipped_step_ids || [])])
 }
 
+function dailyLaterStepIds(progress = currentDailyProgress()) {
+  const resolved = dailyResolvedStepIds(progress)
+  const todayRoutine = routineStepsForDate(todayDateKey())
+  const valid = new Set(todayRoutine.map((step) => step.id))
+  return (progress.later_step_ids || []).filter((id) => valid.has(id) && !resolved.has(id))
+}
+
+function getOrderedUnresolvedDailySteps(progress = currentDailyProgress()) {
+  const resolved = dailyResolvedStepIds(progress)
+  const laterIds = dailyLaterStepIds(progress)
+  const laterSet = new Set(laterIds)
+  const todayRoutine = routineStepsForDate(todayDateKey())
+  const immediate = todayRoutine.filter((step) => !resolved.has(step.id) && !laterSet.has(step.id))
+  const byId = new Map(todayRoutine.map((step) => [step.id, step]))
+  const deferred = laterIds.map((id) => byId.get(id)).filter(Boolean)
+  return [...immediate, ...deferred]
+}
+
+function getCurrentDailyStep() {
+  return getOrderedUnresolvedDailySteps()[0] || null
+}
+
+function getDailyStepPosition(stepId) {
+  const index = routineStepsForDate(todayDateKey()).findIndex((step) => step.id === stepId)
+  return index >= 0 ? index + 1 : 1
+}
+
+function totalDailyActions() {
+  return routineStepsForDate(todayDateKey()).reduce((total, step) => total + Math.max(1, normalizeDailySubsteps(step.substeps).length), 0)
+}
+
+function completedDailyActionsCount(progress = currentDailyProgress()) {
+  const resolved = dailyResolvedStepIds(progress)
+  return routineStepsForDate(todayDateKey()).reduce((total, step) => {
+    const count = Math.max(1, normalizeDailySubsteps(step.substeps).length)
+    if (resolved.has(step.id)) return total + count
+    if (count === 1) return total
+    return total + clamp(Number.parseInt(progress.substep_positions?.[step.id], 10) || 0, 0, count)
+  }, 0)
+}
+
+function getCurrentDailyAction() {
+  const progress = currentDailyProgress()
+  const step = getCurrentDailyStep()
+  if (!step) return null
+  const substeps = normalizeDailySubsteps(step.substeps)
+  if (!substeps.length) return { step, substeps, substepIndex: -1, title: step.title, isSubstep: false }
+  const substepIndex = clamp(Number.parseInt(progress.substep_positions?.[step.id], 10) || 0, 0, Math.max(0, substeps.length - 1))
+  return { step, substeps, substepIndex, title: substeps[substepIndex], isSubstep: true }
+}
+
+function hasDailyActionHistory(progress = currentDailyProgress()) {
+  if ((progress.completed_step_ids || []).length || (progress.skipped_step_ids || []).length || (progress.later_step_ids || []).length) return true
+  return Object.values(progress.substep_positions || {}).some((value) => Number(value) > 0)
+}
+
 function cloneDailyProgress(progress = currentDailyProgress()) {
   return normalizeDailyProgressValue(JSON.parse(JSON.stringify(progress)), todayDateKey())
 }
 
-// The routine step that is your workout: START on its card goes straight into today's Gym plan.
-// Linked in Edit routine, or by its name ("Gym", "battle angel workout", "Leg training").
-// A workout has its own steps, so a step with substeps stays a normal step.
-function stepNameSaysWorkout(title) {
-  return /\b(gym|workouts?|training)\b/i.test(String(title || ''))
+function clearDailyUndo() {
+  if (dailyUndoTimer) window.clearTimeout(dailyUndoTimer)
+  dailyUndoTimer = null
+  dailyUndoSnapshot = null
+  dailyUndoLabel = ''
+  dailyUndoExpiresAt = 0
+}
+
+function rememberDailyUndo(progress, label) {
+  if (dailyUndoTimer) window.clearTimeout(dailyUndoTimer)
+  dailyUndoTimer = null
+  dailyUndoSnapshot = cloneDailyProgress(progress)
+  dailyUndoLabel = label
+  dailyUndoExpiresAt = Date.now() + 5000
+}
+
+function renderDailyUndoToast() {
+  if (!dailyUndoSnapshot || Date.now() >= dailyUndoExpiresAt) return ''
+  return `
+    <div class="day-undo-toast" id="day-undo-toast" role="status">
+      <span>${escapeHtml(dailyUndoLabel)}</span>
+      <button type="button" id="undo-daily-action">Undo</button>
+    </div>`
+}
+
+function bindDailyUndoToast() {
+  const toast = document.querySelector('#day-undo-toast')
+  const undo = document.querySelector('#undo-daily-action')
+  if (!toast || !undo || !dailyUndoSnapshot) return
+  undo.addEventListener('click', () => {
+    const snapshot = dailyUndoSnapshot
+    clearDailyUndo()
+    saveDailyProgress(snapshot)
+    renderDayRunner()
+  })
+  const delay = Math.max(0, dailyUndoExpiresAt - Date.now())
+  dailyUndoTimer = window.setTimeout(() => {
+    toast.classList.add('is-hiding')
+    window.setTimeout(() => {
+      toast.remove()
+      clearDailyUndo()
+    }, 180)
+  }, delay)
 }
 
 function isGymDailyStep(step) {
-  if (!step || normalizeDailySubsteps(step.substeps).length) return false
-  return typeof step.opens_workout === 'boolean' ? step.opens_workout : stepNameSaysWorkout(step.title)
+  const title = String(step?.title || '').trim().toLowerCase()
+  return ['gym', 'workout', 'training'].includes(title) && normalizeDailySubsteps(step?.substeps).length === 0
 }
 
-function lastTrainedDateKey(folderId) {
-  let latest = ''
-  workoutHistory.forEach((entry) => {
-    if (entry.folder_id === folderId && String(entry.workout_date) > latest) latest = String(entry.workout_date)
-  })
-  return latest || null
-}
-
-// "Decide for me": when nothing is planned, suggest the muscle you trained least recently
-// (never-trained first), so starting the gym is one tap instead of a choice.
-function suggestWorkoutFolder() {
-  const today = todayDateKey()
-  const candidates = folders.filter((folder) => (Number(folder.count) || 0) > 0 && !wasWorkoutCompleted(today, folder.id))
-  if (!candidates.length) return null
-  return candidates
-    .map((folder) => ({ folder, last: lastTrainedDateKey(folder.id) }))
-    .sort((a, b) => {
-      if (!a.last && b.last) return -1
-      if (a.last && !b.last) return 1
-      if (a.last !== b.last) return String(a.last).localeCompare(String(b.last))
-      return (Number(a.folder.sort_order) || 0) - (Number(b.folder.sort_order) || 0)
-    })[0]
-}
-
-function daysAgoLabel(dateKey) {
-  if (!dateKey) return 'not trained yet'
-  const days = Math.round((dateFromKey(todayDateKey()).getTime() - dateFromKey(dateKey).getTime()) / 86400000)
-  if (days <= 0) return 'today'
-  if (days === 1) return 'yesterday'
-  return `${days} days ago`
-}
-
-function getDailyGymState(step) {
+function getDailyGymState(step = getCurrentDailyStep()) {
   if (!isGymDailyStep(step)) return null
-  const today = todayDateKey()
-  const planned = getScheduledFolders(today)
-  const remaining = planned.filter((folder) => !wasWorkoutCompleted(today, folder.id))
-  const doneToday = getCompletedFolders(today)
-  const suggestion = planned.length ? null : suggestWorkoutFolder()
-  return { planned, remaining, doneToday, suggestion }
-}
-
-// The Gym card is satisfied by finishing every planned module, or any workout on an unplanned day.
-function gymStepSatisfied(gym) {
-  return Boolean(gym && (gym.planned.length ? gym.remaining.length === 0 : gym.doneToday.length > 0))
+  const planned = getScheduledFolders(todayDateKey())
+  const remaining = planned.filter((folder) => !wasWorkoutCompleted(todayDateKey(), folder.id))
+  return { planned, remaining }
 }
 
 function startDailySystem() {
+  const order = normalizeTodayStackOrder(currentDailyProgress())
+  if (!order.length || remainingTodayActionCount() <= 0) return
+  setActiveDayMode('daily')
   const progress = currentDailyProgress()
-  const order = normalizeTodayStackOrder(progress)
-  if (!order.length || remainingTodayActionCount(progress) <= 0) return false
   progress.stack_order = order
   if (!progress.started_at) progress.started_at = new Date().toISOString()
   progress.is_complete = false
-  progress.closed_at = null
   saveDailyProgress(progress)
   renderDayRunner()
-  return true
 }
 
-// v1.18.1 kept a "picked for you" marker per day; picking is yours now, so the markers can go.
-function clearLegacyAutoPickMarkers() {
-  try {
-    Object.keys(window.localStorage)
-      .filter((key) => key.startsWith('battle-angel-autopick-'))
-      .forEach((key) => window.localStorage.removeItem(key))
-  } catch {
-    // Nothing to tidy.
-  }
-}
-
-function advanceDailyAction(stepId, skip = false) {
+function advanceDailyAction(stepId, skip = false, options = {}) {
+  const now = Date.now()
+  if (!options.bypassGuard && now - lastDailyTapAt < 900) return false
+  if (!options.bypassGuard) lastDailyTapAt = now
   const progress = currentDailyProgress()
   const step = dailySteps.find((item) => item.id === stepId)
   if (!step) return false
+  if (options.rememberUndo !== false) rememberDailyUndo(progress, options.undoLabel || (skip ? 'Skipped' : 'Done'))
 
   const substeps = normalizeDailySubsteps(step.substeps)
   const completed = new Set(progress.completed_step_ids || [])
@@ -1460,34 +1282,63 @@ function advanceDailyAction(stepId, skip = false) {
   progress.skipped_step_ids = [...skipped]
   progress.later_step_ids = later
   progress.substep_positions = positions
+  const todayRoutine = routineStepsForDate(todayDateKey())
+  progress.is_complete = todayRoutine.length > 0 && todayRoutine.every((item) => completed.has(item.id) || skipped.has(item.id)) && getPendingPowerPlans().length === 0
   if (!progress.started_at) progress.started_at = new Date().toISOString()
-  progress.is_complete = remainingTodayActionCount(progress) === 0
   saveDailyProgress(progress)
+  if (options.render !== false) renderDayRunner()
   return true
 }
 
-// Ignores the accidental second tap of a double tap.
-function guardActionTap(ms = 800) {
+function completeDailyStep(stepId) {
+  advanceDailyAction(stepId, false, { undoLabel: 'Done' })
+}
+
+function skipDailyStep(stepId) {
+  advanceDailyAction(stepId, true, { undoLabel: 'Skipped' })
+}
+
+function deferDailyStep(stepId) {
   const now = Date.now()
-  if (now - lastDailyTapAt < ms) return false
+  if (now - lastDailyTapAt < 900) return
   lastDailyTapAt = now
-  return true
+  const step = dailySteps.find((item) => item.id === stepId)
+  if (!step) return
+  const key = routineStackKey(stepId)
+  const order = normalizeTodayStackOrder(currentDailyProgress())
+  if (order.filter((item) => item !== key).length === 0) return
+  rememberDailyUndo(currentDailyProgress(), 'Moved to later')
+  if (!moveStackKeyToEnd(key)) return
+  renderDayRunner()
 }
 
-// A finished workout checks off today's workout step, wherever you started it (the card or the Gym tab),
-// so you never do it twice. Returns true when that card was the one you were on, so the day picks up
-// right where you left it (the next planned module, or the next card).
+function triggerDailyPrimaryAction(step) {
+  const gymState = getDailyGymState(step)
+  if (gymState) {
+    const nextFolder = gymState.remaining?.[0] || null
+    if (nextFolder) openFolder(nextFolder.id, { mode: 'workout' })
+    else renderWorkouts()
+    return
+  }
+  completeDailyStep(step.id)
+}
+
+function dailyGymStepCanAutoComplete(step) {
+  const gym = getDailyGymState(step)
+  return Boolean(gym && gym.planned.length && gym.remaining.length === 0)
+}
+
 function maybeCompleteDailyGymStepAfterWorkout() {
   const progress = currentDailyProgress()
-  if (progress.closed_at) return false
-  const action = getCurrentStackAction(progress)
-  const wasCurrent = Boolean(progress.started_at && action && action.type === 'routine' && !action.isSubstep && isGymDailyStep(action.step))
-  const resolved = dailyResolvedStepIds(progress)
-  getTodayStackEntries(progress).forEach((entry) => {
-    if (entry.type !== 'routine' || resolved.has(entry.id) || !isGymDailyStep(entry.step)) return
-    if (gymStepSatisfied(getDailyGymState(entry.step))) advanceDailyAction(entry.id, false)
-  })
-  return wasCurrent
+  if (!progress.started_at || progress.is_complete) return false
+  const action = getCurrentStackAction()
+  if (!action || action.type !== 'routine' || action.isSubstep || !isGymDailyStep(action.step)) return false
+  const gym = getDailyGymState(action.step)
+  if (!gym) return false
+  const shouldComplete = gym.planned.length ? gym.remaining.length === 0 : true
+  if (!shouldComplete) return true
+  advanceDailyAction(action.step.id, false, { bypassGuard: true, rememberUndo: false, render: false })
+  return true
 }
 
 function getScheduleEntries(dateKey) {
@@ -1515,6 +1366,10 @@ function getScheduledFolders(dateKey) {
     return folders.filter((folder) => chosenIds.has(folder.id))
   }
   return getWeeklyFolders(dateKey)
+}
+
+function getScheduledFolder(dateKey) {
+  return getScheduledFolders(dateKey)[0] || null
 }
 
 function wasWorkoutCompleted(dateKey, folderId) {
@@ -1786,10 +1641,9 @@ async function downloadFullBackup() {
       if (!historyResult.error) historyRows = historyResult.data || []
     }
     if (dailySystemAvailable) {
-      // '*' so the backup always carries every column the database has (v1.18 core steps, energy mode, wrap-up...).
       const [dailyStepsResult, dailyProgressResult] = await Promise.all([
-        supabase.from('daily_steps').select('*').order('sort_order', { ascending: true }),
-        supabase.from('daily_progress').select('*').order('progress_date', { ascending: true })
+        supabase.from('daily_steps').select('id,title,note,substeps,active_days,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
+        supabase.from('daily_progress').select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,substep_positions,is_complete,started_at,updated_at').order('progress_date', { ascending: true })
       ])
       if (!dailyStepsResult.error) dailyStepBackupRows = dailyStepsResult.data || []
       if (!dailyProgressResult.error) dailyProgressBackupRows = dailyProgressResult.data || []
@@ -1797,7 +1651,7 @@ async function downloadFullBackup() {
 
     if (dailyMedsAvailable) {
       const [medsResult, medLogResult] = await Promise.all([
-        supabase.from('daily_meds').select('id,name,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
+        supabase.from('daily_meds').select(dailyMedAnchorsAvailable ? 'id,name,routine_step_id,sort_order,created_at,updated_at' : 'id,name,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
         supabase.from('daily_med_log').select('med_id,taken_date,taken_at').order('taken_date', { ascending: true })
       ])
       if (!medsResult.error) dailyMedBackupRows = medsResult.data || []
@@ -1806,8 +1660,8 @@ async function downloadFullBackup() {
 
     if (powerActionsAvailable) {
       const [powerTodosResult, powerPlanResult] = await Promise.all([
-        supabase.from('power_todos').select('*').order('created_at', { ascending: true }),
-        supabase.from('power_action_plan').select('*').order('action_date', { ascending: true }).order('sort_order', { ascending: true })
+        supabase.from('power_todos').select('id,title,sort_order,completed_at,created_at,updated_at').order('created_at', { ascending: true }),
+        supabase.from('power_action_plan').select('id,todo_id,action_date,status,sort_order,started_at,created_at,updated_at').order('action_date', { ascending: true }).order('sort_order', { ascending: true })
       ])
       if (!powerTodosResult.error) powerTodoBackupRows = powerTodosResult.data || []
       if (!powerPlanResult.error) powerPlanBackupRows = powerPlanResult.data || []
@@ -1815,7 +1669,7 @@ async function downloadFullBackup() {
 
     const manifest = {
       format: 'battle-angel-backup',
-      version: 11,
+      version: 12,
       exported_at: new Date().toISOString(),
       account_email: currentUser.email || '',
       folders: folderRows.filter((folder) => folder.name !== MOTIVATION_FOLDER_NAME),
@@ -1893,9 +1747,6 @@ async function downloadFullBackup() {
 function renderLogin(message = '') {
   document.documentElement.classList.remove('day-runner-active')
   document.body.classList.remove('day-runner-active')
-  closeSheet()
-  clearUndo()
-  hideToast(true)
   workoutMode = false
   viewVersion += 1
   currentView = 'login'
@@ -2108,40 +1959,32 @@ function saveSnapshot() {
     dailyMedsDate,
     powerTodos,
     powerPlans,
-    powerDoneToday,
     powerActionsDate
   })
-  updateAppBadge()
 }
 
 async function restoreSnapshot() {
   const snapshot = readJson(snapshotKey(), null)
   if (!snapshot || !Array.isArray(snapshot.folders)) return false
-  const today = todayDateKey()
   folders = snapshot.folders
   motivationFolder = snapshot.motivationFolder || null
   scheduleEntries = snapshot.scheduleEntries || []
   weeklyPlanEntries = snapshot.weeklyPlanEntries || []
   workoutHistory = mergePendingCompletions(snapshot.workoutHistory || [])
-  dailySteps = Array.isArray(snapshot.dailySteps) ? snapshot.dailySteps.map(normalizeDailyStepRow) : []
-  dailyProgress = normalizeDailyProgressValue(snapshot.dailyProgress, today)
-  const pendingDaily = pendingDailyProgressFor(today)
+  dailySteps = Array.isArray(snapshot.dailySteps) ? snapshot.dailySteps.map((step) => ({ ...step, substeps: normalizeDailySubsteps(step.substeps), active_days: normalizeRoutineDays(step.active_days) })) : []
+  dailyProgress = normalizeDailyProgressValue(snapshot.dailyProgress, todayDateKey())
+  const pendingDaily = pendingDailyProgressFor(todayDateKey())
   if (pendingDaily) dailyProgress = pendingDaily
   dailyMeds = Array.isArray(snapshot.dailyMeds) ? snapshot.dailyMeds : []
-  dailyMedsDate = today
-  dailyMedTakenIds = snapshot.dailyMedsDate === today && Array.isArray(snapshot.dailyMedTakenIds) ? snapshot.dailyMedTakenIds : []
-  dailyMedTakenIds = mergeDailyMedTakenIds(dailyMedTakenIds, today)
-  const sameDay = snapshot.powerActionsDate === today
-  powerActionsDate = today
-  const merged = applyPendingPowerState(
-    Array.isArray(snapshot.powerTodos) ? snapshot.powerTodos : [],
-    sameDay && Array.isArray(snapshot.powerPlans) ? snapshot.powerPlans : [],
-    sameDay && Array.isArray(snapshot.powerDoneToday) ? snapshot.powerDoneToday : [],
-    today
-  )
-  powerTodos = merged.todos
-  powerPlans = merged.plans
-  powerDoneToday = merged.doneToday
+  dailyMedsDate = snapshot.dailyMedsDate === todayDateKey() ? snapshot.dailyMedsDate : todayDateKey()
+  dailyMedTakenIds = snapshot.dailyMedsDate === todayDateKey() && Array.isArray(snapshot.dailyMedTakenIds) ? snapshot.dailyMedTakenIds : []
+  dailyMedTakenIds = mergeDailyMedTakenIds(dailyMedTakenIds, todayDateKey())
+  powerTodos = Array.isArray(snapshot.powerTodos) ? snapshot.powerTodos : []
+  powerActionsDate = snapshot.powerActionsDate === todayDateKey() ? snapshot.powerActionsDate : todayDateKey()
+  powerPlans = snapshot.powerActionsDate === todayDateKey() && Array.isArray(snapshot.powerPlans) ? snapshot.powerPlans : []
+  const pendingPowerMerged = applyPendingPowerWrites(powerTodos, powerPlans, powerActionsDate)
+  powerTodos = pendingPowerMerged.todos
+  powerPlans = pendingPowerMerged.plans
   motivationVideos = await hydrateMotivationRows(snapshot.motivationRows || [])
   return true
 }
@@ -2233,37 +2076,21 @@ async function hydrateVideoRows(rows, objectUrlBucket = offlineObjectUrls, objec
   })
 }
 
-function pendingBucket(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-}
-
 function readPending() {
   const pending = readJson(pendingKey(), {})
   return {
-    weights: pendingBucket(pending.weights),
+    weights: pending.weights && typeof pending.weights === 'object' ? pending.weights : {},
     completions: Array.isArray(pending.completions) ? pending.completions : [],
     uncompletions: Array.isArray(pending.uncompletions) ? pending.uncompletions : [],
-    weightLogs: pendingBucket(pending.weightLogs),
+    weightLogs: pending.weightLogs && typeof pending.weightLogs === 'object' ? pending.weightLogs : {},
     dailyProgress: pending.dailyProgress && typeof pending.dailyProgress === 'object' ? pending.dailyProgress : null,
-    medToggles: pendingBucket(pending.medToggles),
-    powerPlanWrites: pendingBucket(pending.powerPlanWrites),
-    todoCreates: pendingBucket(pending.todoCreates),
-    todoWrites: pendingBucket(pending.todoWrites),
-    todoDeletes: pendingBucket(pending.todoDeletes)
+    medToggles: pending.medToggles && typeof pending.medToggles === 'object' ? pending.medToggles : {},
+    powerPlanWrites: pending.powerPlanWrites && typeof pending.powerPlanWrites === 'object' ? pending.powerPlanWrites : {}
   }
 }
 
 function writePending(pending) {
   writeJson(pendingKey(), pending)
-}
-
-function hasPendingWrites(pending = readPending()) {
-  return Boolean(
-    Object.keys(pending.weights).length || pending.completions.length || pending.uncompletions.length ||
-    Object.keys(pending.weightLogs).length || pending.dailyProgress || Object.keys(pending.medToggles).length ||
-    Object.keys(pending.powerPlanWrites).length || Object.keys(pending.todoCreates).length ||
-    Object.keys(pending.todoWrites).length || Object.keys(pending.todoDeletes).length
-  )
 }
 
 function mergePendingCompletions(history) {
@@ -2279,295 +2106,140 @@ function mergePendingCompletions(history) {
   return merged
 }
 
-const TODO_V118_FIELDS = ['size', 'snoozed_until', 'snooze_count', 'parent_id']
-const PROGRESS_V118_FIELDS = ['energy_mode', 'defer_counts', 'closed_at']
-
-function withoutFields(row, fields) {
-  const next = { ...row }
-  fields.forEach((field) => delete next[field])
-  return next
-}
-
-// No signal: stop and retry later. Any other failure: retry a few times, then drop that one write,
-// so a single impossible row can never block everything queued behind it.
-function noteQueueFailure(bucket, key, error) {
-  if (isNetworkError(error)) return 'stop'
-  console.warn(`battle angel sync (${bucket}) failed:`, error)
-  const pending = readPending()
-  const item = pending[bucket]?.[key]
-  if (item) {
-    item.attempts = (Number(item.attempts) || 0) + 1
-    if (item.attempts >= 5) delete pending[bucket][key]
-    writePending(pending)
-  }
-  return 'continue'
-}
-
-function removeQueued(bucket, key, stamp) {
-  const next = readPending()
-  if (next[bucket]?.[key] && next[bucket][key].updated_at === stamp) {
-    delete next[bucket][key]
-    writePending(next)
-  }
-}
-
-async function upsertTodoRow(row) {
-  let sendV118 = actionEngineAvailable
-  let result = await supabase.from('power_todos').upsert(sendV118 ? row : withoutFields(row, TODO_V118_FIELDS), { onConflict: 'id' })
-  if (result.error && sendV118 && isMissingV118ColumnError(result.error)) {
-    actionEngineAvailable = false
-    sendV118 = false
-    result = await supabase.from('power_todos').upsert(withoutFields(row, TODO_V118_FIELDS), { onConflict: 'id' })
-  }
-  // A first step whose parent never reached the server: keep the step, lose only the link.
-  // (Foreign key 23503, or the v1.18 policy that only allows linking to your own todos, 42501.)
-  if (result.error && sendV118 && row.parent_id && ['23503', '42501'].includes(String(result.error.code || ''))) {
-    result = await supabase.from('power_todos').upsert({ ...row, parent_id: null }, { onConflict: 'id' })
-  }
-  return result
-}
-
-async function flushTodoQueue() {
-  // 1. Todos created on this phone (inserted first: plans and edits depend on them).
-  for (const [id, item] of Object.entries(readPending().todoCreates)) {
-    const row = {
-      id,
-      user_id: currentUser.id,
-      title: String(item.title || '').slice(0, POWER_TODO_TITLE_MAX) || 'Todo',
-      sort_order: Number(item.sort_order) || 0,
-      completed_at: item.completed_at || null,
-      created_at: item.created_at || item.updated_at || nowIso(),
-      updated_at: item.updated_at || nowIso(),
-      size: item.size === 'quick' || item.size === 'big' ? item.size : null,
-      snoozed_until: item.snoozed_until || null,
-      snooze_count: Math.max(0, Number(item.snooze_count) || 0),
-      parent_id: item.parent_id || null
-    }
-    const { error } = await upsertTodoRow(row)
-    if (error) {
-      if (isMissingPowerActionsError(error)) {
-        powerActionsAvailable = false
-        return
-      }
-      if (noteQueueFailure('todoCreates', id, error) === 'stop') return
-      continue
-    }
-    removeQueued('todoCreates', id, item.updated_at)
-  }
-
-  // 2. Edits (title, size, snooze, completion).
-  for (const [id, item] of Object.entries(readPending().todoWrites)) {
-    const sendV118 = actionEngineAvailable
-    let patch = { ...(item.patch || {}) }
-    if (!sendV118) patch = withoutFields(patch, TODO_V118_FIELDS)
-    let error = null
-    if (Object.keys(patch).length) {
-      ;({ error } = await supabase.from('power_todos').update({ ...patch, updated_at: item.updated_at || nowIso() }).eq('id', id))
-      if (error && sendV118 && isMissingV118ColumnError(error)) {
-        actionEngineAvailable = false
-        const legacyPatch = withoutFields(patch, TODO_V118_FIELDS)
-        error = Object.keys(legacyPatch).length
-          ? (await supabase.from('power_todos').update({ ...legacyPatch, updated_at: item.updated_at || nowIso() }).eq('id', id)).error
-          : null
-      }
-    }
-    if (error) {
-      if (isMissingPowerActionsError(error)) {
-        powerActionsAvailable = false
-        return
-      }
-      if (noteQueueFailure('todoWrites', id, error) === 'stop') return
-      continue
-    }
-    removeQueued('todoWrites', id, item.updated_at)
-  }
-
-  // 3. Today's choices, matched by todo + date (works for rows made offline or on another device).
-  for (const [key, item] of Object.entries(readPending().powerPlanWrites)) {
-    if (!item?.todo_id || !item?.action_date) {
-      removeQueued('powerPlanWrites', key, item?.updated_at)
-      continue
-    }
-    let error = null
-    if (item.status === 'removed') {
-      ;({ error } = await supabase.from('power_action_plan').delete().eq('todo_id', item.todo_id).eq('action_date', item.action_date))
-    } else {
-      ;({ error } = await supabase.from('power_action_plan').upsert({
-        user_id: currentUser.id,
-        todo_id: item.todo_id,
-        action_date: item.action_date,
-        status: ['pending', 'done', 'skipped'].includes(item.status) ? item.status : 'pending',
-        sort_order: Number(item.sort_order) || 0,
-        started_at: item.started_at || null,
-        updated_at: item.updated_at || nowIso()
-      }, { onConflict: 'user_id,todo_id,action_date' }))
-    }
-    // v1.17 queue items also carried the todo completion.
-    if (!error && Object.prototype.hasOwnProperty.call(item, 'todo_completed_at')) {
-      ;({ error } = await supabase.from('power_todos').update({ completed_at: item.todo_completed_at || null, updated_at: item.updated_at || nowIso() }).eq('id', item.todo_id))
-    }
-    if (error) {
-      if (isMissingPowerActionsError(error)) {
-        powerActionsAvailable = false
-        return
-      }
-      if (noteQueueFailure('powerPlanWrites', key, error) === 'stop') return
-      continue
-    }
-    removeQueued('powerPlanWrites', key, item.updated_at)
-  }
-
-  // 4. Dropped todos (their plan rows go with them).
-  for (const [id, item] of Object.entries(readPending().todoDeletes)) {
-    const { error } = await supabase.from('power_todos').delete().eq('id', id)
-    if (error) {
-      if (isMissingPowerActionsError(error)) {
-        powerActionsAvailable = false
-        return
-      }
-      if (noteQueueFailure('todoDeletes', id, error) === 'stop') return
-      continue
-    }
-    removeQueued('todoDeletes', id, item.updated_at)
-  }
-}
-
-async function flushDailyProgressQueue() {
-  const dailyItem = readPending().dailyProgress
-  if (!dailyItem || !dailySystemAvailable) return
-  const payload = {
-    user_id: currentUser.id,
-    progress_date: dailyItem.progress_date,
-    completed_step_ids: dailyItem.completed_step_ids || [],
-    skipped_step_ids: dailyItem.skipped_step_ids || [],
-    later_step_ids: dailyItem.later_step_ids || [],
-    stack_order: dailyItem.stack_order || [],
-    substep_positions: dailyItem.substep_positions || {},
-    is_complete: Boolean(dailyItem.is_complete),
-    started_at: dailyItem.started_at || null,
-    updated_at: dailyItem.updated_at || new Date().toISOString(),
-    energy_mode: dailyItem.energy_mode === 'low' ? 'low' : 'normal',
-    defer_counts: normalizeCountMap(dailyItem.defer_counts),
-    closed_at: dailyItem.closed_at || null
-  }
-  const upsert = (row) => supabase.from('daily_progress').upsert(row, { onConflict: 'user_id,progress_date' })
-  const sendV118 = actionEngineAvailable
-  let { error } = await upsert(sendV118 ? payload : withoutFields(payload, PROGRESS_V118_FIELDS))
-  if (error && sendV118 && isMissingV118ColumnError(error)) {
-    actionEngineAvailable = false
-    ;({ error } = await upsert(withoutFields(payload, PROGRESS_V118_FIELDS)))
-  }
-  if (error) {
-    if (isMissingDailySystemError(error)) dailySystemAvailable = false
-    return
-  }
-  const next = readPending()
-  if (next.dailyProgress?.updated_at === dailyItem.updated_at) next.dailyProgress = null
-  writePending(next)
-}
-
 let flushingPending = false
-let flushRequested = false
 async function flushPendingWrites() {
-  if (!currentUser || navigator.onLine === false) return
-  if (flushingPending) {
-    flushRequested = true
-    return
-  }
-  if (!hasPendingWrites()) return
+  if (!currentUser || flushingPending || navigator.onLine === false) return
+  const pending = readPending()
+  if (!Object.keys(pending.weights).length && !pending.completions.length && !pending.uncompletions.length && !Object.keys(pending.weightLogs).length && !pending.dailyProgress && !Object.keys(pending.medToggles).length && !Object.keys(pending.powerPlanWrites).length) return
   flushingPending = true
   try {
-    do {
-      flushRequested = false
-      await flushPendingOnce()
-    } while (flushRequested && currentUser && navigator.onLine !== false)
-  } catch (error) {
-    console.warn('battle angel sync paused:', error)
-  } finally {
-    flushingPending = false
-  }
-}
-
-async function flushPendingOnce() {
-  const pending = readPending()
-  if (!hasPendingWrites(pending)) return
-  for (const [groupId, value] of Object.entries(pending.weights)) {
-    const { error } = await supabase.from('exercises').update({ last_weight: value }).eq('exercise_group', groupId)
-    if (!error) {
-      const next = readPending()
-      if (next.weights[groupId] === value) delete next.weights[groupId]
-      writePending(next)
-    }
-  }
-  for (const item of pending.completions) {
-    const stillPending = readPending().completions.some((entry) => entry.workout_date === item.workout_date && entry.folder_id === item.folder_id)
-    if (!stillPending) continue
-    const { error } = await supabase.from('workout_history').upsert({
-      user_id: currentUser.id,
-      workout_date: item.workout_date,
-      folder_id: item.folder_id,
-      completed_at: item.completed_at
-    }, { onConflict: 'user_id,workout_date,folder_id' })
-    if (!error) {
-      const next = readPending()
-      next.completions = next.completions.filter((entry) => !(entry.workout_date === item.workout_date && entry.folder_id === item.folder_id))
-      writePending(next)
-    }
-  }
-  for (const item of pending.uncompletions) {
-    const stillPending = readPending().uncompletions.some((entry) => entry.workout_date === item.workout_date && entry.folder_id === item.folder_id)
-    if (!stillPending) continue
-    const { error } = await supabase.from('workout_history').delete().eq('workout_date', item.workout_date).eq('folder_id', item.folder_id)
-    if (!error) {
-      const next = readPending()
-      next.uncompletions = next.uncompletions.filter((entry) => !(entry.workout_date === item.workout_date && entry.folder_id === item.folder_id))
-      writePending(next)
-    }
-  }
-  await flushDailyProgressQueue()
-  if (dailyMedsAvailable) {
-    for (const [key, item] of Object.entries(readPending().medToggles)) {
-      let error = null
-      if (item.is_taken) {
-        ;({ error } = await supabase.from('daily_med_log').upsert({
-          user_id: currentUser.id,
-          med_id: item.med_id,
-          taken_date: item.taken_date,
-          taken_at: item.updated_at || new Date().toISOString()
-        }, { onConflict: 'user_id,med_id,taken_date' }))
-      } else {
-        ;({ error } = await supabase.from('daily_med_log').delete().eq('med_id', item.med_id).eq('taken_date', item.taken_date))
-      }
-      if (error) {
-        if (isMissingDailyMedsError(error)) dailyMedsAvailable = false
-        break
-      }
-      const next = readPending()
-      if (next.medToggles[key]?.updated_at === item.updated_at) delete next.medToggles[key]
-      writePending(next)
-    }
-  }
-  if (powerActionsAvailable) await flushTodoQueue()
-  if (weightLogAvailable) {
-    for (const [key, item] of Object.entries(pending.weightLogs)) {
-      const { error } = await supabase.from('exercise_weight_log').upsert({
-        user_id: currentUser.id,
-        folder_id: item.folder_id,
-        exercise_group: item.exercise_group,
-        workout_date: item.workout_date,
-        weight: item.weight,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'user_id,exercise_group,workout_date' })
-      if (error && isMissingWeightLogError(error)) {
-        weightLogAvailable = false
-        break
-      }
+    for (const [groupId, value] of Object.entries(pending.weights)) {
+      const { error } = await supabase.from('exercises').update({ last_weight: value }).eq('exercise_group', groupId)
       if (!error) {
         const next = readPending()
-        if (next.weightLogs[key]?.weight === item.weight) delete next.weightLogs[key]
+        if (next.weights[groupId] === value) delete next.weights[groupId]
         writePending(next)
       }
     }
+    for (const item of pending.completions) {
+      const stillPending = readPending().completions.some((entry) => entry.workout_date === item.workout_date && entry.folder_id === item.folder_id)
+      if (!stillPending) continue
+      const { error } = await supabase.from('workout_history').upsert({
+        user_id: currentUser.id,
+        workout_date: item.workout_date,
+        folder_id: item.folder_id,
+        completed_at: item.completed_at
+      }, { onConflict: 'user_id,workout_date,folder_id' })
+      if (!error) {
+        const next = readPending()
+        next.completions = next.completions.filter((entry) => !(entry.workout_date === item.workout_date && entry.folder_id === item.folder_id))
+        writePending(next)
+      }
+    }
+    for (const item of pending.uncompletions) {
+      const stillPending = readPending().uncompletions.some((entry) => entry.workout_date === item.workout_date && entry.folder_id === item.folder_id)
+      if (!stillPending) continue
+      const { error } = await supabase.from('workout_history').delete().eq('workout_date', item.workout_date).eq('folder_id', item.folder_id)
+      if (!error) {
+        const next = readPending()
+        next.uncompletions = next.uncompletions.filter((entry) => !(entry.workout_date === item.workout_date && entry.folder_id === item.folder_id))
+        writePending(next)
+      }
+    }
+    const dailyItem = readPending().dailyProgress
+    if (dailyItem && dailySystemAvailable) {
+      const { error } = await supabase.from('daily_progress').upsert({
+        user_id: currentUser.id,
+        progress_date: dailyItem.progress_date,
+        completed_step_ids: dailyItem.completed_step_ids || [],
+        skipped_step_ids: dailyItem.skipped_step_ids || [],
+        later_step_ids: dailyItem.later_step_ids || [],
+        stack_order: dailyItem.stack_order || [],
+        substep_positions: dailyItem.substep_positions || {},
+        is_complete: Boolean(dailyItem.is_complete),
+        started_at: dailyItem.started_at || null,
+        updated_at: dailyItem.updated_at || new Date().toISOString()
+      }, { onConflict: 'user_id,progress_date' })
+      if (error) {
+        if (isMissingDailySystemError(error)) dailySystemAvailable = false
+      } else {
+        const next = readPending()
+        if (next.dailyProgress?.updated_at === dailyItem.updated_at) next.dailyProgress = null
+        writePending(next)
+      }
+    }
+    if (dailyMedsAvailable) {
+      for (const [key, item] of Object.entries(readPending().medToggles)) {
+        let error = null
+        if (item.is_taken) {
+          ;({ error } = await supabase.from('daily_med_log').upsert({
+            user_id: currentUser.id,
+            med_id: item.med_id,
+            taken_date: item.taken_date,
+            taken_at: item.updated_at || new Date().toISOString()
+          }, { onConflict: 'user_id,med_id,taken_date' }))
+        } else {
+          ;({ error } = await supabase.from('daily_med_log').delete().eq('med_id', item.med_id).eq('taken_date', item.taken_date))
+        }
+        if (error) {
+          if (isMissingDailyMedsError(error)) dailyMedsAvailable = false
+          break
+        }
+        const next = readPending()
+        if (next.medToggles[key]?.updated_at === item.updated_at) delete next.medToggles[key]
+        writePending(next)
+      }
+    }
+    if (powerActionsAvailable) {
+      for (const [key, item] of Object.entries(readPending().powerPlanWrites)) {
+        const { error: planError } = await supabase.from('power_action_plan').update({
+          status: item.status,
+          sort_order: item.sort_order,
+          started_at: item.started_at || null,
+          updated_at: item.updated_at || new Date().toISOString()
+        }).eq('id', item.plan_id)
+        if (planError) {
+          if (isMissingPowerActionsError(planError)) powerActionsAvailable = false
+          break
+        }
+        if (Object.prototype.hasOwnProperty.call(item, 'todo_completed_at')) {
+          const { error: todoError } = await supabase.from('power_todos').update({
+            completed_at: item.todo_completed_at,
+            updated_at: item.updated_at || new Date().toISOString()
+          }).eq('id', item.todo_id)
+          if (todoError) {
+            if (isMissingPowerActionsError(todoError)) powerActionsAvailable = false
+            break
+          }
+        }
+        const next = readPending()
+        if (next.powerPlanWrites[key]?.updated_at === item.updated_at) delete next.powerPlanWrites[key]
+        writePending(next)
+      }
+    }
+    if (weightLogAvailable) {
+      for (const [key, item] of Object.entries(pending.weightLogs)) {
+        const { error } = await supabase.from('exercise_weight_log').upsert({
+          user_id: currentUser.id,
+          folder_id: item.folder_id,
+          exercise_group: item.exercise_group,
+          workout_date: item.workout_date,
+          weight: item.weight,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id,exercise_group,workout_date' })
+        if (error && isMissingWeightLogError(error)) {
+          weightLogAvailable = false
+          break
+        }
+        if (!error) {
+          const next = readPending()
+          if (next.weightLogs[key]?.weight === item.weight) delete next.weightLogs[key]
+          writePending(next)
+        }
+      }
+    }
+  } finally {
+    flushingPending = false
   }
 }
 
@@ -2578,22 +2250,14 @@ function dataSignature() {
     weeklyPlanEntries,
     workoutHistory.map((entry) => [entry.workout_date, entry.folder_id]),
     motivationVideos.map((video) => video.id),
-    dailySteps.map((step) => [step.id, step.title, step.note, step.substeps, step.sort_order, Boolean(step.is_core), step.weekdays, step.opens_workout]),
+    dailySteps.map((step) => [step.id, step.title, step.note, step.substeps, step.active_days, step.sort_order]),
     dailyProgress,
-    dailyMeds.map((med) => [med.id, med.name, med.sort_order]),
+    dailyMeds.map((med) => [med.id, med.name, med.routine_step_id, med.sort_order]),
     dailyMedsDate,
     dailyMedTakenIds,
-    powerTodos.map((todo) => [todo.id, todo.title, todo.sort_order, todo.size, todo.snoozed_until, todo.snooze_count]),
-    powerPlans.map((plan) => [plan.todo_id, plan.action_date, plan.status, plan.sort_order]),
-    powerDoneToday.map((todo) => todo.id)
+    powerTodos.map((todo) => [todo.id, todo.title, todo.sort_order]),
+    powerPlans.map((plan) => [plan.id, plan.todo_id, plan.action_date, plan.status, plan.sort_order, plan.started_at])
   ])
-}
-
-// The runner only redraws when the card itself changed (for example, finished on another device),
-// so a background sync never yanks the screen out from under you.
-function refreshRunnerIfChanged() {
-  if (currentView !== 'day-runner' || document.querySelector('.sheet-backdrop')) return
-  if (runnerKeyFor(getCurrentStackAction()) !== lastRunnerKey) renderDayRunner()
 }
 
 // Re-render the current tab with fresh data, but only if the user hasn't moved on and something actually changed.
@@ -2610,8 +2274,6 @@ async function refreshInBackground() {
   }
   if (viewVersion !== version || (dataSignature() === before && !wasCached)) return
   if (currentView === 'day') renderDay()
-  else if (currentView === 'day-runner') refreshRunnerIfChanged()
-  else if (currentView === 'day-prompt') refreshPowerPromptIfIdle()
   else if (currentView === 'home') renderHome()
   else if (currentView === 'workouts') renderWorkouts()
 }
@@ -2888,10 +2550,9 @@ function returnFromRestScreen() {
 
 function renderBottomNav(activeTab) {
   const tabs = [
-    // The day is a gift, the body is forged, and the calendar is where you write your destiny.
-    ['day', 'Gifts'],
-    ['gym', 'Forge'],
-    ['plan', 'Destiny'],
+    ['day', 'Day'],
+    ['gym', 'Gym'],
+    ['plan', 'Plan'],
     ['more', 'More']
   ]
   return `<nav class="bottom-nav" aria-label="Main navigation">${tabs.map(([id, label]) => `
@@ -2921,17 +2582,11 @@ function renderShell(content, options = {}) {
   const showHeader = options.showHeader !== false
   viewVersion += 1
   currentView = options.view || options.navTab || ''
-  closeSheet()
-  // Undo toasts belong to the Day tab; leaving it ends the undo window.
-  if (!DAY_VIEWS.includes(currentView)) {
-    clearUndo()
-    hideToast(true)
-  }
-  const lockDayRunner = currentView === 'day-runner' || currentView === 'triage'
+  const lockDayRunner = currentView === 'day-runner'
   document.documentElement.classList.toggle('day-runner-active', lockDayRunner)
   document.body.classList.toggle('day-runner-active', lockDayRunner)
   app.innerHTML = `
-    <main class="shell ${workoutMode ? 'workout-shell' : ''} ${options.navTab ? 'has-bottom-nav' : ''} ${showHeader ? '' : 'shell-no-header'} ${options.shellClass || ''}">
+    <main class="shell ${workoutMode ? 'workout-shell' : ''} ${options.navTab ? 'has-bottom-nav' : ''} ${showHeader ? '' : 'shell-no-header'}">
       ${showHeader ? `<header class="topbar">
         <div class="topbar-title">
           <div class="brand-name brand-name-compact">battle angel</div>
@@ -3005,560 +2660,78 @@ function renderMotivationLibrary() {
     </details>`
 }
 
-// ---------- small helpers for the Day tab ----------
-
-function plural(count, word, pluralWord = `${word}s`) {
-  return `${count} ${count === 1 ? word : pluralWord}`
-}
-
-function shorten(text, max = 34) {
-  const value = String(text || '')
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value
-}
-
-function ageInDays(iso) {
-  const created = Date.parse(iso || '')
-  if (!created) return 0
-  const createdDay = dateFromKey(formatLocalDateKey(new Date(created))).getTime()
-  return Math.max(0, Math.round((dateFromKey(todayDateKey()).getTime() - createdDay) / 86400000))
-}
-
-// Inbox lists run newest first. powerTodos itself stays oldest first (new ones are appended).
-function newestFirst(todos) {
-  return [...todos].reverse()
-}
-
-function ageShortLabel(iso) {
-  const days = ageInDays(iso)
-  if (days <= 0) return 'new'
-  if (days < 14) return `${days}d`
-  return `${Math.floor(days / 7)}w`
-}
-
-function ageLongLabel(iso) {
-  const days = ageInDays(iso)
-  if (days <= 0) return 'added today'
-  if (days === 1) return 'since yesterday'
-  return `waiting ${days} days`
-}
-
-function returnDayLabel(dateKey) {
-  const days = Math.round((dateFromKey(dateKey).getTime() - dateFromKey(todayDateKey()).getTime()) / 86400000)
-  if (days <= 1) return 'tomorrow'
-  if (days < 7) return new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(dateFromKey(dateKey))
-  return formatPlanDate(dateKey, { short: true })
-}
-
-function prefersReducedMotion() {
-  try {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  } catch {
-    return false
-  }
-}
-
-// ---------- toasts + undo ----------
-// Undo instead of "Are you sure?": acting stays one tap, and a slip costs one more tap, not a lost item.
-
-function toastHost() {
-  let host = document.querySelector('#toast-host')
-  if (!host) {
-    host = document.createElement('div')
-    host.id = 'toast-host'
-    host.setAttribute('aria-live', 'polite')
-    document.body.appendChild(host)
-  }
-  return host
-}
-
-function showToast(message, options = {}) {
-  const host = toastHost()
-  if (toastTimer) window.clearTimeout(toastTimer)
-  host.innerHTML = `
-    <div class="day-undo-toast" role="status">
-      <span>${escapeHtml(message)}</span>
-      ${options.actionLabel ? `<button type="button">${escapeHtml(options.actionLabel)}</button>` : ''}
-    </div>`
-  host.querySelector('button')?.addEventListener('click', () => {
-    hideToast(true)
-    options.onAction?.()
-  })
-  toastTimer = window.setTimeout(() => hideToast(), options.ms || (options.actionLabel ? UNDO_MS : 2600))
-}
-
-function hideToast(immediate = false) {
-  if (toastTimer) window.clearTimeout(toastTimer)
-  toastTimer = null
-  const host = document.querySelector('#toast-host')
-  const toast = host?.firstElementChild
-  if (!toast) return
-  if (immediate) {
-    host.innerHTML = ''
-    return
-  }
-  toast.classList.add('is-hiding')
-  window.setTimeout(() => {
-    if (host.firstElementChild === toast) host.innerHTML = ''
-  }, 180)
-}
-
-function rememberUndo(label, restore, rerender) {
-  const state = { restore, rerender, expiresAt: Date.now() + UNDO_MS }
-  undoState = state
-  showToast(label, {
-    actionLabel: 'Undo',
-    onAction: () => {
-      if (undoState !== state) return
-      undoState = null
-      state.restore()
-      state.rerender?.()
-    }
-  })
-}
-
-function clearUndo() {
-  undoState = null
-}
-
-// ---------- bottom sheets ----------
-
-function openSheet(innerHtml, options = {}) {
-  closeSheet()
-  const backdrop = document.createElement('div')
-  backdrop.className = 'sheet-backdrop'
-  backdrop.innerHTML = `<div class="sheet ${options.sheetClass || ''}" role="dialog" aria-modal="true" aria-label="${escapeHtml(options.label || 'Options')}">${innerHtml}</div>`
-  document.body.appendChild(backdrop)
-  sheetOnDismiss = options.onDismiss || null
-  backdrop.addEventListener('click', (event) => {
-    if (event.target.closest('[data-sheet-close]')) {
-      dismissSheet()
-      return
-    }
-    // A stray tap outside never throws away something you were typing.
-    if (event.target === backdrop && ![...backdrop.querySelectorAll('input')].some((input) => input.value.trim())) dismissSheet()
-  })
-  return backdrop
-}
-
-// You closed it (× or a tap outside): run the sheet's follow-up, like putting the runner on the next card.
-function dismissSheet() {
-  const onDismiss = sheetOnDismiss
-  closeSheet()
-  onDismiss?.()
-}
-
-function closeSheet() {
-  sheetOnDismiss = null
-  document.querySelectorAll('.sheet-backdrop').forEach((element) => element.remove())
-}
-
-// ---------- re-render helpers ----------
-
-function currentOpenDetailIds() {
-  return [...document.querySelectorAll('#main-content details[open][id]')].map((element) => element.id)
-}
-
-// Redraw the Day screen you're on with fresh data, keeping your place: scroll position and open items.
-function rerenderDayView(extra = {}) {
-  const openIds = extra.openIds || currentOpenDetailIds()
-  const y = window.scrollY
-  if (currentView === 'day-routine') renderRoutineEditor()
-  else if (currentView === 'day-boosters') renderBoostersEditor()
-  else if (currentView === 'day-prompt') renderPowerPrompt()
-  else renderDay('', { forceOverview: true, ...extra })
-  openIds.forEach((id) => document.getElementById(id)?.setAttribute('open', ''))
-  window.scrollTo(0, y)
-}
-
-function rerenderOverview(extra = {}) {
-  if (currentView === 'day-routine' || currentView === 'day-boosters' || currentView === 'day-prompt') {
-    rerenderDayView(extra)
-    return
-  }
-  const y = window.scrollY
-  renderDay('', { forceOverview: true, ...extra })
-  window.scrollTo(0, y)
-}
-
-function rerenderCurrentDayView() {
-  if (currentView === 'triage') renderTriage()
-  else if (currentView === 'day-runner') renderDayRunner()
-  else if (DAY_VIEWS.includes(currentView)) rerenderDayView()
-}
-
-// ---------- feedback: sound, haptics, celebration ----------
-
-function doneSoundOn() {
-  try {
-    return window.localStorage.getItem(DONE_SOUND_KEY) !== 'off'
-  } catch {
-    return true
-  }
-}
-
-function playTones(notes, volume = 0.1) {
-  try {
-    if (!audioCtx) return
-    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
-    const start = audioCtx.currentTime + 0.01
-    notes.forEach(([offset, frequency, duration]) => {
-      const oscillator = audioCtx.createOscillator()
-      const gain = audioCtx.createGain()
-      oscillator.type = 'sine'
-      oscillator.connect(gain)
-      gain.connect(audioCtx.destination)
-      oscillator.frequency.value = frequency
-      gain.gain.setValueAtTime(0.0001, start + offset)
-      gain.gain.exponentialRampToValueAtTime(volume, start + offset + 0.012)
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + duration)
-      oscillator.start(start + offset)
-      oscillator.stop(start + offset + duration + 0.03)
-    })
-  } catch {
-    // Feedback is a bonus; the action already counted.
-  }
-}
-
-function playDoneTick() {
-  if (doneSoundOn()) playTones([[0, 880, 0.08], [0.07, 1320, 0.12]], 0.08)
-}
-
-function playDayCompleteChime() {
-  if (doneSoundOn()) playTones([[0, 523, 0.16], [0.13, 659, 0.16], [0.26, 784, 0.16], [0.39, 1047, 0.32]], 0.1)
-}
-
-function playSprintChime() {
-  playTones([[0, 660, 0.2], [0.22, 880, 0.28]], 0.14)
-}
-
-function vibrate(pattern) {
-  try {
-    navigator.vibrate?.(pattern)
-  } catch {
-    // iPhone Safari has no vibration API; the visual check still lands.
-  }
-}
-
-// A quick visible + audible "done" before the next card: the reward has to land in the same second as the action.
-function celebrateDone() {
-  playDoneTick()
-  vibrate(14)
-  const card = document.querySelector('#day-step-card')
-  if (!card || prefersReducedMotion()) return Promise.resolve()
-  card.classList.add('is-done')
-  document.querySelectorAll('.day-action-controls button, .card-tools button').forEach((button) => { button.disabled = true })
-  return new Promise((resolve) => window.setTimeout(resolve, 340))
-}
-
-// ---------- 5-minute sprint ----------
-// "Just 5 minutes" lowers the cost of starting to almost nothing. Most of the time, once started, you keep going.
-
-function runnerKeyFor(action) {
-  if (!action) return ''
-  return `${action.key}#${Number.isInteger(action.substepIndex) && action.substepIndex >= 0 ? action.substepIndex : ''}`
-}
-
-function sprintStorageKey() {
-  return `battle-angel-sprint-${currentUser?.id || 'anon'}`
-}
-
-function readSprint() {
-  const value = readJson(sprintStorageKey(), null)
-  if (!value || typeof value.key !== 'string') return null
-  const endsAt = Number(value.endsAt)
-  const startedAt = Number(value.startedAt)
-  if (!Number.isFinite(endsAt) || !Number.isFinite(startedAt) || Date.now() - endsAt > 6 * 60 * 60 * 1000) return null
-  return { key: value.key, startedAt, endsAt, chimed: Boolean(value.chimed) }
-}
-
-function writeSprint(value) {
-  if (value) {
-    writeJson(sprintStorageKey(), value)
-    return
-  }
-  try {
-    window.localStorage.removeItem(sprintStorageKey())
-  } catch {
-    // Nothing stored.
-  }
-}
-
-function sprintIsRunning() {
-  const sprint = readSprint()
-  return Boolean(sprint && sprint.endsAt > Date.now())
-}
-
-function stopSprintTicker() {
-  if (sprintTicker) window.clearInterval(sprintTicker)
-  sprintTicker = null
-}
-
-function clearSprint() {
-  const had = Boolean(readSprint())
-  writeSprint(null)
-  stopSprintTicker()
-  if (had && !workoutMode && !timerEndAt) releaseWakeLock()
-}
-
-function clearSprintFor(stackKey) {
-  const sprint = readSprint()
-  if (sprint && sprint.key.startsWith(`${stackKey}#`)) clearSprint()
-}
-
-function syncSprintWithAction(action) {
-  const sprint = readSprint()
-  if (!sprint) return
-  if (sprint.key !== runnerKeyFor(action)) {
-    clearSprint()
-    return
-  }
-  if (sprint.endsAt > Date.now()) {
-    keepAwake()
-    startSprintTicker()
-  }
-}
-
-function startSprint(action) {
-  if (!action) return
-  unlockAudio()
-  const key = runnerKeyFor(action)
-  const now = Date.now()
-  const existing = readSprint()
-  const running = existing && existing.key === key && existing.endsAt > now
-  writeSprint({
-    key,
-    startedAt: running ? existing.startedAt : now,
-    endsAt: (running ? existing.endsAt : now) + SPRINT_MINUTES * 60 * 1000,
-    chimed: false
-  })
-  keepAwake()
-  updateSprintPill()
-  startSprintTicker()
-}
-
-function sprintPillState(sprint) {
-  if (!sprint) return 'idle'
-  return sprint.endsAt > Date.now() ? 'running' : 'ended'
-}
-
-function sprintPillInner(sprint) {
-  if (!sprint) return `<span class="sprint-label">&#9654; Just ${SPRINT_MINUTES} minutes</span>`
-  const now = Date.now()
-  if (sprint.endsAt > now) {
-    const left = Math.ceil((sprint.endsAt - now) / 1000)
-    const percent = clamp(((now - sprint.startedAt) / Math.max(1, sprint.endsAt - sprint.startedAt)) * 100, 0, 100)
-    return `<span class="sprint-fill" style="width:${percent.toFixed(1)}%"></span><span class="sprint-time">${formatTime(left)}</span><span class="sprint-label">you're in · +${SPRINT_MINUTES}</span>`
-  }
-  return `<span class="sprint-label">Time's up. You started. +${SPRINT_MINUTES} more?</span>`
-}
-
-function renderSprintPill(action) {
-  const sprint = readSprint()
-  const mine = sprint && sprint.key === runnerKeyFor(action) ? sprint : null
-  return `<button type="button" class="sprint-pill" id="sprint-pill" data-state="${sprintPillState(mine)}" aria-label="Start a ${SPRINT_MINUTES}-minute sprint">${sprintPillInner(mine)}</button>`
-}
-
-function updateSprintPill() {
-  const pill = document.querySelector('#sprint-pill')
-  if (!pill) return
-  const sprint = readSprint()
-  const mine = sprint && sprint.key === lastRunnerKey ? sprint : null
-  pill.dataset.state = sprintPillState(mine)
-  pill.innerHTML = sprintPillInner(mine)
-}
-
-function startSprintTicker() {
-  if (sprintTicker) return
-  sprintTicker = window.setInterval(() => {
-    const sprint = readSprint()
-    if (!sprint) {
-      stopSprintTicker()
-      return
-    }
-    if (sprint.endsAt <= Date.now()) {
-      if (!sprint.chimed) {
-        writeSprint({ ...sprint, chimed: true })
-        // Only chime right at the end, not when you come back to the app long after.
-        if (document.visibilityState === 'visible' && Date.now() - sprint.endsAt < 15000) {
-          playSprintChime()
-          vibrate([40, 60, 40])
-        }
-        if (!workoutMode && !timerEndAt) releaseWakeLock()
-      }
-      updateSprintPill()
-      stopSprintTicker()
-      return
-    }
-    updateSprintPill()
-  }, 500)
-}
-
-// ---------- setup screens: routine and boosters ----------
-// Both work the same way: a numbered list you open item by item, and an add form at the bottom.
-// They live on their own screens, so the Day overview stays about today.
-
-function openDayEditor(kind) {
-  if (kind === 'routine') renderRoutineEditor()
-  else renderBoostersEditor()
-  window.scrollTo(0, 0)
-}
-
-function renderCoreCheckbox(checked, id = '') {
-  if (!actionEngineAvailable) return ''
-  return `
-    <label class="core-check">
-      <input type="checkbox" name="is_core" ${id ? `id="${id}"` : ''} ${checked ? 'checked' : ''} />
-      <span><strong>Core step</strong>, still runs on low-energy days</span>
-    </label>`
-}
-
-// Seven day buttons, Monday first. All on means every day. The last one on can't be turned off.
-function renderDayPicker(weekdays) {
-  if (!routineDaysAvailable) return ''
-  const days = normalizeWeekdays(weekdays)
-  return `
-    <fieldset class="day-picker" data-day-picker>
-      <legend class="field-label">Days</legend>
-      <div class="day-picker-row">
-        ${WEEKDAY_ORDER.map((day) => `<button type="button" class="day-toggle" data-day-toggle="${day}" aria-pressed="${!days || days.includes(day) ? 'true' : 'false'}" aria-label="${WEEKDAY_NAMES[day]}">${WEEKDAY_NAMES[day][0]}</button>`).join('')}
-      </div>
-      <p class="day-picker-summary" data-day-summary aria-live="polite">${escapeHtml(weekdaysLabel(days))}</p>
-    </fieldset>`
-}
-
-function pickedDays(picker) {
-  return [...picker.querySelectorAll('[data-day-toggle][aria-pressed="true"]')].map((button) => Number(button.dataset.dayToggle))
-}
-
-// undefined = this form has no day picker (the database step hasn't run), so the days aren't sent.
-function readDayPicker(scope) {
-  const picker = scope?.querySelector('[data-day-picker]')
-  return picker ? normalizeWeekdays(pickedDays(picker)) : undefined
-}
-
-function bindDayPickers() {
-  document.querySelectorAll('[data-day-toggle]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const picker = button.closest('[data-day-picker]')
-      const summary = picker?.querySelector('[data-day-summary]')
-      if (!picker) return
-      const on = button.getAttribute('aria-pressed') === 'true'
-      if (on && pickedDays(picker).length === 1) {
-        if (summary) {
-          summary.textContent = 'Keep at least one day.'
-          summary.classList.remove('is-flash')
-          void summary.offsetWidth
-          summary.classList.add('is-flash')
-        }
-        return
-      }
-      button.setAttribute('aria-pressed', on ? 'false' : 'true')
-      if (summary) {
-        summary.classList.remove('is-flash')
-        summary.textContent = weekdaysLabel(pickedDays(picker))
-      }
-    })
-  })
-}
-
-// Links a step to the Gym tab. Shown once the v1.20 database step has run; before that, the name decides.
-function renderWorkoutLinkCheckbox(checked, id = '') {
-  if (!routineDaysAvailable) return ''
-  return `
-    <label class="core-check workout-link-check">
-      <input type="checkbox" name="opens_workout" ${id ? `id="${id}"` : ''} ${checked ? 'checked' : ''} />
-      <span><strong>Opens today's workout</strong>, START goes straight into today's workout in Forge</span>
-    </label>`
-}
-
-function renderEditorItem({ id, number, title, meta, form }) {
-  return `
-    <details class="editor-item" id="${id}">
-      <summary>
-        <span class="editor-item-num" aria-hidden="true">${number}</span>
-        <span class="editor-item-copy"><strong>${escapeHtml(title)}</strong>${meta ? `<small>${escapeHtml(meta)}</small>` : ''}</span>
-        <span class="editor-item-open" aria-hidden="true">Edit</span>
-      </summary>
-      ${form}
-    </details>`
-}
-
-function renderEditorActions({ moveAttr, idAttr, id, index, count, deleteAttr }) {
-  return `
-    <div class="editor-actions">
-      <button type="submit" class="primary-button">Save</button>
-      <button type="button" class="secondary-button" ${moveAttr}="up" ${idAttr}="${id}" ${index === 0 ? 'disabled' : ''} aria-label="Move up">&uarr;</button>
-      <button type="button" class="secondary-button" ${moveAttr}="down" ${idAttr}="${id}" ${index === count - 1 ? 'disabled' : ''} aria-label="Move down">&darr;</button>
-      <button type="button" class="ghost-danger" ${deleteAttr}="${id}">Delete</button>
-    </div>`
-}
-
-function renderRoutineEditor() {
-  if (!dailySystemAvailable) {
-    renderDay()
-    return
-  }
+function renderDailyEditor() {
   const progress = currentDailyProgress()
   const rows = dailySteps.map((step, index) => {
     const substeps = normalizeDailySubsteps(step.substeps)
-    const meta = [step.weekdays ? weekdaysLabel(step.weekdays) : '', isGymDailyStep(step) ? 'opens workout' : '', substeps.length ? plural(substeps.length, 'substep') : '', step.is_core && actionEngineAvailable ? 'core' : ''].filter(Boolean).join(', ')
-    return renderEditorItem({
-      id: `routine-step-${step.id}`,
-      number: index + 1,
-      title: step.title,
-      meta,
-      form: `
-        <form class="editor-form" data-daily-edit="${step.id}">
+    const activeDays = normalizeRoutineDays(step.active_days)
+    return `
+      <details class="daily-edit-item">
+        <summary>
+          <span class="daily-edit-summary-copy"><strong>${escapeHtml(step.title)}</strong><small>${escapeHtml(routineDaysLabel(activeDays))}${substeps.length ? ` · ${substeps.length} substeps` : ''}</small></span>
+          <span class="daily-edit-more">Edit</span>
+        </summary>
+        <form class="daily-edit-form" data-daily-edit="${step.id}">
           <label>
-            <span class="field-label">Step</span>
+            <span class="eyebrow">STEP</span>
             <input name="title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required value="${escapeHtml(step.title)}" />
           </label>
-          ${renderDayPicker(step.weekdays)}
+          ${routineDayPickerHtml(activeDays)}
           <label>
-            <span class="field-label">Short note, optional</span>
-            <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only what you need to remember">${escapeHtml(step.note || '')}</textarea>
+            <span class="eyebrow">SHORT NOTE · OPTIONAL</span>
+            <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only what helps you act">${escapeHtml(step.note || '')}</textarea>
           </label>
-          <label>
-            <span class="field-label">Substeps, one per line, optional</span>
-            <textarea name="substeps" rows="${Math.min(6, Math.max(2, substeps.length + 1))}" placeholder="Brush teeth&#10;Skincare&#10;Get dressed">${escapeHtml(dailySubstepsText(step))}</textarea>
-          </label>
-          ${renderWorkoutLinkCheckbox(isGymDailyStep(step))}
-          ${renderCoreCheckbox(step.is_core)}
-          ${renderEditorActions({ moveAttr: 'data-daily-move', idAttr: 'data-daily-step-id', id: step.id, index, count: dailySteps.length, deleteAttr: 'data-daily-delete' })}
-        </form>`
-    })
+          <details class="daily-substeps-editor" ${substeps.length ? 'open' : ''}>
+            <summary>Substeps${substeps.length ? ` · ${substeps.length}` : ' · optional'}</summary>
+            <label>
+              <span class="eyebrow">ONE PER LINE</span>
+              <textarea name="substeps" rows="${Math.min(6, Math.max(3, substeps.length + 1))}" placeholder="Brush teeth\nSkincare\nGet dressed">${escapeHtml(dailySubstepsText(step))}</textarea>
+            </label>
+          </details>
+          <div class="daily-edit-actions">
+            <button type="submit" class="primary-button">Save</button>
+            <button type="button" class="secondary-button" data-daily-move="up" data-daily-step-id="${step.id}" ${index === 0 ? 'disabled' : ''}>↑ Earlier</button>
+            <button type="button" class="secondary-button" data-daily-move="down" data-daily-step-id="${step.id}" ${index === dailySteps.length - 1 ? 'disabled' : ''}>↓ Later</button>
+            <button type="button" class="ghost-danger" data-daily-delete="${step.id}">Delete</button>
+          </div>
+        </form>
+      </details>`
   }).join('')
 
-  const coreTip = actionEngineAvailable && dailySteps.length >= 4 && !dailySteps.some((step) => step.is_core)
-    ? '<p class="editor-tip">Tip: mark 3 to 5 steps as <strong>core</strong>. On a rough day you run only those, and a minimum day still counts.</p>'
-    : ''
-
-  renderShell(`
-    <button type="button" class="back-button editor-back" id="editor-back"><span aria-hidden="true">&lsaquo;</span> Gifts</button>
-    <p class="editor-intro">Runs top to bottom${routineDaysAvailable ? ', on the days you pick for each step' : ', every day'}. A step with <strong>workout</strong> or <strong>gym</strong> in its name opens today's workout${routineDaysAvailable ? ', or switch on <strong>Opens today\'s workout</strong> for any step' : ''}.</p>
-    ${routineDaysAvailable ? '' : '<p class="editor-tip editor-db-note">To pick the days a step runs, run <strong>supabase/routine_upgrade.sql</strong> once in Supabase. Until then every step runs every day.</p>'}
-    ${rows ? `<div class="editor-list">${rows}</div>` : '<div class="day-panel"><p class="day-empty">No steps yet. Start with the first thing you do after waking up.</p></div>'}
-    ${coreTip}
-    <form id="add-daily-step" class="editor-add">
-      <h3 class="editor-add-title">Add a step</h3>
-      <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="e.g. Get ready" aria-label="New step" />
-      ${renderDayPicker(null)}
-      <details class="editor-add-more" id="routine-add-more">
-        <summary>Note, substeps${routineDaysAvailable ? ', workout link' : ''}${actionEngineAvailable ? ', core' : ''}</summary>
-        <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Short note, optional" aria-label="Short note"></textarea>
-        <textarea id="daily-step-substeps" rows="3" placeholder="Substeps, one per line" aria-label="Substeps, one per line"></textarea>
-        ${renderWorkoutLinkCheckbox(false, 'daily-step-workout')}
-        ${renderCoreCheckbox(false, 'daily-step-core')}
+  return `
+    <section class="day-setup-section">
+      <p class="day-setup-help">Choose the days once. Only steps scheduled for today enter Autopilot.</p>
+      <details class="day-setup-add" ${dailySteps.length ? '' : 'open'}>
+        <summary>+ Add routine step</summary>
+        <form id="add-daily-step" class="daily-add-form">
+          <label>
+            <span class="eyebrow">STEP</span>
+            <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="e.g. Take out trash" />
+          </label>
+          ${routineDayPickerHtml(ALL_ROUTINE_DAYS)}
+          <label>
+            <span class="eyebrow">SHORT NOTE · OPTIONAL</span>
+            <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="Only if it helps"></textarea>
+          </label>
+          <details class="daily-substeps-editor">
+            <summary>Add substeps · optional</summary>
+            <label>
+              <span class="eyebrow">ONE PER LINE</span>
+              <textarea id="daily-step-substeps" rows="4" placeholder="Brush teeth\nSkincare\nGet dressed"></textarea>
+            </label>
+          </details>
+          <button type="submit" class="primary-button">Add step</button>
+        </form>
       </details>
-      <button type="submit" class="primary-button">Add step</button>
+      ${rows ? `<div class="daily-edit-list">${rows}</div>` : '<div class="daily-editor-empty">Add the repeating actions you want battle angel to serve automatically.</div>'}
+      ${progress.started_at ? '<button type="button" class="text-button danger-text daily-reset" id="reset-day-progress">Restart today\'s Autopilot</button>' : ''}
       <div id="daily-editor-status" class="status-line" aria-live="polite"></div>
-    </form>
-    ${progress.started_at ? '<button type="button" class="text-button danger-text editor-reset" id="reset-day-progress">Restart today from the first step</button>' : ''}`,
-    { title: 'Routine', showAccount: false, showTimer: false, navTab: 'day', view: 'day-routine' })
+    </section>`
+}
 
-  document.querySelector('#editor-back')?.addEventListener('click', openDayOverview)
+function bindDailyEditor() {
+  bindRoutineDayPickers()
   document.querySelector('#add-daily-step')?.addEventListener('submit', addDailyStep)
-  bindDayPickers()
   document.querySelectorAll('[data-daily-edit]').forEach((form) => form.addEventListener('submit', updateDailyStep))
   document.querySelectorAll('[data-daily-move]').forEach((button) => {
     button.addEventListener('click', () => moveDailyStep(button.dataset.dailyStepId, button.dataset.dailyMove))
@@ -3569,39 +2742,10 @@ function renderRoutineEditor() {
   document.querySelector('#reset-day-progress')?.addEventListener('click', resetTodayDailyProgress)
 }
 
-function renderBoostersEditor() {
-  if (!dailyMedsAvailable) {
-    openDayOverview()
-    return
-  }
-  const rows = dailyMeds.map((med, index) => renderEditorItem({
-    id: `booster-${med.id}`,
-    number: index + 1,
-    title: med.name,
-    meta: '',
-    form: `
-      <form class="editor-form" data-daily-med-edit="${med.id}">
-        <label>
-          <span class="field-label">Name</span>
-          <input name="name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required value="${escapeHtml(med.name)}" />
-        </label>
-        ${renderEditorActions({ moveAttr: 'data-daily-med-move', idAttr: 'data-daily-med-id', id: med.id, index, count: dailyMeds.length, deleteAttr: 'data-daily-med-delete' })}
-      </form>`
-  })).join('')
-
-  renderShell(`
-    <button type="button" class="back-button editor-back" id="editor-back"><span aria-hidden="true">&lsaquo;</span> Gifts</button>
-    <p class="editor-intro">Your daily boosters. Check them off on Gifts, or with the Boosters button while you work.</p>
-    ${rows ? `<div class="editor-list">${rows}</div>` : '<div class="day-panel"><p class="day-empty">No boosters yet. Add the first one below.</p></div>'}
-    <form id="add-daily-med" class="editor-add">
-      <h3 class="editor-add-title">Add a booster</h3>
-      <input id="daily-med-name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required placeholder="e.g. Vitamin D" aria-label="New booster" />
-      <button type="submit" class="primary-button">Add booster</button>
-      <div id="daily-meds-status" class="status-line" aria-live="polite"></div>
-    </form>`,
-    { title: 'Boosters', showAccount: false, showTimer: false, navTab: 'day', view: 'day-boosters' })
-
-  document.querySelector('#editor-back')?.addEventListener('click', openDayOverview)
+function bindDailyMeds() {
+  document.querySelectorAll('[data-daily-med-toggle]').forEach((button) => {
+    button.addEventListener('click', () => toggleDailyMed(button.dataset.dailyMedToggle))
+  })
   document.querySelector('#add-daily-med')?.addEventListener('submit', addDailyMed)
   document.querySelectorAll('[data-daily-med-edit]').forEach((form) => form.addEventListener('submit', updateDailyMed))
   document.querySelectorAll('[data-daily-med-move]').forEach((button) => {
@@ -3612,155 +2756,6 @@ function renderBoostersEditor() {
   })
 }
 
-async function insertOrUpdateDailyStep(row, id = null) {
-  const run = (payload) => id
-    ? supabase.from('daily_steps').update(payload).eq('id', id)
-    : supabase.from('daily_steps').insert(payload)
-  let sendV118 = actionEngineAvailable
-  let sendV120 = routineDaysAvailable
-  const payload = () => withoutFields(row, [...(sendV118 ? [] : ['is_core']), ...(sendV120 ? [] : V120_COLUMNS)])
-  let { error } = await run(payload())
-  for (let attempt = 0; attempt < 2 && error; attempt += 1) {
-    if (sendV120 && isMissingV120ColumnError(error)) {
-      routineDaysAvailable = false
-      sendV120 = false
-    } else if (sendV118 && isMissingV118ColumnError(error)) {
-      actionEngineAvailable = false
-      sendV118 = false
-    } else break
-    ;({ error } = await run(payload()))
-  }
-  return error
-}
-
-// Days picked before the database step ran can't be saved; say so instead of dropping them silently.
-function daysNotSaved(row) {
-  return !routineDaysAvailable && (('weekdays' in row && row.weekdays !== null) || row.opens_workout === true)
-}
-
-async function addDailyStep(event) {
-  event.preventDefault()
-  if (!currentUser || !dailySystemAvailable) return
-  const title = document.querySelector('#daily-step-title')?.value.trim().slice(0, DAILY_STEP_TITLE_MAX)
-  const note = document.querySelector('#daily-step-note')?.value.trim().slice(0, DAILY_STEP_NOTE_MAX) || ''
-  const substeps = parseDailySubstepsText(document.querySelector('#daily-step-substeps')?.value || '')
-  const isCore = Boolean(document.querySelector('#daily-step-core')?.checked)
-  const weekdays = readDayPicker(document.querySelector('#add-daily-step'))
-  const workoutBox = document.querySelector('#daily-step-workout')
-  // Unticked on a new step means "decide by the name", so "battle angel workout" still links itself.
-  const opensWorkout = workoutBox?.checked ? true : undefined
-  const status = document.querySelector('#daily-editor-status')
-  if (!title) return
-  if (status) status.textContent = 'Saving...'
-  const nextOrder = Math.max(0, ...dailySteps.map((step) => Number(step.sort_order) || 0)) + 1
-  const row = {
-    user_id: currentUser.id,
-    title,
-    note,
-    substeps,
-    sort_order: nextOrder,
-    is_core: isCore,
-    ...(weekdays === undefined ? {} : { weekdays }),
-    ...(opensWorkout ? { opens_workout: true, substeps: [] } : {}),
-    updated_at: new Date().toISOString()
-  }
-  const error = await insertOrUpdateDailyStep(row)
-  if (error) {
-    if (status) status.textContent = isNetworkError(error) ? 'Connect to edit your routine.' : error.message
-    return
-  }
-  await loadDailySystem()
-  saveSnapshot()
-  rerenderDayView()
-  document.querySelector('#daily-step-title')?.focus()
-  showToast(daysNotSaved(row) ? 'Added. Days need the database step first.' : `Added: ${shorten(title, 28)}${weekdays ? ` · ${weekdaysLabel(weekdays)}` : ''}`)
-}
-
-async function updateDailyStep(event) {
-  event.preventDefault()
-  const form = event.currentTarget
-  const id = form.dataset.dailyEdit
-  const title = form.elements.title.value.trim().slice(0, DAILY_STEP_TITLE_MAX)
-  const note = form.elements.note.value.trim().slice(0, DAILY_STEP_NOTE_MAX)
-  const substeps = parseDailySubstepsText(form.elements.substeps?.value || '')
-  const isCore = Boolean(form.elements.is_core?.checked)
-  const weekdays = readDayPicker(form)
-  const workoutBox = form.elements.opens_workout
-  const opensWorkout = workoutBox ? Boolean(workoutBox.checked) : undefined
-  if (!title) return
-  const row = {
-    title,
-    note,
-    substeps: opensWorkout ? [] : substeps,
-    is_core: isCore,
-    ...(weekdays === undefined ? {} : { weekdays }),
-    ...(opensWorkout === undefined ? {} : { opens_workout: opensWorkout }),
-    updated_at: new Date().toISOString()
-  }
-  const error = await insertOrUpdateDailyStep(row, id)
-  if (error) {
-    alert(isNetworkError(error) ? 'Connect to edit your routine.' : error.message)
-    return
-  }
-  await loadDailySystem()
-  saveSnapshot()
-  rerenderDayView({ openIds: currentOpenDetailIds().filter((openId) => openId !== `routine-step-${id}`) })
-  showToast(daysNotSaved(row) ? 'Saved. Days need the database step first.' : opensWorkout && substeps.length ? 'Saved. Linked to your workout, which has its own steps, so the substeps were removed.' : 'Step saved')
-}
-
-async function moveDailyStep(stepId, direction) {
-  const index = dailySteps.findIndex((step) => step.id === stepId)
-  if (index < 0) return
-  const target = direction === 'up' ? index - 1 : index + 1
-  if (target < 0 || target >= dailySteps.length) return
-  const ordered = [...dailySteps]
-  const [moved] = ordered.splice(index, 1)
-  ordered.splice(target, 0, moved)
-  for (let i = 0; i < ordered.length; i += 1) {
-    if (Number(ordered[i].sort_order) === i + 1) continue
-    const { error } = await supabase.from('daily_steps').update({ sort_order: i + 1, updated_at: new Date().toISOString() }).eq('id', ordered[i].id)
-    if (error) {
-      alert(isNetworkError(error) ? 'Connect to reorder your routine.' : error.message)
-      return
-    }
-  }
-  await loadDailySystem()
-  saveSnapshot()
-  rerenderDayView()
-}
-
-async function deleteDailyStep(stepId) {
-  const step = dailySteps.find((item) => item.id === stepId)
-  if (!step || !confirm(`Delete "${step.title}" from your routine?`)) return
-  const { error } = await supabase.from('daily_steps').delete().eq('id', stepId)
-  if (error) {
-    alert(isNetworkError(error) ? 'Connect to edit your routine.' : error.message)
-    return
-  }
-  const progress = currentDailyProgress()
-  progress.completed_step_ids = progress.completed_step_ids.filter((id) => id !== stepId)
-  progress.skipped_step_ids = (progress.skipped_step_ids || []).filter((id) => id !== stepId)
-  progress.later_step_ids = (progress.later_step_ids || []).filter((id) => id !== stepId)
-  const positions = { ...(progress.substep_positions || {}) }
-  delete positions[stepId]
-  progress.substep_positions = positions
-  progress.is_complete = false
-  saveDailyProgress(progress)
-  await loadDailySystem()
-  saveSnapshot()
-  rerenderDayView()
-}
-
-// Starting over brings back this morning's question, with today's power actions still picked.
-function resetTodayDailyProgress() {
-  if (!confirm('Restart today from the first step? Finished power actions stay finished.')) return
-  clearSprint()
-  saveDailyProgress(emptyDailyProgress(todayDateKey()))
-  renderDay()
-}
-
-// ---------- boosters ----------
-// Shown as Boosters; stored in the daily_meds tables, so nothing in the database changes.
 async function addDailyMed(event) {
   event.preventDefault()
   if (!currentUser || !dailyMedsAvailable) return
@@ -3770,21 +2765,22 @@ async function addDailyMed(event) {
   if (!name) return
   if (status) status.textContent = 'Saving...'
   const nextOrder = Math.max(0, ...dailyMeds.map((med) => Number(med.sort_order) || 0)) + 1
-  const { error } = await supabase.from('daily_meds').insert({
+  const routineStepId = dailyMedAnchorsAvailable ? (document.querySelector('#daily-med-routine-step')?.value || null) : null
+  const payload = {
     user_id: currentUser.id,
     name,
     sort_order: nextOrder,
     updated_at: new Date().toISOString()
-  })
+  }
+  if (dailyMedAnchorsAvailable) payload.routine_step_id = routineStepId
+  const { error } = await supabase.from('daily_meds').insert(payload)
   if (error) {
     if (status) status.textContent = isNetworkError(error) ? 'Connect to edit boosters.' : error.message
     return
   }
   await loadDailyMeds()
   saveSnapshot()
-  rerenderDayView()
-  document.querySelector('#daily-med-name')?.focus()
-  showToast(`Added: ${shorten(name, 28)}`)
+  renderBoosterSetupScreen()
 }
 
 async function updateDailyMed(event) {
@@ -3793,15 +2789,16 @@ async function updateDailyMed(event) {
   const id = form.dataset.dailyMedEdit
   const name = form.elements.name.value.trim().slice(0, DAILY_MED_NAME_MAX)
   if (!name) return
-  const { error } = await supabase.from('daily_meds').update({ name, updated_at: new Date().toISOString() }).eq('id', id)
+  const changes = { name, updated_at: new Date().toISOString() }
+  if (dailyMedAnchorsAvailable) changes.routine_step_id = form.elements.routine_step_id?.value || null
+  const { error } = await supabase.from('daily_meds').update(changes).eq('id', id)
   if (error) {
     alert(isNetworkError(error) ? 'Connect to edit boosters.' : error.message)
     return
   }
   await loadDailyMeds()
   saveSnapshot()
-  rerenderDayView({ openIds: currentOpenDetailIds().filter((openId) => openId !== `booster-${id}`) })
-  showToast('Booster saved')
+  renderBoosterSetupScreen()
 }
 
 async function moveDailyMed(medId, direction) {
@@ -3821,12 +2818,12 @@ async function moveDailyMed(medId, direction) {
   }
   await loadDailyMeds()
   saveSnapshot()
-  rerenderDayView()
+  renderBoosterSetupScreen()
 }
 
 async function deleteDailyMed(medId) {
   const med = dailyMeds.find((item) => item.id === medId)
-  if (!med || !confirm(`Delete "${med.name}" from your boosters?`)) return
+  if (!med || !confirm(`Delete "${med.name}"?`)) return
   const { error } = await supabase.from('daily_meds').delete().eq('id', medId)
   if (error) {
     alert(isNetworkError(error) ? 'Connect to edit boosters.' : error.message)
@@ -3840,748 +2837,390 @@ async function deleteDailyMed(medId) {
   writePending(pending)
   await loadDailyMeds()
   saveSnapshot()
-  rerenderDayView()
+  renderBoosterSetupScreen()
 }
 
-// Boosters live where you are: a small pill in the runner until they're all checked.
-function renderRunnerMedsPill() {
-  if (!dailyMedsAvailable || !dailyMeds.length) return ''
-  const taken = currentDailyMedTakenSet().size
-  if (taken >= dailyMeds.length) return ''
-  return `<button type="button" class="runner-meds-pill" id="runner-meds" aria-label="Boosters: ${taken} of ${dailyMeds.length} done">Boosters ${taken}/${dailyMeds.length}</button>`
-}
 
-function renderMedsSheetBody() {
-  const taken = currentDailyMedTakenSet()
+function renderQuickCapture() {
+  if (!powerActionsAvailable) return ''
   return `
-    <div class="sheet-head"><strong>Boosters today</strong><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
-    <div class="daily-meds-list meds-sheet-list">
-      ${dailyMeds.map((med) => {
-        const isTaken = taken.has(med.id)
-        return `
-          <button type="button" class="daily-med-row booster-row ${isTaken ? 'is-taken' : ''}" data-sheet-med="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}">
-            <span class="daily-med-check" aria-hidden="true">${isTaken ? '&#10003;' : ''}</span>
-            <span class="daily-med-name">${escapeHtml(med.name)}</span>
-          </button>`
-      }).join('')}
-    </div>`
+    <section class="day-capture-card" aria-label="Quick todo capture">
+      <form id="add-power-todo" class="day-capture-form">
+        <input id="power-todo-title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Dump a todo..." aria-label="Dump a todo into Inbox" autocomplete="off" />
+        <button type="submit" class="day-capture-button" aria-label="Add to Inbox">+</button>
+      </form>
+      <div id="power-todos-status" class="micro-status day-capture-status" aria-live="polite"></div>
+    </section>`
 }
 
-function showMedsSheet() {
-  const backdrop = openSheet(renderMedsSheetBody(), { label: 'Boosters today' })
-  const bind = () => {
-    backdrop.querySelectorAll('[data-sheet-med]').forEach((button) => {
-      button.addEventListener('click', () => {
-        toggleDailyMed(button.dataset.sheetMed, { render: false })
-        const sheet = backdrop.querySelector('.sheet')
-        if (sheet) sheet.innerHTML = renderMedsSheetBody()
-        bind()
-        updateRunnerMedsPill()
-      })
-    })
-  }
-  bind()
-}
-
-function updateRunnerMedsPill() {
-  const pill = document.querySelector('#runner-meds')
-  if (!pill) return
-  const html = renderRunnerMedsPill()
-  if (!html) {
-    pill.remove()
-    return
-  }
-  pill.outerHTML = html
-  document.querySelector('#runner-meds')?.addEventListener('click', showMedsSheet)
-}
-
-// ---------- capture ----------
-// Capture never needs signal and never asks you to decide anything. Brain-dump mode: the field stays focused.
-
-function handleCaptureSubmit(event) {
-  event.preventDefault()
-  const input = document.querySelector('#capture-input')
-  const todo = createLocalTodo(input?.value || '')
-  if (!todo) return
-  rerenderOverview({ focusCapture: true })
-  showToast(`In Inbox: ${shorten(todo.title, 26)}`, {
-    actionLabel: 'Do today',
-    onAction: () => {
-      setTodoTodayStatus(todo.id, 'pending')
-      rerenderCurrentDayView()
-      showToast('Added to today')
-    }
+function bindTodayPlanner() {
+  document.querySelectorAll('[data-stack-move]').forEach((button) => {
+    button.addEventListener('click', () => moveTodayStackItem(button.dataset.stackKey, button.dataset.stackMove))
   })
 }
 
-// Capture is one action: type, Enter, back to the card. Deciding when to do it is for later.
+async function createPowerTodo(title) {
+  if (!currentUser || !powerActionsAvailable) return { error: new Error('Todo Inbox is not ready.') }
+  const clean = String(title || '').trim().slice(0, POWER_TODO_TITLE_MAX)
+  if (!clean) return { error: new Error('Add a todo first.') }
+  const nextOrder = Math.max(0, ...powerTodos.map((todo) => Number(todo.sort_order) || 0)) + 1
+  const { data, error } = await supabase.from('power_todos').insert({
+    user_id: currentUser.id,
+    title: clean,
+    sort_order: nextOrder,
+    updated_at: new Date().toISOString()
+  }).select('id,title,sort_order,completed_at,created_at,updated_at').single()
+  if (error) return { error }
+  powerTodos.push(data)
+  powerTodos.sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  saveSnapshot()
+  return { data }
+}
+
 function showRunnerCapture() {
-  if (!powerActionsAvailable) return
-  const backdrop = openSheet(`
-    <form class="runner-capture-form" id="runner-capture-form" autocomplete="off">
-      <div class="sheet-head"><strong>Dump it. Keep moving.</strong><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
-      <input id="runner-capture-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="What just popped into your head?" enterkeyhint="done" />
-      <button type="submit" class="primary-button">Save to Inbox</button>
-    </form>`, { label: 'Capture a thought' })
-  const input = backdrop.querySelector('#runner-capture-input')
-  input?.focus()
-  backdrop.querySelector('#runner-capture-form')?.addEventListener('submit', (event) => {
+  if (document.querySelector('#runner-capture-sheet')) return
+  const screen = document.querySelector('.day-runner-screen')
+  if (!screen) return
+  const sheet = document.createElement('div')
+  sheet.id = 'runner-capture-sheet'
+  sheet.className = 'runner-capture-sheet'
+  sheet.innerHTML = `
+    <form id="runner-capture-form" class="runner-capture-form">
+      <div class="runner-capture-title">Dump it. Keep moving.</div>
+      <input id="runner-capture-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Todo" autocomplete="off" />
+      <div class="runner-capture-actions">
+        <button type="button" class="secondary-button" id="runner-capture-cancel">Cancel</button>
+        <button type="submit" class="primary-button" id="runner-capture-save">Inbox</button>
+      </div>
+      <div id="runner-capture-status" class="micro-status"></div>
+    </form>`
+  screen.appendChild(sheet)
+  const input = sheet.querySelector('#runner-capture-input')
+  window.setTimeout(() => input?.focus(), 40)
+  sheet.querySelector('#runner-capture-cancel')?.addEventListener('click', () => sheet.remove())
+  sheet.querySelector('#runner-capture-form')?.addEventListener('submit', async (event) => {
     event.preventDefault()
-    const todo = createLocalTodo(input?.value || '')
-    if (!todo) {
-      input?.focus()
+    const status = sheet.querySelector('#runner-capture-status')
+    const button = sheet.querySelector('#runner-capture-save')
+    const title = input?.value || ''
+    button.disabled = true
+    if (status) status.textContent = 'Saving...'
+    const result = await createPowerTodo(title)
+    if (result.error) {
+      button.disabled = false
+      if (status) status.textContent = isNetworkError(result.error) ? 'Connect to save this todo.' : result.error.message
       return
     }
-    closeSheet()
-    renderDayRunner()
-    showToast('Saved to Inbox', {
-      actionLabel: 'Do next',
-      onAction: () => {
-        setTodoTodayStatus(todo.id, 'pending', { position: 'next' })
-        rerenderCurrentDayView()
-        showToast('Up next')
-      }
-    })
+    if (status) status.textContent = 'Saved to Inbox.'
+    window.setTimeout(() => sheet.remove(), 450)
   })
 }
 
-// ---------- inbox edits ----------
+function bindPowerTodos() {
+  document.querySelector('#add-power-todo')?.addEventListener('submit', addPowerTodo)
+  document.querySelectorAll('[data-power-today]').forEach((button) => {
+    button.addEventListener('click', () => togglePowerTodoToday(button.dataset.powerToday))
+  })
+  document.querySelectorAll('[data-power-todo-edit]').forEach((form) => form.addEventListener('submit', updatePowerTodo))
+  document.querySelectorAll('[data-power-todo-delete]').forEach((button) => {
+    button.addEventListener('click', () => deletePowerTodo(button.dataset.powerTodoDelete))
+  })
+}
 
-function updatePowerTodo(event) {
+function renderAfterTodoChange(view = currentView) {
+  if (view === 'day-plan') renderDayPlannerScreen()
+  else if (view === 'day-inbox') renderDayInboxScreen()
+  else renderDay('', { forceOverview: true })
+}
+
+async function addPowerTodo(event) {
   event.preventDefault()
+  const returnView = currentView
+  const input = document.querySelector('#power-todo-title')
+  const status = document.querySelector('#power-todos-status')
+  const title = input?.value || ''
+  if (!title.trim()) return
+  if (status) status.textContent = 'Saving...'
+  const result = await createPowerTodo(title)
+  if (result.error) {
+    if (status) status.textContent = isNetworkError(result.error) ? 'Connect to save this todo.' : result.error.message
+    return
+  }
+  renderAfterTodoChange(returnView)
+  const nextStatus = document.querySelector('#power-todos-status')
+  if (nextStatus) nextStatus.textContent = 'Captured.'
+}
+
+async function togglePowerTodoToday(todoId) {
+  const returnView = currentView
+  if (!currentUser || !powerActionsAvailable) return
+  const todo = getPowerTodo(todoId)
+  if (!todo) return
+  const dateKey = todayDateKey()
+  const existing = getTodayPowerPlans().find((plan) => plan.todo_id === todoId)
+  if (existing?.status === 'pending') {
+    const { error } = await supabase.from('power_action_plan').delete().eq('id', existing.id)
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to change today\'s plan.' : error.message)
+      return
+    }
+    clearPendingPowerWrite(existing.id)
+  } else if (existing) {
+    const nextOrder = Math.max(0, ...getPendingPowerPlans().map((plan) => Number(plan.sort_order) || 0)) + 1
+    const { error } = await supabase.from('power_action_plan').update({ status: 'pending', sort_order: nextOrder, started_at: null, updated_at: new Date().toISOString() }).eq('id', existing.id)
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to change today\'s plan.' : error.message)
+      return
+    }
+    clearPendingPowerWrite(existing.id)
+  } else {
+    const nextOrder = Math.max(0, ...getTodayPowerPlans().map((plan) => Number(plan.sort_order) || 0)) + 1
+    const { error } = await supabase.from('power_action_plan').insert({
+      user_id: currentUser.id,
+      todo_id: todoId,
+      action_date: dateKey,
+      status: 'pending',
+      sort_order: nextOrder,
+      started_at: null,
+      updated_at: new Date().toISOString()
+    })
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to choose today\'s todos.' : error.message)
+      return
+    }
+  }
+  await loadPowerActions()
+  const progress = currentDailyProgress()
+  progress.stack_order = normalizeTodayStackOrder(progress)
+  saveDailyProgress(progress)
+  renderAfterTodoChange(returnView)
+}
+
+async function updatePowerTodo(event) {
+  event.preventDefault()
+  const returnView = currentView
   const form = event.currentTarget
   const id = form.dataset.powerTodoEdit
   const title = form.elements.title.value.trim().slice(0, POWER_TODO_TITLE_MAX)
   if (!title) return
-  patchLocalTodo(id, { title })
-  rerenderOverview()
-  showToast('Saved')
-}
-
-function deletePowerTodo(todoId) {
-  const todo = getPowerTodo(todoId)
-  if (!todo) return
-  const progressBefore = cloneDailyProgress()
-  const restore = dropTodo(todoId)
-  if (!restore) return
-  const progress = currentDailyProgress()
-  progress.stack_order = normalizeTodayStackOrder(progress)
-  saveDailyProgress(progress)
-  rerenderOverview()
-  rememberUndo(`Deleted "${shorten(todo.title, 22)}"`, () => {
-    restore()
-    saveDailyProgress(progressBefore)
-  }, rerenderOverview)
-}
-
-// ---------- low energy + wrap up ----------
-
-function toggleEnergyMode() {
-  const progress = currentDailyProgress()
-  progress.energy_mode = isLowEnergy(progress) ? 'normal' : 'low'
-  progress.is_complete = false
-  saveDailyProgress(progress)
-  showToast(progress.energy_mode === 'low' ? 'Low-energy day: core steps only' : 'Full day back on')
-}
-
-// An explicit end to the day closes the open loops: what's done is done, the rest waits in Inbox, no guilt.
-function wrapUpDay() {
-  const progress = currentDailyProgress()
-  const before = cloneDailyProgress(progress)
-  const stamp = new Date().toISOString()
-  progress.closed_at = stamp
-  progress.is_complete = true
-  if (!progress.started_at) progress.started_at = stamp
-  saveDailyProgress(progress)
-  clearSprint()
-  closeSheet()
-  renderDay('', { forceOverview: true, justCompleted: true })
-  rememberUndo('Day wrapped', () => saveDailyProgress(before), () => renderDay())
-}
-
-function reopenDay() {
-  const progress = currentDailyProgress()
-  progress.closed_at = null
-  progress.is_complete = remainingTodayActionCount(progress) === 0
-  saveDailyProgress(progress)
-  renderDay()
-}
-
-// ---------- wins ----------
-
-function getTodayWins() {
-  const progress = currentDailyProgress()
-  const completed = new Set(progress.completed_step_ids || [])
-  return {
-    routine: dailySteps.filter((step) => completed.has(step.id)).map((step) => step.title),
-    routineActions: routineDoneCount(progress),
-    todos: powerDoneToday.map((todo) => todo.title),
-    workouts: getCompletedFolders(todayDateKey()).map((folder) => folder.name)
-  }
-}
-
-function renderDayCompleteCard({ closed, celebrate }) {
-  const wins = getTodayWins()
-  // A finished low-energy day is a win as it is; the rest of the routine stays an optional bonus.
-  const progress = currentDailyProgress()
-  const bonusAvailable = !closed && isLowEnergy(progress) && hasCoreSteps() && dailySteps.some((step) => !step.is_core && stepScheduledOn(step, progress.progress_date) && !dailyResolvedStepIds(progress).has(step.id))
-  const parts = []
-  if (wins.routineActions) parts.push(plural(wins.routineActions, 'routine action'))
-  if (wins.todos.length) parts.push(plural(wins.todos.length, 'todo'))
-  if (wins.workouts.length) parts.push(`${wins.workouts.join(' + ')} trained`)
-  const summary = parts.length ? parts.join(' · ') : 'Rest is part of the system too.'
-  const chips = [
-    ...wins.workouts.map((name) => `<li class="win-chip is-workout">${escapeHtml(name)} &#10003;</li>`),
-    ...wins.todos.map((title) => `<li class="win-chip">${escapeHtml(title)}</li>`)
-  ].join('')
-  const tomorrow = getScheduledFolders(addDaysKey(todayDateKey(), 1))
-  return `
-    <section class="day-complete-card ${celebrate ? 'is-celebrating' : ''}">
-      <div class="day-complete-mark">${closed ? 'Wrapped' : 'Done'}</div>
-      <h2>${closed ? 'Day wrapped.' : 'Day complete.'}</h2>
-      <p class="wins-summary">${escapeHtml(summary)}</p>
-      ${chips ? `<ul class="win-chips" aria-label="Today's wins">${chips}</ul>` : ''}
-      <button type="button" class="day-hero-cta finish-day-cta" id="finish-my-day">Finish my day <span aria-hidden="true">&rarr;</span></button>
-      <p class="wins-note finish-day-note">Five minutes of your motivation, then one question.</p>
-      ${wins.routine.length ? `<details class="wins-list"><summary>Routine done · ${wins.routine.length}</summary><ul>${wins.routine.map((title) => `<li>${escapeHtml(title)}</li>`).join('')}</ul></details>` : ''}
-      ${closed ? '<p class="wins-note">Anything unfinished is safe in Inbox. Tomorrow starts clean.</p>' : ''}
-      ${tomorrow.length ? `<p class="wins-note">Tomorrow: ${escapeHtml(tomorrow.map((folder) => folder.name).join(' + '))}</p>` : ''}
-      ${bonusAvailable ? '<p class="wins-note">Minimum day: done. That counts.</p><button type="button" class="quiet-link" id="bonus-full-day">Got energy left? Do the full day</button>' : ''}
-      ${closed ? '<button type="button" class="quiet-link" id="reopen-day">Reopen day</button>' : ''}
-      <button type="button" class="quiet-link" id="complete-glance">See today's cards</button>
-    </section>`
-}
-
-// ---------- morning: today's power actions ----------
-// The day opens with one deliberate choice: what moves you forward today, ranked by importance.
-// Three numbered slots fill in the order you tap. Everything you don't pick waits in Inbox.
-
-function newPowerPrompt(mode = 'start') {
-  const ids = getPowerActionList().filter((item) => !item.done && getPowerTodo(item.todo.id)).map((item) => item.todo.id)
-  return { mode, date: todayDateKey(), ids, lastPicked: null }
-}
-
-// Returns false when power actions aren't available, so the caller can fall back to the plain routine.
-function openPowerPrompt(mode = 'start') {
-  if (!powerActionsAvailable || !currentUser) return false
-  if (mode === 'change' || !powerPrompt || powerPrompt.date !== todayDateKey() || powerPrompt.mode !== mode) {
-    powerPrompt = newPowerPrompt(mode)
-  }
-  renderPowerPrompt()
-  window.scrollTo(0, 0)
-  return true
-}
-
-function openPowerPromptForToday() {
-  return openPowerPrompt(currentDailyProgress().started_at ? 'change' : 'start')
-}
-
-function renderPromptSlot(todo, rank, canMoveUp) {
-  return `
-    <div class="slot is-filled ${powerPrompt.lastPicked === todo.id ? 'is-new' : ''}">
-      <span class="slot-num" aria-hidden="true">${rank}</span>
-      <span class="slot-title">${escapeHtml(todo.title)}</span>
-      <span class="slot-tools">
-        ${canMoveUp ? `<button type="button" class="slot-tool" data-prompt-up="${todo.id}" aria-label="Make ${escapeHtml(todo.title)} more important">&uarr;</button>` : ''}
-        <button type="button" class="slot-tool" data-prompt-pick="${todo.id}" aria-label="Remove ${escapeHtml(todo.title)} from today">&times;</button>
-      </span>
-    </div>`
-}
-
-function renderPromptRow(todo, full) {
-  const meta = isTodoSnoozed(todo) ? `back ${returnDayLabel(todo.snoozed_until)}` : ageShortLabel(todo.created_at)
-  return `
-    <button type="button" class="prompt-row ${full ? 'is-full' : ''}" data-prompt-pick="${todo.id}">
-      <span class="prompt-ring" aria-hidden="true"></span>
-      <span class="prompt-title">${escapeHtml(todo.title)}</span>
-      <span class="prompt-meta">${escapeHtml(meta)}</span>
-    </button>`
-}
-
-function renderPowerPrompt(options = {}) {
-  if (!powerPrompt || powerPrompt.date !== todayDateKey()) powerPrompt = newPowerPrompt('start')
-  powerPrompt.ids = powerPrompt.ids.filter((id, index, list) => getPowerTodo(id) && list.indexOf(id) === index)
-  const picked = powerPrompt.ids.map((id) => getPowerTodo(id))
-  const pickedIds = new Set(powerPrompt.ids)
-  const doneToday = getPowerActionList().filter((item) => item.done)
-  const offset = doneToday.length
-  const count = picked.length
-  const full = count >= TODAY_TODO_TARGET
-  const change = powerPrompt.mode === 'change'
-  const dateKey = todayDateKey()
-  // Same order as Inbox on the Day tab (newest first), so the list looks familiar every morning.
-  const ready = newestFirst(powerTodos.filter((todo) => !pickedIds.has(todo.id) && !isTodoSnoozed(todo, dateKey)))
-  const resting = newestFirst(powerTodos.filter((todo) => !pickedIds.has(todo.id) && isTodoSnoozed(todo, dateKey)))
-
-  const slots = picked.map((todo, index) => renderPromptSlot(todo, offset + index + 1, index > 0))
-  for (let position = count + 1; position <= TODAY_TODO_TARGET; position += 1) {
-    const rank = offset + position
-    slots.push(position === count + 1
-      ? `
-        <form class="slot is-open" id="prompt-add" autocomplete="off">
-          <span class="slot-num" aria-hidden="true">${rank}</span>
-          <input id="prompt-add-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" placeholder="${ready.length || resting.length ? 'Type it, or tap one below' : 'Type it here'}" aria-label="Power action ${rank}" enterkeyhint="done" />
-          <button type="submit" class="slot-add" aria-label="Add">+</button>
-        </form>`
-      : `<div class="slot is-empty" aria-hidden="true"><span class="slot-num">${rank}</span></div>`)
-  }
-
-  const status = full
-    ? 'All set. To swap one, remove it first.'
-    : count
-      ? `Next: your #${offset + count + 1}, or lock in.`
-      : `Tap in order of importance. Your #${offset + 1} first.`
-  const primaryLabel = change ? 'Save power actions' : count ? 'Lock in and start' : `Pick your #${offset + 1} first`
-
-  renderShell(`
-    <div class="prompt-screen">
-      <header class="prompt-head">
-        <p class="prompt-date">${escapeHtml(formatPlanDate(dateKey))}</p>
-        <h2 class="prompt-question">${escapeHtml(POWER_PROMPT_QUESTION)}</h2>
-      </header>
-      <section class="prompt-slots" aria-label="Today's power actions">
-        ${doneToday.map((item) => `
-          <div class="slot is-done"><span class="slot-num" aria-hidden="true">&#10003;</span><span class="slot-title"><span class="visually-hidden">Done: </span>${escapeHtml(item.todo.title)}</span></div>`).join('')}
-        ${slots.join('')}
-        <p class="prompt-status" id="prompt-status" aria-live="polite">${escapeHtml(status)}</p>
-      </section>
-      ${ready.length ? `
-        <section class="prompt-inbox" aria-labelledby="prompt-inbox-title">
-          <h3 class="prompt-section-title" id="prompt-inbox-title">From your Inbox</h3>
-          <div class="prompt-list">${ready.map((todo) => renderPromptRow(todo, full)).join('')}</div>
-        </section>` : ''}
-      ${resting.length ? `
-        <details class="prompt-resting" id="prompt-resting" ${powerPrompt.restingOpen ? 'open' : ''}>
-          <summary>Resting until later <span>${resting.length}</span></summary>
-          <div class="prompt-list">${resting.map((todo) => renderPromptRow(todo, full)).join('')}</div>
-        </details>` : ''}
-      <div class="prompt-actions">
-        <button type="button" class="day-primary-action prompt-lock" id="prompt-lock" ${!change && !count ? 'disabled' : ''}>${escapeHtml(primaryLabel)} <span aria-hidden="true">&rarr;</span></button>
-        <button type="button" class="quiet-link prompt-skip" id="prompt-skip">${change ? 'Cancel' : 'Skip and start with my routine'}</button>
-      </div>
-    </div>`,
-    { title: 'Gifts', showAccount: false, showTimer: false, showHeader: false, navTab: 'day', view: 'day-prompt', shellClass: 'prompt-shell' })
-
-  powerPrompt.lastPicked = null
-  document.querySelectorAll('[data-prompt-pick]').forEach((button) => {
-    button.addEventListener('click', () => togglePromptPick(button.dataset.promptPick))
-  })
-  document.querySelectorAll('[data-prompt-up]').forEach((button) => {
-    button.addEventListener('click', () => movePromptPickUp(button.dataset.promptUp))
-  })
-  document.querySelector('#prompt-add')?.addEventListener('submit', addPromptTodo)
-  document.querySelector('#prompt-lock')?.addEventListener('click', lockInPowerActions)
-  document.querySelector('#prompt-skip')?.addEventListener('click', skipPowerPrompt)
-  document.querySelector('#prompt-resting')?.addEventListener('toggle', (event) => {
-    if (powerPrompt) powerPrompt.restingOpen = event.currentTarget.open
-  })
-  if (options.focusAdd) document.querySelector('#prompt-add-input')?.focus()
-}
-
-function rerenderPowerPrompt(options = {}) {
-  const y = window.scrollY
-  renderPowerPrompt(options)
-  window.scrollTo(0, y)
-}
-
-// A background sync can bring new todos in; redraw only when you're not typing.
-function refreshPowerPromptIfIdle() {
-  const input = document.querySelector('#prompt-add-input')
-  if (input && (input.value || document.activeElement === input)) return
-  if (document.querySelector('.sheet-backdrop')) return
-  rerenderPowerPrompt()
-}
-
-function flashPromptStatus(message) {
-  const status = document.querySelector('#prompt-status')
-  if (!status) return
-  status.textContent = message
-  status.classList.remove('is-flash')
-  void status.offsetWidth
-  status.classList.add('is-flash')
-}
-
-function togglePromptPick(todoId) {
-  if (!powerPrompt) return
-  const index = powerPrompt.ids.indexOf(todoId)
-  if (index >= 0) {
-    powerPrompt.ids.splice(index, 1)
-  } else if (powerPrompt.ids.length >= TODAY_TODO_TARGET) {
-    flashPromptStatus(`That's ${TODAY_TODO_TARGET}. Remove one above to swap it.`)
-    vibrate(30)
-    return
-  } else {
-    powerPrompt.ids.push(todoId)
-    powerPrompt.lastPicked = todoId
-    vibrate(12)
-  }
-  rerenderPowerPrompt()
-}
-
-function movePromptPickUp(todoId) {
-  if (!powerPrompt) return
-  const index = powerPrompt.ids.indexOf(todoId)
-  if (index <= 0) return
-  powerPrompt.ids.splice(index, 1)
-  powerPrompt.ids.splice(index - 1, 0, todoId)
-  powerPrompt.lastPicked = todoId
-  rerenderPowerPrompt()
-}
-
-function addPromptTodo(event) {
-  event.preventDefault()
-  const input = document.querySelector('#prompt-add-input')
-  const todo = createLocalTodo(input?.value || '')
-  if (!todo || !powerPrompt) {
-    input?.focus()
+  const { error } = await supabase.from('power_todos').update({ title, updated_at: new Date().toISOString() }).eq('id', id)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit todos.' : error.message)
     return
   }
-  powerPrompt.ids.push(todo.id)
-  powerPrompt.lastPicked = todo.id
-  rerenderPowerPrompt({ focusAdd: powerPrompt.ids.length < TODAY_TODO_TARGET })
-}
-
-// Your picks become today's power actions, in the order you ranked them. Anything you un-picked
-// goes back to Inbox untouched.
-function applyPowerActionPicks(ids) {
-  const keep = new Set(ids)
-  getPendingPowerPlans().forEach((plan) => {
-    const todo = getPowerTodo(plan.todo_id)
-    // A first step made with Shrink it stays as long as its power action does.
-    if (keep.has(plan.todo_id) || (todo?.parent_id && keep.has(todo.parent_id))) return
-    removeTodayPlan(plan.todo_id)
-  })
-  ids.forEach((id) => {
-    const todo = getPowerTodo(id)
-    if (!todo) return
-    // Picking something that was resting means it matters now.
-    if (actionEngineAvailable && isTodoSnoozed(todo)) patchLocalTodo(id, { snoozed_until: null })
-    if (getTodayPlanForTodo(id)?.status !== 'pending') setTodoTodayStatus(id, 'pending')
-  })
-
-  // The picks run together, in rank order, where your todos already were (after the routine on a fresh day).
-  const progress = currentDailyProgress()
-  const order = normalizeTodayStackOrder(progress)
-  const keys = ids.map(todoStackKey).filter((key) => order.includes(key))
-  const firstIndex = order.findIndex((key) => keys.includes(key))
-  const rest = order.filter((key) => !keys.includes(key))
-  const insertAt = firstIndex < 0 ? rest.length : order.slice(0, firstIndex).filter((key) => !keys.includes(key)).length
-  rest.splice(insertAt, 0, ...keys)
-  progress.stack_order = rest
-  saveDailyProgress(progress)
-
-  // The plan rows carry the rank too (after anything already done today), so every device shows the same order.
-  const base = Math.max(0, ...getTodayPowerPlans().filter((plan) => plan.status === 'done').map((plan) => Number(plan.sort_order) || 0))
-  ids.forEach((id, index) => {
-    const plan = getTodayPlanForTodo(id)
-    if (plan && Number(plan.sort_order) !== base + index + 1) queuePlanWrite(setLocalPowerPlan(id, { sort_order: base + index + 1, updated_at: nowIso() }))
-  })
+  await loadPowerActions()
   saveSnapshot()
+  renderAfterTodoChange(returnView)
 }
 
-// Starting the day always works, even with nothing queued: you land on your first card, or on the overview.
-function beginDay() {
-  const progress = currentDailyProgress()
-  progress.stack_order = normalizeTodayStackOrder(progress)
-  if (!progress.started_at) progress.started_at = nowIso()
-  progress.is_complete = false
-  progress.closed_at = null
-  saveDailyProgress(progress)
-  if (remainingTodayActionCount(progress) > 0) renderDayRunner()
-  else openDayOverview()
-}
-
-function lockInPowerActions() {
-  if (!powerPrompt || !guardActionTap(500)) return
-  const { mode } = powerPrompt
-  const ids = powerPrompt.ids.filter((id) => getPowerTodo(id))
-  if (mode === 'start' && !ids.length) {
-    flashPromptStatus('Pick at least one, or skip to start with your routine.')
+async function deletePowerTodo(todoId) {
+  const returnView = currentView
+  const todo = getPowerTodo(todoId)
+  if (!todo || !confirm(`Delete "${todo.title}"?`)) return
+  const { error } = await supabase.from('power_todos').delete().eq('id', todoId)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit todos.' : error.message)
     return
   }
-  unlockAudio()
-  applyPowerActionPicks(ids)
-  powerPrompt = null
-  if (mode === 'change') {
-    openDayOverview()
-    showToast(ids.length ? `Power actions saved: ${ids.length}` : 'No power actions today')
-    return
-  }
-  beginDay()
-  showToast(`Locked in: ${plural(ids.length, 'power action')}`)
+  powerTodos = powerTodos.filter((item) => item.id !== todoId)
+  powerPlans = powerPlans.filter((plan) => plan.todo_id !== todoId)
+  const pending = readPending()
+  Object.keys(pending.powerPlanWrites).forEach((key) => {
+    if (pending.powerPlanWrites[key]?.todo_id === todoId) delete pending.powerPlanWrites[key]
+  })
+  writePending(pending)
+  await loadPowerActions()
+  saveSnapshot()
+  renderAfterTodoChange(returnView)
 }
 
-function skipPowerPrompt() {
-  if (!powerPrompt) return
-  const { mode } = powerPrompt
-  powerPrompt = null
-  if (mode === 'change') {
-    openDayOverview()
-    return
-  }
-  beginDay()
-}
-
-// Today's power actions in order of importance: the rank you gave them, which stays put when a card
-// moves to Later. A "first step" made with Shrink it rides along with its power action instead of
-// counting as one of its own.
-function getPowerActionList() {
-  const plans = sortBySortOrder(getTodayPowerPlans().filter((plan) => plan.status === 'pending' || plan.status === 'done'))
-  const planned = new Set(plans.map((plan) => plan.todo_id))
-  return plans
-    .map((plan) => ({ plan, todo: getAnyTodo(plan.todo_id), done: plan.status === 'done' }))
-    .filter((item) => item.todo && !(item.todo.parent_id && planned.has(item.todo.parent_id)))
-    .map((item, index) => ({ ...item, number: index + 1 }))
-}
-
-// How a todo is named on its card and in Today's order: "Power action 2 of 3", or "First step of #2".
-function powerActionLabel(todo, list = getPowerActionList()) {
-  const parent = todo.parent_id ? list.find((item) => item.todo.id === todo.parent_id) : null
-  if (parent) return { text: `First step of #${parent.number}`, number: parent.number, parentTitle: parent.todo.title }
-  const item = list.find((entry) => entry.todo.id === todo.id)
-  return item
-    ? { text: `Power action ${item.number} of ${list.length}`, number: item.number, parentTitle: '' }
-    : { text: 'Power action', number: 0, parentTitle: '' }
-}
-
-// ---------- Day overview ----------
-// One page, one order: what's up now, your power actions, boosters, the rest of today, Inbox, setup.
-// Every section has the same head (title, count, one action). Editing always opens its own screen.
-
-function openDayOverview() {
-  dayUi = { reorder: false, orderAll: false, inboxEdit: false, inboxAll: false }
-  renderDay('', { forceOverview: true })
-  window.scrollTo(0, 0)
-}
-
-function renderDayHero({ progress, entries, remaining, score, started, closed, complete, low, celebrate }) {
-  if (complete) return renderDayCompleteCard({ closed, celebrate })
-  const date = escapeHtml(formatPlanDate(todayDateKey()))
-  if (!entries.length) {
-    return `
-      <section class="day-hero">
-        <p class="day-hero-date">${date}</p>
-        <h2 class="day-hero-title">Nothing queued yet.</h2>
-        <p class="day-hero-copy">Set up your routine below${powerActionsAvailable ? ', or pick what you\'re getting done today' : ''}.</p>
-        ${powerActionsAvailable ? '<button type="button" class="day-hero-cta" id="hero-pick">Pick power actions <span aria-hidden="true">&rarr;</span></button>' : ''}
-      </section>`
-  }
-  if (!started) {
-    return `
-      <section class="day-hero">
-        <p class="day-hero-date">${date}</p>
-        <h2 class="day-hero-title">Ready when you are.</h2>
-        <p class="day-hero-copy">${plural(remaining, 'action')} lined up.</p>
-        <button type="button" class="day-hero-cta" id="hero-start">Start your day <span aria-hidden="true">&rarr;</span></button>
-      </section>`
-  }
-  const action = getCurrentStackAction(progress)
-  const tools = [
-    `<button type="button" class="day-chip day-chip-eye" id="hero-glance" aria-label="See all of today's cards">${EYE_ICON}<span>All cards</span></button>`,
-    hasCoreSteps() ? `<button type="button" class="day-chip" id="toggle-energy">${low ? 'Back to full day' : 'Low energy: core only'}</button>` : '',
-    actionEngineAvailable ? '<button type="button" class="day-chip" id="wrap-up-day">Wrap up day</button>' : ''
-  ].join('')
-  return `
-    <section class="day-hero ${low ? 'is-low-energy' : ''}">
-      <div class="day-hero-row">
-        <p class="day-hero-date">${date}${low ? ', core only' : ''}</p>
-        <p class="day-hero-score"><strong>${score.done}</strong> of ${score.total} done</p>
-      </div>
-      <div class="day-hero-progress" aria-hidden="true"><span style="width:${score.percent}%"></span></div>
-      <p class="day-hero-label">Up now</p>
-      <p class="day-hero-now">${escapeHtml(action?.title || '')}</p>
-      <button type="button" class="day-hero-cta" id="hero-continue">Continue <span aria-hidden="true">&rarr;</span></button>
-      ${tools ? `<div class="day-hero-tools">${tools}</div>` : ''}
-    </section>`
-}
-
-function renderSectionHead(id, title, count = '', actions = '') {
-  return `
-    <div class="day-section-head">
-      <h3 id="${id}">${escapeHtml(title)}</h3>
-      ${count !== '' ? `<span class="day-section-count">${escapeHtml(String(count))}</span>` : ''}
-      ${actions ? `<span class="day-section-actions">${actions}</span>` : ''}
-    </div>`
-}
-
-function renderPowerActionsSection() {
-  if (!powerActionsAvailable) return ''
-  const list = getPowerActionList()
-  const doneCount = list.filter((item) => item.done).length
-  const rows = list.map((item) => `
-    <li class="pa-row ${item.done ? 'is-done' : ''}">
-      <span class="pa-num" aria-hidden="true">${item.done ? '&#10003;' : item.number}</span>
-      <span class="pa-title">${item.done ? '<span class="visually-hidden">Done: </span>' : ''}${escapeHtml(item.todo.title)}</span>
-    </li>`).join('')
-  return `
-    <section class="day-section" id="power-actions" aria-labelledby="power-actions-title">
-      ${renderSectionHead('power-actions-title', 'Power actions', list.length ? `${doneCount}/${list.length}` : '',
-        `<button type="button" class="day-section-action" id="change-power-actions">${list.length ? 'Change' : 'Pick'}</button>`)}
-      ${rows
-        ? `<ol class="day-panel pa-list">${rows}</ol>`
-        : '<div class="day-panel"><p class="day-empty">None picked for today. What would move you forward?</p></div>'}
-    </section>`
-}
-
-function renderBoostersSection() {
-  if (!dailyMedsAvailable) {
-    return `
-      <section class="day-section" id="boosters" aria-labelledby="boosters-title">
-        ${renderSectionHead('boosters-title', 'Boosters')}
-        <div class="day-panel"><p class="day-empty">Boosters need the v1.15 database step once (see README).</p></div>
-      </section>`
-  }
+function renderDailyMedsQuick() {
+  if (!dailyMedsAvailable || !dailyMeds.length) return ''
+  const anytime = dailyMeds.filter((med) => !med.routine_step_id)
+  if (!anytime.length) return ''
   const taken = currentDailyMedTakenSet()
-  const rows = dailyMeds.map((med) => {
+  const remaining = anytime.filter((med) => !taken.has(med.id)).length
+  const rows = anytime.map((med) => {
     const isTaken = taken.has(med.id)
     return `
-      <button type="button" class="daily-med-row booster-row ${isTaken ? 'is-taken' : ''}" data-daily-med-toggle="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}">
-        <span class="daily-med-check" aria-hidden="true">${isTaken ? '&#10003;' : ''}</span>
-        <span class="daily-med-name">${escapeHtml(med.name)}</span>
+      <button type="button" class="day-med-quick-row ${isTaken ? 'is-taken' : ''}" data-daily-med-toggle="${med.id}" aria-pressed="${isTaken ? 'true' : 'false'}">
+        <span class="day-med-quick-check" aria-hidden="true">${isTaken ? '✓' : ''}</span>
+        <span class="day-med-quick-copy"><strong>${escapeHtml(med.name)}</strong></span>
       </button>`
   }).join('')
   return `
-    <section class="day-section" id="boosters" aria-labelledby="boosters-title">
-      ${renderSectionHead('boosters-title', 'Boosters', dailyMeds.length ? `${taken.size}/${dailyMeds.length}` : '')}
-      ${rows
-        ? `<div class="day-panel booster-list">${rows}</div>`
-        : '<div class="day-panel"><p class="day-empty">No boosters yet.</p><button type="button" class="day-panel-link" data-open-boosters-editor>Add boosters</button></div>'}
+    <section class="day-med-quick-card day-anytime-boosters" aria-label="Anytime boosters">
+      <div class="day-compact-head"><strong>Anytime boosters</strong><span>${remaining ? `${remaining} left` : 'done ✓'}</span></div>
+      <div class="day-med-quick-list">${rows}</div>
     </section>`
 }
 
-function orderKindLabel(entry, progress, list) {
-  if (entry.type === 'todo') {
-    const label = powerActionLabel(entry.todo, list)
-    return label.parentTitle ? label.text : label.number ? `Power action ${label.number}` : 'Power action'
-  }
-  const substeps = normalizeDailySubsteps(entry.step.substeps)
-  const parts = ['Routine']
-  if (isGymDailyStep(entry.step)) parts.push('opens your workout')
-  if (entry.step.is_core && hasCoreSteps()) parts.push('core')
-  if (substeps.length) {
-    const position = clamp(Number.parseInt(progress.substep_positions?.[entry.id], 10) || 0, 0, substeps.length)
-    parts.push(`${position} of ${substeps.length} done`)
-  }
-  return parts.join(', ')
-}
-
-// What's left today, in the order it will come up. Power actions carry their number.
-// The next few show by default; Reorder or "Show all" opens the whole list. (A "Show all" that
-// would reveal a single row takes as much room as the row, so then the whole list shows.)
-function renderDayOrderSection(progress, entries, low) {
-  const resolved = dailyResolvedStepIds(progress)
-  const upcoming = entries.filter((entry) => entry.type === 'todo' || !resolved.has(entry.id))
-  const currentKey = getCurrentStackAction(progress)?.key || ''
-  const list = getPowerActionList()
-  const dateKey = progress.progress_date || todayDateKey()
-  const offToday = dailySteps.filter((step) => !stepScheduledOn(step, dateKey))
-  const restingCount = low ? dailySteps.filter((step) => stepScheduledOn(step, dateKey) && !step.is_core).length : 0
-  // Steps that aren't on today's days rest quietly, but the list says so, so nothing looks lost.
-  const offNote = offToday.length
-    ? `Not on ${WEEKDAY_NAMES[weekdayOf(dateKey)]}s: ${offToday.length <= 3 ? offToday.map((step) => step.title).join(', ') : plural(offToday.length, 'step')}.`
-    : ''
-  const showAll = dayUi.reorder || dayUi.orderAll || upcoming.length <= ORDER_PREVIEW_COUNT + 1
-  const shown = showAll ? upcoming : upcoming.slice(0, ORDER_PREVIEW_COUNT)
-  const rows = shown.map((entry, index) => {
-    const isNow = entry.key === currentKey
-    const kind = orderKindLabel(entry, progress, list)
-    const mark = entry.type === 'todo'
-      ? `<span class="order-mark is-power" aria-hidden="true">${powerActionLabel(entry.todo, list).number || ''}</span>`
-      : '<span class="order-mark" aria-hidden="true"></span>'
+function renderDailyMedsSetup() {
+  if (!dailyMedsAvailable) {
     return `
-      <li class="order-row is-${entry.type} ${isNow ? 'is-now' : ''}">
-        ${mark}
-        <span class="order-copy"><strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(isNow ? `Up now. ${kind}` : kind)}</small></span>
-        ${dayUi.reorder ? `
-          <span class="order-move">
-            <button type="button" class="order-move-button" data-order-move="up" data-stack-key="${escapeHtml(entry.key)}" ${index === 0 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} earlier">&uarr;</button>
-            <button type="button" class="order-move-button" data-order-move="down" data-stack-key="${escapeHtml(entry.key)}" ${index === upcoming.length - 1 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} later">&darr;</button>
-          </span>` : ''}
-      </li>`
-  }).join('')
-  const more = !showAll && upcoming.length > shown.length
-    ? `<button type="button" class="day-panel-link" id="order-show-all">Show all ${upcoming.length}</button>`
-    : ''
-  return `
-    <section class="day-section" id="day-order" aria-labelledby="day-order-title">
-      ${renderSectionHead('day-order-title', "Today's order", `${upcoming.length} left`,
-        upcoming.length > 1 ? `<button type="button" class="day-section-action ${dayUi.reorder ? 'is-active' : ''}" id="toggle-reorder" aria-pressed="${dayUi.reorder}">${dayUi.reorder ? 'Done' : 'Reorder'}</button>` : '')}
-      ${rows ? `<ol class="day-panel order-list">${rows}</ol>${more}` : '<div class="day-panel"><p class="day-empty">Nothing left for today.</p></div>'}
-      ${restingCount ? `<p class="day-section-note">Low energy: ${plural(restingCount, 'non-core step')} resting today.</p>` : ''}
-      ${offNote ? `<p class="day-section-note" id="day-off-note">${escapeHtml(offNote)}</p>` : ''}
-    </section>`
-}
-
-// Inbox is your backlog: everything that isn't in today. Today's picks live under Power actions,
-// so nothing shows up twice.
-function renderInboxSection() {
-  if (!powerActionsAvailable) return ''
-  const dateKey = todayDateKey()
-  const inToday = new Set(getTodayPowerPlans().filter((plan) => plan.status === 'pending').map((plan) => plan.todo_id))
-  // Newest first: what you just dumped shows at the top, and the oldest wait for Sort.
-  const backlog = newestFirst(powerTodos.filter((todo) => !inToday.has(todo.id)))
-  const due = dueInboxCount()
-  const showAll = dayUi.inboxAll || dayUi.inboxEdit || backlog.length <= INBOX_PREVIEW_COUNT + 1
-  const shown = showAll ? backlog : backlog.slice(0, INBOX_PREVIEW_COUNT)
-  const rows = shown.map((todo) => {
-    if (dayUi.inboxEdit) {
-      return `
-        <li>
-          <form class="inbox-edit-row" data-power-todo-edit="${todo.id}">
-            <input name="title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required value="${escapeHtml(todo.title)}" aria-label="Rename ${escapeHtml(todo.title)}" />
-            <button type="submit" class="small-button">Save</button>
-            <button type="button" class="inbox-delete" data-power-todo-delete="${todo.id}" aria-label="Delete ${escapeHtml(todo.title)}">Delete</button>
-          </form>
-        </li>`
-    }
-    const meta = isTodoSnoozed(todo, dateKey) ? `back ${returnDayLabel(todo.snoozed_until)}` : ageShortLabel(todo.created_at)
-    return `
-      <li class="inbox-row">
-        <span class="inbox-title">${escapeHtml(todo.title)}</span>
-        <span class="inbox-meta">${escapeHtml(meta)}</span>
-      </li>`
-  }).join('')
-  const actions = [
-    due ? '<button type="button" class="day-section-action" data-open-triage>Sort</button>' : '',
-    backlog.length ? `<button type="button" class="day-section-action ${dayUi.inboxEdit ? 'is-active' : ''}" id="toggle-inbox-edit" aria-pressed="${dayUi.inboxEdit}">${dayUi.inboxEdit ? 'Done' : 'Edit'}</button>` : ''
-  ].join('')
-  const more = !showAll && backlog.length > shown.length
-    ? `<button type="button" class="day-panel-link" id="inbox-show-all">Show all ${backlog.length}</button>`
-    : ''
-  const empty = powerTodos.length
-    ? 'Everything left is in today. Anything new you dump lands here.'
-    : 'Empty. Anything you dump lands here.'
-  return `
-    <section class="day-section" id="inbox" aria-labelledby="inbox-title">
-      ${renderSectionHead('inbox-title', 'Inbox', backlog.length || '', actions)}
-      <form id="capture-form" class="day-capture-form" autocomplete="off">
-        <input id="capture-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="Dump a thought" aria-label="Add to Inbox" enterkeyhint="done" />
-        <button type="submit" class="day-capture-button" aria-label="Add to Inbox">+</button>
-      </form>
-      ${rows
-        ? `<ul class="day-panel inbox-list ${dayUi.inboxEdit ? 'is-editing' : ''}">${rows}</ul>${more}`
-        : `<div class="day-panel"><p class="day-empty">${empty}</p></div>`}
-    </section>`
-}
-
-function renderDaySetup() {
-  const coreCount = actionEngineAvailable ? dailySteps.filter((step) => step.is_core).length : 0
-  const routineMeta = dailySteps.length ? `${plural(dailySteps.length, 'step')}${coreCount ? `, ${coreCount} core` : ''}` : 'Not set up yet'
-  const boosterMeta = !dailyMedsAvailable ? 'Needs the database step' : dailyMeds.length ? plural(dailyMeds.length, 'booster') : 'None yet'
-  return `
-    <section class="day-section day-setup" aria-labelledby="setup-title">
-      ${renderSectionHead('setup-title', 'Setup')}
-      <div class="day-panel setup-list">
-        <button type="button" class="setup-row" id="open-routine-editor">
-          <span class="setup-copy"><strong>Edit routine</strong><small>${escapeHtml(routineMeta)}</small></span>
-          <span class="setup-chevron" aria-hidden="true">&rsaquo;</span>
-        </button>
-        <button type="button" class="setup-row" id="open-boosters-editor" ${dailyMedsAvailable ? '' : 'disabled'}>
-          <span class="setup-copy"><strong>Edit boosters</strong><small>${escapeHtml(boosterMeta)}</small></span>
-          <span class="setup-chevron" aria-hidden="true">&rsaquo;</span>
-        </button>
+      <section class="day-setup-section">
+        <div class="day-setup-section-head"><div><div class="today-label">Boosters</div><h2>Boosters</h2></div></div>
+        <div class="daily-editor-empty">Run the latest Supabase SQL once to enable boosters.</div>
+      </section>`
+  }
+  const editRows = dailyMeds.map((med, index) => `
+    <form class="daily-med-edit-row booster-edit-row" data-daily-med-edit="${med.id}">
+      <div class="booster-edit-fields">
+        <input name="name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required value="${escapeHtml(med.name)}" aria-label="Booster name" />
+        ${dailyMedAnchorsAvailable ? `<select name="routine_step_id" aria-label="Activity for ${escapeHtml(med.name)}">${routineStepOptionsHtml(med.routine_step_id)}</select>` : ''}
       </div>
+      <div class="daily-med-edit-actions">
+        <button type="submit" class="small-button">Save</button>
+        <button type="button" class="small-button" data-daily-med-move="up" data-daily-med-id="${med.id}" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="small-button" data-daily-med-move="down" data-daily-med-id="${med.id}" ${index === dailyMeds.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" class="text-button danger-text" data-daily-med-delete="${med.id}">Delete</button>
+      </div>
+    </form>`).join('')
+  return `
+    <section class="day-setup-section">
+      <p class="day-setup-help">Link each booster to the activity where it should appear, or leave it Anytime. Checkmarks reset every day.</p>
+      ${dailyMedAnchorsAvailable ? '' : '<div class="notice info">Run the v1.19 Supabase upgrade once to link boosters to routine activities.</div>'}
+      <form id="add-daily-med" class="daily-med-add-form day-setup-med-add booster-add-form">
+        <div class="booster-add-fields">
+          <input id="daily-med-name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required placeholder="Add booster" aria-label="Booster name" />
+          ${dailyMedAnchorsAvailable ? `<select id="daily-med-routine-step" aria-label="Routine activity">${routineStepOptionsHtml('')}</select>` : ''}
+        </div>
+        <button type="submit" class="primary-button">Add</button>
+      </form>
+      ${editRows ? `<div class="daily-med-edit-list">${editRows}</div>` : ''}
+      <div id="daily-meds-status" class="status-line" aria-live="polite"></div>
     </section>`
+}
+
+
+function renderDayHubRow(id, title, detail, count = '') {
+  return `
+    <button type="button" class="day-hub-row" id="${id}">
+      <span class="day-hub-copy"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></span>
+      ${count !== '' ? `<span class="day-hub-count">${escapeHtml(String(count))}</span>` : ''}
+      <span class="day-hub-chevron" aria-hidden="true">›</span>
+    </button>`
+}
+
+function renderTodayPlanList() {
+  const entries = getTodayStackEntries()
+  if (!entries.length) return '<div class="day-plan-empty">Nothing in today’s stack yet.</div>'
+  return `<div class="day-plan-list">${entries.map((entry, index) => `
+    <div class="day-plan-row ${entry.type === 'todo' ? 'is-todo' : ''}">
+      <span class="day-plan-number">${index + 1}</span>
+      <span class="day-plan-copy">
+        <strong>${escapeHtml(entry.title)}</strong>
+        <small>${entry.type === 'todo' ? 'Todo' : 'Routine'}</small>
+      </span>
+      <span class="day-plan-controls">
+        <button type="button" data-stack-move="up" data-stack-key="${escapeHtml(entry.key)}" ${index === 0 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} earlier">↑</button>
+        <button type="button" data-stack-move="down" data-stack-key="${escapeHtml(entry.key)}" ${index === entries.length - 1 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} later">↓</button>
+        ${entry.type === 'todo' ? `<button type="button" class="is-remove" data-power-today="${entry.id}" aria-label="Remove ${escapeHtml(entry.title)} from today">×</button>` : ''}
+      </span>
+    </div>`).join('')}</div>`
+}
+
+function renderDayPlannerScreen() {
+  const entries = getTodayStackEntries()
+  const selectedTodoIds = new Set(entries.filter((entry) => entry.type === 'todo').map((entry) => entry.id))
+  const inboxChoices = powerTodos.filter((todo) => !selectedTodoIds.has(todo.id))
+  const dayName = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).format(new Date())
+  renderShell(`
+    <div class="day-subview-top">
+      <button type="button" class="day-subview-back" id="back-day-home">‹ Day</button>
+      <div><div class="today-label">${escapeHtml(dayName)}</div><h2>Arrange today</h2></div>
+    </div>
+    <p class="day-subview-intro">Arrange once. Then stop planning and let Autopilot serve the next action.</p>
+    <section class="day-plan-card">
+      <div class="day-compact-head"><strong>Today</strong><span>${entries.length}</span></div>
+      ${renderTodayPlanList()}
+    </section>
+    <section class="day-plan-inbox">
+      <div class="day-compact-head"><strong>Add from Inbox</strong><span>${inboxChoices.length}</span></div>
+      ${inboxChoices.length ? `<div class="day-plan-inbox-list">${inboxChoices.map((todo) => `
+        <button type="button" class="day-plan-inbox-row" data-power-today="${todo.id}">
+          <span>${escapeHtml(todo.title)}</span><strong>+ Today</strong>
+        </button>`).join('')}</div>` : '<div class="day-plan-empty">Inbox clear.</div>'}
+    </section>
+    <button type="button" class="day-primary-footer" id="plan-start-day" ${entries.length ? '' : 'disabled'}>${currentDailyProgress().started_at ? 'CONTINUE DAY' : 'START DAY'} <span aria-hidden="true">→</span></button>`,
+    { title: 'Arrange today', showAccount: false, showTimer: false, showHeader: false, view: 'day-plan' })
+  document.querySelector('#back-day-home')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
+  document.querySelector('#plan-start-day')?.addEventListener('click', startDailySystem)
+  bindTodayPlanner()
+  bindPowerTodos()
+}
+
+function renderDayInboxScreen() {
+  const rows = powerTodos.map((todo) => `
+      <div class="day-inbox-row day-inbox-row-manage-only">
+        <span class="day-inbox-title">${escapeHtml(todo.title)}</span>
+        <details class="day-inbox-more">
+          <summary aria-label="Edit ${escapeHtml(todo.title)}">•••</summary>
+          <form data-power-todo-edit="${todo.id}">
+            <input name="title" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required value="${escapeHtml(todo.title)}" aria-label="Todo title" />
+            <div class="day-inbox-edit-actions">
+              <button type="submit" class="small-button">Save</button>
+              <button type="button" class="text-button danger-text" data-power-todo-delete="${todo.id}">Delete</button>
+            </div>
+          </form>
+        </details>
+      </div>`).join('')
+  renderShell(`
+    <div class="day-subview-top">
+      <button type="button" class="day-subview-back" id="back-day-home">‹ Day</button>
+      <div><div class="today-label">Capture</div><h2>Inbox</h2></div>
+    </div>
+    <p class="day-subview-intro">Dump it here. Choose what belongs today only from Arrange today.</p>
+    ${renderQuickCapture()}
+    <section class="day-inbox-card-flat">
+      <div class="day-compact-head"><strong>Waiting</strong><span>${powerTodos.length}</span></div>
+      ${rows ? `<div class="day-inbox-list-flat">${rows}</div>` : '<div class="day-plan-empty">Nothing waiting.</div>'}
+    </section>`,
+    { title: 'Inbox', showAccount: false, showTimer: false, showHeader: false, view: 'day-inbox' })
+  document.querySelector('#back-day-home')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
+  bindPowerTodos()
+}
+
+function renderDaySetupScreen() {
+  renderShell(`
+    <div class="day-subview-top">
+      <button type="button" class="day-subview-back" id="back-day-home">‹ Day</button>
+      <div><div class="today-label">Set once</div><h2>Setup</h2></div>
+    </div>
+    <section class="day-hub day-setup-hub" aria-label="Day setup">
+      ${renderDayHubRow('open-routine-setup', 'Routine', 'Steps, substeps & weekdays', dailySteps.length)}
+      ${renderDayHubRow('open-booster-setup', 'Boosters', 'What to take & where it appears', dailyMeds.length)}
+    </section>`,
+    { title: 'Setup', showAccount: false, showTimer: false, showHeader: false, view: 'day-setup' })
+  document.querySelector('#back-day-home')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
+  document.querySelector('#open-routine-setup')?.addEventListener('click', renderRoutineSetupScreen)
+  document.querySelector('#open-booster-setup')?.addEventListener('click', renderBoosterSetupScreen)
+}
+
+function renderRoutineSetupScreen() {
+  renderShell(`
+    <div class="day-subview-top">
+      <button type="button" class="day-subview-back" id="back-day-setup">‹ Setup</button>
+      <div><div class="today-label">Day setup</div><h2>Routine</h2></div>
+    </div>
+    <p class="day-subview-intro">Build the repeating actions once. Choose the weekdays each action belongs to.</p>
+    ${renderDailyEditor()}`,
+    { title: 'Routine', showAccount: false, showTimer: false, showHeader: false, view: 'day-routine-setup' })
+  document.querySelector('#back-day-setup')?.addEventListener('click', renderDaySetupScreen)
+  bindDailyEditor()
+}
+
+function renderBoosterSetupScreen() {
+  renderShell(`
+    <div class="day-subview-top">
+      <button type="button" class="day-subview-back" id="back-day-setup">‹ Setup</button>
+      <div><div class="today-label">Day setup</div><h2>Boosters</h2></div>
+    </div>
+    <p class="day-subview-intro">Attach each booster to one routine activity, or leave it Anytime.</p>
+    ${renderDailyMedsSetup()}`,
+    { title: 'Boosters', showAccount: false, showTimer: false, showHeader: false, view: 'day-booster-setup' })
+  document.querySelector('#back-day-setup')?.addEventListener('click', renderDaySetupScreen)
+  bindDailyMeds()
 }
 
 function renderDay(errorMessage = '', options = {}) {
@@ -4592,8 +3231,8 @@ function renderDay(errorMessage = '', options = {}) {
 
   if (!dailySystemAvailable) {
     renderShell(`
-      <div class="notice error">Day Stack needs the latest Supabase schema once. Your gym data is untouched.</div>`,
-      { title: 'Gifts', showAccount: false, showTimer: false, navTab: 'day', view: 'day' })
+      <div class="notice error">Day needs the latest Supabase schema once. Your gym data is untouched.</div>`,
+      { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: 'day' })
     return
   }
 
@@ -4601,815 +3240,136 @@ function renderDay(errorMessage = '', options = {}) {
   progress.stack_order = normalizeTodayStackOrder(progress)
   const entries = getTodayStackEntries(progress)
   const remaining = remainingTodayActionCount(progress)
-  const score = todayScore(progress)
   const started = Boolean(progress.started_at)
-  const closed = Boolean(progress.closed_at)
-  const complete = closed || (started && remaining === 0 && (entries.length > 0 || score.done > 0))
+  const complete = started && remaining === 0
 
-  // The Day tab goes straight to what's next: first thing in the morning that's your power actions,
-  // after that it's one card at a time. The overview is one tap away (Today).
-  if (!options.forceOverview && !errorMessage && !complete) {
-    if (started && remaining > 0) {
-      renderDayRunner()
-      return
-    }
-    if (!started) {
-      if (openPowerPrompt('start')) return
-      if (startDailySystem()) return
-    }
+  if (!options.forceOverview && !errorMessage && started && !complete) {
+    renderDayRunner()
+    return
   }
 
-  const low = isLowEnergy(progress) && hasCoreSteps()
+  let hero = ''
+  if (!entries.length) {
+    hero = `
+      <section class="day-home-hero">
+        <div class="today-label">Today</div>
+        <h2>Nothing queued.</h2>
+        <p>Set up a routine or pull something from Inbox.</p>
+        <button type="button" class="start-workout-button day-start-button" id="empty-plan-day">Arrange today <span aria-hidden="true">→</span></button>
+      </section>`
+  } else if (complete) {
+    hero = `
+      <section class="day-home-hero is-complete">
+        <div class="today-label">Today</div>
+        <h2>Day complete.</h2>
+        <p>You can still capture anything that comes up.</p>
+      </section>`
+  } else {
+    const helper = `${remaining} action${remaining === 1 ? '' : 's'} left`
+    hero = `
+      <section class="day-home-hero">
+        <div class="today-label">${started ? 'In progress' : 'Today'}</div>
+        <h2>${started ? 'Keep moving.' : 'Ready when you are.'}</h2>
+        <p>${escapeHtml(helper)}</p>
+        <button type="button" class="start-workout-button day-start-button" id="start-day">${started ? 'Continue day' : 'Start day'} <span aria-hidden="true">→</span></button>
+      </section>`
+  }
+
   renderShell(`
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${usingCachedData ? '<div class="offline-note">Offline · saved day available</div>' : ''}
-    ${renderDayHero({ progress, entries, remaining, score, started, closed, complete, low, celebrate: Boolean(options.justCompleted) })}
-    ${renderPowerActionsSection()}
-    ${renderBoostersSection()}
-    ${complete ? '' : renderDayOrderSection(progress, entries, low)}
-    ${renderInboxSection()}
-    ${renderDaySetup()}`,
-    { title: 'Gifts', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
+    ${hero}
+    ${renderQuickCapture()}
+    ${renderDailyMedsQuick()}
+    <section class="day-hub" aria-label="Day controls">
+      ${renderDayHubRow('open-day-plan', 'Arrange today', 'Choose and order today', entries.length)}
+      ${renderDayHubRow('open-day-inbox', 'Inbox', 'Capture & manage todos', powerTodos.length)}
+      ${renderDayHubRow('open-day-setup', 'Setup', 'Routine & boosters')}
+    </section>`,
+    { title: 'Day', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
 
-  bindDayOverview()
-  if (options.focusCapture) document.querySelector('#capture-input')?.focus()
-}
-
-function bindDayOverview() {
-  document.querySelector('#hero-continue')?.addEventListener('click', () => {
-    if (!startDailySystem()) rerenderOverview()
-  })
-  document.querySelector('#hero-start')?.addEventListener('click', () => {
-    if (openPowerPrompt('start')) return
-    if (!startDailySystem()) rerenderOverview()
-  })
-  document.querySelector('#hero-pick')?.addEventListener('click', openPowerPromptForToday)
-  document.querySelectorAll('#hero-glance, #complete-glance').forEach((button) => button.addEventListener('click', openGlanceSheet))
-  document.querySelector('#finish-my-day')?.addEventListener('click', startFinishMyDay)
-  document.querySelector('#toggle-energy')?.addEventListener('click', () => {
-    toggleEnergyMode()
-    rerenderOverview()
-  })
-  document.querySelector('#wrap-up-day')?.addEventListener('click', wrapUpDay)
-  document.querySelector('#reopen-day')?.addEventListener('click', reopenDay)
-  document.querySelector('#bonus-full-day')?.addEventListener('click', () => {
-    toggleEnergyMode()
-    if (!startDailySystem()) rerenderOverview()
-  })
-  document.querySelector('#change-power-actions')?.addEventListener('click', openPowerPromptForToday)
-  document.querySelectorAll('[data-daily-med-toggle]').forEach((button) => {
-    button.addEventListener('click', () => toggleDailyMed(button.dataset.dailyMedToggle))
-  })
-  document.querySelector('#toggle-reorder')?.addEventListener('click', () => {
-    dayUi.reorder = !dayUi.reorder
-    rerenderOverview()
-  })
-  document.querySelectorAll('[data-order-move]').forEach((button) => {
-    button.addEventListener('click', () => moveTodayStackItem(button.dataset.stackKey, button.dataset.orderMove))
-  })
-  document.querySelector('#order-show-all')?.addEventListener('click', () => {
-    dayUi.orderAll = true
-    rerenderOverview()
-  })
-  document.querySelector('#capture-form')?.addEventListener('submit', handleCaptureSubmit)
-  document.querySelectorAll('[data-open-triage]').forEach((button) => {
-    button.addEventListener('click', () => openTriage())
-  })
-  document.querySelector('#toggle-inbox-edit')?.addEventListener('click', () => {
-    dayUi.inboxEdit = !dayUi.inboxEdit
-    rerenderOverview()
-  })
-  document.querySelector('#inbox-show-all')?.addEventListener('click', () => {
-    dayUi.inboxAll = true
-    rerenderOverview()
-  })
-  document.querySelectorAll('[data-power-todo-edit]').forEach((form) => form.addEventListener('submit', updatePowerTodo))
-  document.querySelectorAll('[data-power-todo-delete]').forEach((button) => {
-    button.addEventListener('click', () => deletePowerTodo(button.dataset.powerTodoDelete))
-  })
-  document.querySelector('#open-routine-editor')?.addEventListener('click', () => openDayEditor('routine'))
-  document.querySelectorAll('#open-boosters-editor, [data-open-boosters-editor]').forEach((button) => {
-    button.addEventListener('click', () => openDayEditor('boosters'))
-  })
-}
-
-// ---------- finish my day: five minutes of your own motivation, then one question ----------
-// The end of the day gets a ritual: your motivation clips and photos, full screen, for five minutes
-// straight. Then black, one question, and back to Gifts.
-
-const FINISH_REEL_MS = 5 * 60 * 1000
-const FINISH_QUESTION = 'Are you living life like the person you want to be?'
-const FINISH_QUESTION_MS = 12000
-let finishReel = null
-
-function startFinishMyDay() {
-  if (!guardActionTap(600)) return
-  // Finishing closes the day on purpose: what's done is done, anything left waits in Inbox.
-  const progress = currentDailyProgress()
-  if (!progress.closed_at) {
-    const stamp = nowIso()
-    progress.closed_at = stamp
-    progress.is_complete = true
-    if (!progress.started_at) progress.started_at = stamp
-    saveDailyProgress(progress)
-  }
-  clearSprint()
-  clearUndo()
-  hideToast(true)
-  closeSheet()
-  unlockAudio()
-  const queue = buildMotivationQueue(null)
-  if (!queue.length) {
-    showFinishQuestion({ empty: true })
-    return
-  }
-  finishReel = { endsAt: Date.now() + FINISH_REEL_MS, queue, index: 0, errors: 0, imageTimer: null, tick: null }
-  renderFinishReel()
-}
-
-function renderFinishReel() {
-  viewVersion += 1
-  currentView = 'finish'
-  document.documentElement.classList.remove('day-runner-active')
-  document.body.classList.remove('day-runner-active')
-  keepAwake()
-  const soundOn = motivationSoundOn()
-  app.innerHTML = `
-    <main class="rest-lock-screen finish-reel" aria-label="Finishing your day">
-      <video id="finish-video" class="rest-lock-video hidden" playsinline webkit-playsinline preload="auto" ${soundOn ? '' : 'muted'} aria-label="Motivation video"></video>
-      <img id="finish-image" class="rest-lock-image hidden" alt="" />
-      <div class="finish-reel-top">
-        <div class="finish-reel-bar" aria-hidden="true"><span id="finish-reel-progress"></span></div>
-        <div class="finish-reel-tools">
-          <button type="button" class="finish-reel-button" id="finish-sound">${soundOn ? 'Sound on' : 'Sound off'}</button>
-          <span class="finish-reel-time" id="finish-reel-time" aria-live="off"></span>
-          <button type="button" class="finish-reel-button" id="finish-skip">Skip</button>
-        </div>
-      </div>
-    </main>`
-  const video = document.querySelector('#finish-video')
-  const image = document.querySelector('#finish-image')
-  video.loop = false
-  video.addEventListener('ended', () => {
-    if (!finishReel) return
-    finishReel.errors = 0
-    advanceFinishReel()
-  })
-  const onError = () => {
-    if (!finishReel) return
-    finishReel.errors += 1
-    // Nothing in the library will play (offline, deleted): go straight to the question.
-    if (finishReel.errors >= Math.max(1, finishReel.queue.length)) {
-      showFinishQuestion()
-      return
-    }
-    advanceFinishReel()
-  }
-  video.addEventListener('error', onError)
-  image.addEventListener('error', onError)
-  image.addEventListener('load', () => { if (finishReel) finishReel.errors = 0 })
-  document.querySelector('#finish-skip')?.addEventListener('click', () => showFinishQuestion())
-  document.querySelector('#finish-sound')?.addEventListener('click', toggleFinishSound)
-  if (finishReel.tick) window.clearInterval(finishReel.tick)
-  finishReel.tick = window.setInterval(updateFinishReel, 500)
-  updateFinishReel()
-  playFinishItem()
-}
-
-function finishReelItem() {
-  if (!finishReel?.queue.length) return null
-  return motivationVideos.find((item) => item.id === finishReel.queue[finishReel.index] && item.signedUrl) || null
-}
-
-function playFinishItem() {
-  if (!finishReel) return
-  if (finishReel.imageTimer) window.clearTimeout(finishReel.imageTimer)
-  finishReel.imageTimer = null
-  const video = document.querySelector('#finish-video')
-  const image = document.querySelector('#finish-image')
-  if (!video || !image) return
-  let item = finishReelItem()
-  let guard = finishReel.queue.length
-  while (!item && guard > 0) {
-    finishReel.index = (finishReel.index + 1) % finishReel.queue.length
-    item = finishReelItem()
-    guard -= 1
-  }
-  if (!item) {
-    showFinishQuestion()
-    return
-  }
-  if (isImagePath(item.video_path)) {
-    video.pause()
-    video.classList.add('hidden')
-    image.classList.remove('hidden')
-    image.src = item.signedUrl
-    finishReel.imageTimer = window.setTimeout(advanceFinishReel, MOTIVATION_IMAGE_SECONDS * 1000)
-    return
-  }
-  image.classList.add('hidden')
-  image.removeAttribute('src')
-  video.classList.remove('hidden')
-  // One <video> element for every clip keeps iPhone's sound permission between clips.
-  if (video.getAttribute('src') !== item.signedUrl) video.src = item.signedUrl
-  else {
-    try {
-      video.currentTime = 0
-    } catch {
-      // Not seekable yet: it starts from the top anyway.
-    }
-  }
-  video.muted = !motivationSoundOn()
-  const result = video.play()
-  result?.catch?.((error) => {
-    if (error?.name === 'NotAllowedError' && !video.muted) {
-      video.muted = true
-      updateFinishSoundButton(false)
-      video.play()?.catch?.(() => {})
-    }
-  })
-}
-
-function advanceFinishReel() {
-  if (!finishReel || currentView !== 'finish') return
-  if (Date.now() >= finishReel.endsAt) {
-    showFinishQuestion()
-    return
-  }
-  finishReel.index += 1
-  if (finishReel.index >= finishReel.queue.length) {
-    // Went through everything: reshuffle and keep going until the five minutes are up.
-    finishReel.queue = buildMotivationQueue(finishReel.queue[finishReel.queue.length - 1])
-    finishReel.index = 0
-  }
-  playFinishItem()
-}
-
-function updateFinishReel() {
-  if (!finishReel || currentView !== 'finish') return
-  const left = Math.max(0, finishReel.endsAt - Date.now())
-  if (left <= 0) {
-    showFinishQuestion()
-    return
-  }
-  const bar = document.querySelector('#finish-reel-progress')
-  if (bar) bar.style.width = `${Math.min(100, (1 - left / FINISH_REEL_MS) * 100)}%`
-  const time = document.querySelector('#finish-reel-time')
-  if (time) time.textContent = formatTime(Math.ceil(left / 1000))
-}
-
-function toggleFinishSound() {
-  const next = !motivationSoundOn()
-  setMotivationSound(next)
-  updateFinishSoundButton(next)
-  const video = document.querySelector('#finish-video')
-  if (video && !video.classList.contains('hidden')) {
-    video.muted = !next
-    video.play()?.catch?.(() => {})
-  }
-}
-
-function updateFinishSoundButton(on) {
-  const button = document.querySelector('#finish-sound')
-  if (button) button.textContent = on ? 'Sound on' : 'Sound off'
-}
-
-function stopFinishReel() {
-  if (!finishReel) return
-  if (finishReel.tick) window.clearInterval(finishReel.tick)
-  if (finishReel.imageTimer) window.clearTimeout(finishReel.imageTimer)
-  document.querySelector('#finish-video')?.pause()
-  finishReel = null
-}
-
-function showFinishQuestion({ empty = false } = {}) {
-  stopFinishReel()
-  viewVersion += 1
-  currentView = 'finish-question'
-  keepAwake()
-  app.innerHTML = `
-    <main class="finish-question" id="finish-question" aria-live="polite">
-      <p class="finish-question-text">${escapeHtml(FINISH_QUESTION)}</p>
-      <p class="finish-question-sign">battle angel.</p>
-      ${empty ? '<p class="finish-question-hint">Add videos or photos in More &rarr; Edit motivation, and they play here first.</p>' : ''}
-    </main>`
-  playDayCompleteChime()
-  const version = viewVersion
-  const exit = () => {
-    if (viewVersion === version) exitFinishMyDay()
-  }
-  window.setTimeout(exit, FINISH_QUESTION_MS)
-  // A tap in the first moments was meant for the reel, not to leave the question.
-  window.setTimeout(() => document.querySelector('#finish-question')?.addEventListener('click', exit), 1500)
-}
-
-function exitFinishMyDay() {
-  releaseWakeLock()
-  renderDay('', { forceOverview: true })
-  window.scrollTo(0, 0)
-}
-
-// ---------- the eye: every card of today at a glance ----------
-// Tap a card to mark it done, in any order. Tap it again to undo. Close the sheet and the
-// autopilot picks up at the next card that isn't done.
-
-const EYE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.9"/></svg>'
-
-function glanceRoutineMeta(step, progress) {
-  const substeps = normalizeDailySubsteps(step.substeps)
-  if (isGymDailyStep(step)) {
-    const gym = getDailyGymState(step)
-    const names = gym?.planned.map((folder) => folder.name).join(' + ') || gym?.suggestion?.folder.name || ''
-    return names ? `Workout: ${names}` : 'Workout'
-  }
-  if (!substeps.length) return 'Routine'
-  const position = clamp(Number.parseInt(progress.substep_positions?.[step.id], 10) || 0, 0, substeps.length)
-  return position ? `${position} of ${substeps.length} done` : `${substeps.length} steps`
-}
-
-// What the eye shows: what's left in the order it comes up, then what's done or skipped today.
-function glanceItems(progress = currentDailyProgress()) {
-  const dateKey = progress.progress_date || todayDateKey()
-  const completed = new Set(progress.completed_step_ids || [])
-  const skipped = new Set(progress.skipped_step_ids || [])
-  const list = getPowerActionList()
-  const currentKey = getCurrentStackAction(progress)?.key || ''
-  const todo = []
-  getTodayStackEntries(progress).forEach((entry) => {
-    if (entry.type === 'routine') {
-      if (completed.has(entry.id) || skipped.has(entry.id)) return
-      const meta = glanceRoutineMeta(entry.step, progress)
-      todo.push({ key: entry.key, kind: 'routine', id: entry.id, title: entry.title, meta: isLaterKey(entry.key, progress) ? `Later · ${meta}` : meta, now: entry.key === currentKey })
-      return
-    }
-    if (entry.plan?.status !== 'pending') return
-    const label = powerActionLabel(entry.todo, list)
-    todo.push({ key: entry.key, kind: 'todo', id: entry.id, title: entry.title, meta: isLaterKey(entry.key, progress) ? `Later · ${label.text}` : label.text, number: label.number, now: entry.key === currentKey })
-  })
-
-  const done = []
-  dailySteps.forEach((step) => {
-    if (!stepScheduledOn(step, dateKey)) return
-    if (completed.has(step.id)) done.push({ key: routineStackKey(step.id), kind: 'routine', id: step.id, title: step.title, meta: isGymDailyStep(step) ? 'Workout' : 'Routine', state: 'done' })
-    else if (skipped.has(step.id)) done.push({ key: routineStackKey(step.id), kind: 'routine', id: step.id, title: step.title, meta: 'Skipped today', state: 'skipped' })
-  })
-  powerDoneToday.forEach((item) => {
-    const meta = getTodayPlanForTodo(item.id) ? powerActionLabel(item, list).text : 'From Inbox'
-    done.push({ key: todoStackKey(item.id), kind: 'todo', id: item.id, title: item.title, meta, state: 'done' })
-  })
-  getTodayPowerPlans().filter((plan) => plan.status === 'skipped').forEach((plan) => {
-    const item = getPowerTodo(plan.todo_id)
-    if (item) done.push({ key: todoStackKey(item.id), kind: 'todo', id: item.id, title: item.title, meta: item.snoozed_until ? `Skipped · back ${returnDayLabel(item.snoozed_until)}` : 'Skipped today', state: 'skipped' })
-  })
-  return { todo, done }
-}
-
-function renderGlanceRow(item, state) {
-  const mark = state === 'done'
-    ? '&#10003;'
-    : state === 'skipped'
-      ? '&ndash;'
-      : item.kind === 'todo' && item.number ? String(item.number) : ''
-  const classes = ['glance-row', `is-${state}`, item.now ? 'is-now' : '', glanceSession?.lastKey === item.key ? 'is-changed' : ''].filter(Boolean).join(' ')
-  const action = state === 'todo' ? 'Mark done' : 'Put back on today'
-  return `
-    <button type="button" class="${classes}" data-glance-key="${escapeHtml(item.key)}" aria-label="${escapeHtml(`${action}: ${item.title}`)}">
-      <span class="glance-mark ${item.kind === 'todo' && state === 'todo' && item.number ? 'is-power' : ''}" aria-hidden="true">${mark}</span>
-      <span class="glance-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.now ? `Up now · ${item.meta}` : item.meta)}</small></span>
-    </button>`
-}
-
-function renderGlanceBody() {
-  const progress = currentDailyProgress()
-  const { todo, done } = glanceItems(progress)
-  const dateKey = progress.progress_date || todayDateKey()
-  const offToday = dailySteps.filter((step) => !stepScheduledOn(step, dateKey))
-  const low = isLowEnergy(progress) && hasCoreSteps()
-  const resting = low ? dailySteps.filter((step) => stepScheduledOn(step, dateKey) && !step.is_core && !dailyResolvedStepIds(progress).has(step.id)).length : 0
-  const notes = [
-    resting ? `Low energy: ${plural(resting, 'non-core step')} resting today.` : '',
-    offToday.length ? `Not on ${WEEKDAY_NAMES[weekdayOf(dateKey)]}s: ${offToday.length <= 3 ? offToday.map((step) => step.title).join(', ') : plural(offToday.length, 'step')}.` : ''
-  ].filter(Boolean)
-  return `
-    <div class="sheet-head"><strong>Today</strong><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
-    <p class="glance-hint">Tap a card to mark it done, in any order. Tap again to undo.</p>
-    <h4 class="glance-group">To do <span>${todo.length}</span></h4>
-    ${todo.length
-      ? `<div class="glance-list" id="glance-todo">${todo.map((item) => renderGlanceRow(item, 'todo')).join('')}</div>`
-      : '<p class="glance-empty">All done. Nothing left today.</p>'}
-    ${done.length ? `
-      <h4 class="glance-group">Done <span>${done.filter((item) => item.state === 'done').length}</span></h4>
-      <div class="glance-list" id="glance-done">${done.map((item) => renderGlanceRow(item, item.state)).join('')}</div>` : ''}
-    ${notes.map((note) => `<p class="glance-note">${escapeHtml(note)}</p>`).join('')}
-    <button type="button" class="glance-open-day" id="glance-open-day">Open the full day <small>power actions, boosters, inbox, setup</small><span aria-hidden="true">&rsaquo;</span></button>`
-}
-
-function openGlanceSheet() {
-  glanceSession = { routineBefore: new Map(), todoBefore: new Map(), lastKey: '' }
-  const backdrop = openSheet(renderGlanceBody(), {
-    label: "Today's cards",
-    sheetClass: 'glance-sheet',
-    onDismiss: () => {
-      glanceSession = null
-      if (currentView === 'day-runner') renderDayRunner()
-      else if (currentView === 'day' || currentView === 'day-overview') rerenderOverview()
-    }
-  })
-  bindGlanceSheet(backdrop)
-}
-
-function bindGlanceSheet(backdrop) {
-  backdrop.querySelectorAll('[data-glance-key]').forEach((button) => {
-    button.addEventListener('click', () => toggleGlanceItem(button.dataset.glanceKey))
-  })
-  backdrop.querySelector('#glance-open-day')?.addEventListener('click', () => {
-    glanceSession = null
-    closeSheet()
-    openDayOverview()
-  })
-}
-
-function refreshGlanceSheet() {
-  const backdrop = document.querySelector('.sheet-backdrop')
-  const sheet = backdrop?.querySelector('.glance-sheet')
-  if (!sheet) return
-  const y = sheet.scrollTop
-  sheet.innerHTML = renderGlanceBody()
-  sheet.scrollTop = y
-  bindGlanceSheet(backdrop)
-}
-
-// Puts a key back at a position in today's order (a power action you un-did returns to its place).
-function placeStackKey(key, index) {
-  const progress = currentDailyProgress()
-  const order = normalizeTodayStackOrder(progress).filter((item) => item !== key)
-  if (!normalizeTodayStackOrder(progress).includes(key)) return
-  order.splice(clamp(index, 0, order.length), 0, key)
-  progress.stack_order = order
-  saveDailyProgress(progress)
-}
-
-// A todo finished earlier (in the runner, or another day's session of this sheet) goes back to today.
-function reopenTodoToday(todoId) {
-  const done = powerDoneToday.find((item) => item.id === todoId)
-  if (!done) return false
-  const stamp = nowIso()
-  powerDoneToday = powerDoneToday.filter((item) => item.id !== todoId)
-  powerTodos = sortBySortOrder([...powerTodos.filter((item) => item.id !== todoId), normalizeTodoRow({ ...done, completed_at: null })])
-  queueTodoPatch(todoId, { completed_at: null })
-  if (getTodayPlanForTodo(todoId)) queuePlanWrite(setLocalPowerPlan(todoId, { status: 'pending', updated_at: stamp }))
-  else setTodoTodayStatus(todoId, 'pending')
-  saveSnapshot()
-  return true
-}
-
-function toggleGlanceItem(key) {
-  if (!glanceSession) return
-  const [kind, id] = String(key).split(':', 2)
-  const progress = currentDailyProgress()
-  let markedDone = false
-
-  if (kind === 'routine') {
-    const step = dailySteps.find((item) => item.id === id)
-    if (!step) return
-    const completed = new Set(progress.completed_step_ids || [])
-    const skipped = new Set(progress.skipped_step_ids || [])
-    const positions = { ...(progress.substep_positions || {}) }
-    const substeps = normalizeDailySubsteps(step.substeps)
-    if (completed.has(id) || skipped.has(id)) {
-      // Back on today: exactly as it was before this sheet touched it, or fresh.
-      const before = glanceSession.routineBefore.get(id)
-      completed.delete(id)
-      skipped.delete(id)
-      if (before && !before.completed && !before.skipped) {
-        if (before.position) positions[id] = before.position
-        else delete positions[id]
-      } else delete positions[id]
-    } else {
-      if (!glanceSession.routineBefore.has(id)) glanceSession.routineBefore.set(id, { completed: false, skipped: false, position: Number.parseInt(positions[id], 10) || 0 })
-      completed.add(id)
-      skipped.delete(id)
-      if (substeps.length) positions[id] = substeps.length
-      markedDone = true
-    }
-    progress.completed_step_ids = [...completed]
-    progress.skipped_step_ids = [...skipped]
-    progress.later_step_ids = (progress.later_step_ids || []).filter((item) => item !== id)
-    progress.substep_positions = positions
-    progress.is_complete = false
-    saveDailyProgress(progress)
-  } else if (kind === 'todo') {
-    const plan = getTodayPlanForTodo(id)
-    const isOpen = Boolean(getPowerTodo(id))
-    if (isOpen && plan?.status === 'skipped') {
-      // Skipped earlier, wanted after all: back on today, no longer resting.
-      queuePlanWrite(setLocalPowerPlan(id, { status: 'pending', updated_at: nowIso() }))
-      if (actionEngineAvailable && getPowerTodo(id)?.snoozed_until) patchLocalTodo(id, { snoozed_until: null })
-      saveSnapshot()
-    } else if (isOpen) {
-      const index = normalizeTodayStackOrder(progress).indexOf(key)
-      const restore = markTodoDone(id)
-      if (!restore) return
-      glanceSession.todoBefore.set(id, { restore, index })
-      clearSprintFor(key)
-      markedDone = true
-    } else {
-      const before = glanceSession.todoBefore.get(id)
-      if (before) {
-        before.restore()
-        glanceSession.todoBefore.delete(id)
-        placeStackKey(key, before.index)
-      } else if (!reopenTodoToday(id)) return
-    }
-  } else return
-
-  glanceSession.lastKey = key
-  if (markedDone) {
-    unlockAudio()
-    playDoneTick()
-    vibrate(12)
-  } else vibrate(8)
-  refreshGlanceSheet()
-}
-
-// ---------- Later: pinned at the top of the runner, tap the circle when done ----------
-// Everything you sent to Later today waits in a strip above the card, so you can finish it the moment
-// you get to it, in any order. The circle is a checkbox: one tap checks it off (with Undo). The name
-// needs a double tap, so brushing it never finishes anything.
-
-const LATER_DOUBLE_TAP_MS = 420
-
-function isLaterKey(key, progress = currentDailyProgress()) {
-  return Number(progress.defer_counts?.[key]) > 0
-}
-
-// Still open, sent to Later at least once today, and not the card on screen right now.
-// Power actions first in their order of importance, then routine steps in routine order.
-function getLaterItems(progress = currentDailyProgress(), currentKey = '') {
-  const resolved = dailyResolvedStepIds(progress)
-  const list = getPowerActionList()
-  const items = getTodayStackEntries(progress).filter((entry) => {
-    if (entry.key === currentKey || !isLaterKey(entry.key, progress)) return false
-    return entry.type === 'todo' ? entry.plan?.status === 'pending' : !resolved.has(entry.id)
-  }).map((entry) => {
-    if (entry.type === 'todo') {
-      const label = powerActionLabel(entry.todo, list)
-      return { key: entry.key, kind: 'todo', title: entry.title, number: label.number, order: label.number || 99 }
-    }
-    const index = dailySteps.findIndex((step) => step.id === entry.id)
-    return { key: entry.key, kind: 'routine', title: entry.title, number: 0, order: 100 + index }
-  })
-  return items.sort((a, b) => a.order - b.order)
-}
-
-function renderLaterTray(progress, currentKey) {
-  const items = getLaterItems(progress, currentKey)
-  if (!items.length) return ''
-  return `
-    <section class="later-tray" aria-label="Later today">
-      <div class="later-head"><span>Later</span><small id="later-hint">tap the circle when done</small></div>
-      <div class="later-chips">
-        ${items.map((item) => `
-          <div class="later-chip ${item.kind === 'todo' ? 'is-power' : ''}" data-later-key="${escapeHtml(item.key)}">
-            <button type="button" class="later-check" data-later-check="${escapeHtml(item.key)}" aria-label="${escapeHtml(`Mark ${item.title} done`)}">
-              <span class="later-mark" aria-hidden="true">${item.kind === 'todo' && item.number ? item.number : ''}</span>
-            </button>
-            <button type="button" class="later-name" data-later-name="${escapeHtml(item.key)}" aria-label="${escapeHtml(`${item.title}. Double-tap to mark done`)}">
-              <span class="later-title">${escapeHtml(item.title)}</span>
-            </button>
-          </div>`).join('')}
-      </div>
-    </section>`
-}
-
-function bindLaterTray() {
-  const hint = document.querySelector('#later-hint')
-  let hintTimer = null
-  const flashHint = (text) => {
-    if (!hint) return
-    hint.textContent = text
-    if (hintTimer) window.clearTimeout(hintTimer)
-    hintTimer = window.setTimeout(() => { hint.textContent = 'tap the circle when done' }, 1600)
-  }
-  // The circle is a checkbox: one tap, it fills with a check, then the item leaves the strip.
-  document.querySelectorAll('[data-later-check]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const chip = button.closest('.later-chip')
-      if (!chip || chip.classList.contains('is-checking')) return
-      chip.classList.add('is-checking')
-      const mark = button.querySelector('.later-mark')
-      if (mark) mark.innerHTML = '&#10003;'
-      vibrate(12)
-      window.setTimeout(() => completeLaterItem(button.dataset.laterCheck), prefersReducedMotion() ? 0 : 200)
-    })
-  })
-  // The name needs a double tap; one tap only highlights it and points at the circle.
-  document.querySelectorAll('[data-later-name]').forEach((button) => {
-    let lastTapAt = 0
-    let disarmTimer = null
-    button.addEventListener('click', () => {
-      const chip = button.closest('.later-chip')
-      const now = Date.now()
-      if (now - lastTapAt <= LATER_DOUBLE_TAP_MS) {
-        lastTapAt = 0
-        if (disarmTimer) window.clearTimeout(disarmTimer)
-        completeLaterItem(button.dataset.laterName)
-        return
-      }
-      lastTapAt = now
-      document.querySelectorAll('.later-chip.is-armed').forEach((other) => other.classList.remove('is-armed'))
-      chip?.classList.add('is-armed')
-      vibrate(6)
-      flashHint('tap the circle to check it off')
-      if (disarmTimer) window.clearTimeout(disarmTimer)
-      disarmTimer = window.setTimeout(() => chip?.classList.remove('is-armed'), 1600)
-    })
-  })
-}
-
-function completeLaterItem(key) {
-  const [kind, id] = String(key).split(':', 2)
-  const progressBefore = cloneDailyProgress()
-  let restoreTodo = null
-  let title = ''
-  if (kind === 'todo') {
-    const todo = getPowerTodo(id)
-    if (!todo) return
-    title = todo.title
-    restoreTodo = markTodoDone(id)
-    if (!restoreTodo) return
-  } else if (kind === 'routine') {
-    const step = dailySteps.find((item) => item.id === id)
-    const progress = currentDailyProgress()
-    // A second tap that lands after a redraw must not count it twice.
-    if (!step || (progress.completed_step_ids || []).includes(id)) return
-    title = step.title
-    const substeps = normalizeDailySubsteps(step.substeps)
-    progress.completed_step_ids = [...new Set([...(progress.completed_step_ids || []), id])]
-    progress.skipped_step_ids = (progress.skipped_step_ids || []).filter((item) => item !== id)
-    progress.later_step_ids = (progress.later_step_ids || []).filter((item) => item !== id)
-    if (substeps.length) progress.substep_positions = { ...(progress.substep_positions || {}), [id]: substeps.length }
-    progress.is_complete = false
-    saveDailyProgress(progress)
-  } else return
-  clearSprintFor(key)
-  unlockAudio()
-  playDoneTick()
-  if (currentView === 'day-runner') renderDayRunner()
-  rememberUndo(`Done: ${shorten(title, 24)}`, () => {
-    restoreTodo?.()
-    saveDailyProgress(progressBefore)
-  }, renderDayRunner)
-}
-
-// ---------- the runner: one card, one decision ----------
-
-function renderDeferNudge(count, type) {
-  const advice = type === 'todo'
-    ? 'Usually that means too big or too vague. Shrink it, give it 5 minutes, or skip it today. No guilt.'
-    : type === 'gym'
-      ? 'Deal: just the first exercise. If you still want to stop after it, stop. Or skip today, no guilt.'
-      : 'Give it 5 minutes, or skip it today. No guilt.'
-  return `<div class="defer-nudge" role="note"><strong>Moved ${count}× today.</strong> ${advice}</div>`
-}
-
-// Paralysis tools stay out of sight until you need them: after 30 seconds on the same todo,
-// or right away when it comes back after a Later. An easy card stays just DONE / Later / Skip.
-function renderStuckTools(action) {
-  return `
-    <div class="card-tools stuck-tools" id="stuck-tools">
-      <span class="stuck-label">Stuck?</span>
-      ${renderSprintPill(action)}
-      <button type="button" class="card-link" id="shrink-todo">Shrink it</button>
-    </div>`
-}
-
-function bindStuckTools(action) {
-  document.querySelector('#sprint-pill')?.addEventListener('click', () => startSprint(action))
-  document.querySelector('#shrink-todo')?.addEventListener('click', () => showShrinkSheet(action.todo))
-}
-
-function scheduleStuckReveal(action) {
-  if (stuckRevealTimer) window.clearTimeout(stuckRevealTimer)
-  const key = runnerKeyFor(action)
-  stuckRevealTimer = window.setTimeout(() => {
-    stuckRevealTimer = null
-    const slot = document.querySelector('#stuck-slot')
-    if (currentView !== 'day-runner' || lastRunnerKey !== key || !slot || slot.childElementCount) return
-    revealedStuckKeys.add(key)
-    slot.innerHTML = renderStuckTools(action)
-    bindStuckTools(action)
-  }, STUCK_REVEAL_MS)
+  document.querySelector('#start-day')?.addEventListener('click', startDailySystem)
+  document.querySelector('#empty-plan-day')?.addEventListener('click', renderDayPlannerScreen)
+  document.querySelector('#open-day-plan')?.addEventListener('click', renderDayPlannerScreen)
+  document.querySelector('#open-day-inbox')?.addEventListener('click', renderDayInboxScreen)
+  document.querySelector('#open-day-setup')?.addEventListener('click', renderDaySetupScreen)
+  bindDailyMeds()
+  bindPowerTodos()
 }
 
 function renderDayRunner() {
-  if (stuckRevealTimer) window.clearTimeout(stuckRevealTimer)
-  stuckRevealTimer = null
+  setActiveDayMode('daily')
   const progress = currentDailyProgress()
   progress.stack_order = normalizeTodayStackOrder(progress)
-  if (progress.closed_at) {
+  const action = getCurrentStackAction()
+  if (!action) {
+    progress.is_complete = true
+    saveDailyProgress(progress)
+    clearDailyUndo()
+    clearPowerUndo()
+    setActiveDayMode(null)
     renderDay('', { forceOverview: true })
     return
   }
-  const action = getCurrentStackAction(progress)
-  if (!action) {
-    const firstFinish = !progress.is_complete
-    progress.is_complete = true
-    saveDailyProgress(progress)
-    clearSprint()
-    renderDay('', { forceOverview: true, justCompleted: firstFinish })
-    if (firstFinish) playDayCompleteChime()
-    return
-  }
 
+  const remaining = remainingTodayActionCount()
+  let cardBody = ''
+  let primaryLabel = 'DONE'
   let gymState = null
-  if (action.type === 'routine' && !action.isSubstep) {
-    gymState = getDailyGymState(action.step)
-    if (gymStepSatisfied(gymState)) {
-      advanceDailyAction(action.step.id, false)
+
+  if (action.type === 'todo') {
+    cardBody = `
+      <div class="day-step-parent">Todo</div>
+      <h2>${escapeHtml(action.title)}</h2>`
+  } else {
+    const { step, substeps, substepIndex, title, isSubstep } = action
+    gymState = !isSubstep ? getDailyGymState(step) : null
+    if (gymState?.planned.length && gymState.remaining.length === 0) {
+      advanceDailyAction(step.id, false, { bypassGuard: true, rememberUndo: false, render: false })
       renderDayRunner()
       return
     }
-  }
-
-  const score = todayScore(progress)
-  const low = isLowEnergy(progress) && hasCoreSteps()
-  const deferCount = Number(progress.defer_counts?.[action.key]) || 0
-  const key = runnerKeyFor(action)
-  // The first card of the day is the moment to decide how big today is, so the option lives right there.
-  const roughDayLink = score.done === 0 && hasCoreSteps() && !low
-    ? '<div class="card-tools"><button type="button" class="card-link" id="rough-day">Rough day? Core only</button></div>'
-    : ''
-  let cardBody = ''
-  let cardClass = ''
-  let primaryLabel = 'DONE'
-  let waitForStuck = false
-
-  if (action.type === 'todo') {
-    const todo = action.todo
-    const parent = todo.parent_id ? getAnyTodo(todo.parent_id) : null
-    const sprint = readSprint()
-    const showStuck = deferCount >= 1 || revealedStuckKeys.has(key) || Boolean(sprint && sprint.key === key)
-    const label = powerActionLabel(todo)
-    const parentTitle = label.parentTitle || parent?.title || ''
-    waitForStuck = !showStuck
-    cardClass = 'day-step-card-todo'
-    cardBody = `
-      <div class="day-step-parent">${escapeHtml(label.text)}${parentTitle ? ` <span>${label.parentTitle ? '' : 'step of: '}${escapeHtml(shorten(parentTitle, 28))}</span>` : ''}</div>
-      <h2>${escapeHtml(todo.title)}</h2>
-      ${deferCount >= DEFER_NUDGE_AT ? renderDeferNudge(deferCount, 'todo') : ''}
-      <div id="stuck-slot">${showStuck ? renderStuckTools(action) : ''}</div>
-      ${roughDayLink}`
-  } else if (gymState) {
-    const { step } = action
-    const nextFolder = gymState.remaining[0] || gymState.suggestion?.folder || null
-    const plannedNames = gymState.planned.map((folder) => folder.name).join(' + ')
-    const doneCount = gymState.planned.length - gymState.remaining.length
-    const resumable = nextFolder && getSavedWorkoutForFolder(nextFolder.id)
-    primaryLabel = nextFolder ? `${resumable ? 'RESUME' : 'START'} ${nextFolder.name.toUpperCase()}` : 'CHOOSE WORKOUT'
-    cardClass = 'day-step-card-gym'
-    cardBody = `
-      <div class="day-step-parent">${escapeHtml(step.title.trim().toLowerCase() === 'gym' ? 'Routine · Forge' : `${step.title} · Forge`)}</div>
-      <h2>${escapeHtml(plannedNames || gymState.suggestion?.folder.name || step.title)}</h2>
-      ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
-      ${deferCount >= DEFER_NUDGE_AT ? renderDeferNudge(deferCount, 'gym') : ''}
-      ${gymState.planned.length > 1 && doneCount ? `<p class="day-gym-empty">${doneCount} of ${gymState.planned.length} done. Next: ${escapeHtml(gymState.remaining[0].name)}.</p>` : ''}
-      ${!gymState.planned.length && gymState.suggestion ? `<p class="day-gym-empty">Nothing planned, so it's picked for you: last trained ${escapeHtml(daysAgoLabel(gymState.suggestion.last))}.</p><div class="card-tools"><button type="button" class="card-link" id="gym-choose-other">Choose another</button></div>` : ''}
-      ${!gymState.planned.length && !gymState.suggestion ? '<p class="day-gym-empty">No workout planned today.</p>' : ''}
-      ${roughDayLink}`
-  } else {
-    const { step, substeps, substepIndex, title, isSubstep } = action
-    const substepMeta = isSubstep ? `${substepIndex + 1} of ${substeps.length}` : ''
-    cardBody = `
-      <div class="day-step-parent">${isSubstep ? `${escapeHtml(step.title)} <span>${escapeHtml(substepMeta)}</span>` : 'Routine'}${low && step.is_core ? ' <span>core</span>' : ''}</div>
-      <h2>${escapeHtml(title)}</h2>
-      ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
-      ${deferCount >= DEFER_NUDGE_AT ? `${renderDeferNudge(deferCount, 'routine')}<div class="card-tools">${renderSprintPill(action)}</div>` : ''}
-      ${roughDayLink}`
+    if (gymState) {
+      const plannedNames = gymState.planned.map((folder) => folder.name).join(' + ')
+      const nextFolder = gymState.remaining[0] || null
+      primaryLabel = nextFolder ? 'START WORKOUT' : 'CHOOSE WORKOUT'
+      cardBody = `
+        <div class="day-step-parent">Routine · Gym</div>
+        <h2>${escapeHtml(plannedNames || 'Gym')}</h2>
+        ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
+        ${renderRoutineBoosters(step.id)}
+        ${gymState.planned.length ? '' : '<p class="day-gym-empty">No workout planned today.</p>'}`
+    } else {
+      const substepMeta = isSubstep ? `${substepIndex + 1} of ${substeps.length}` : ''
+      cardBody = `
+        <div class="day-step-parent">${isSubstep ? `${escapeHtml(step.title)} <span>${escapeHtml(substepMeta)}</span>` : 'Routine'}</div>
+        <h2>${escapeHtml(title)}</h2>
+        ${step.note ? `<p>${escapeHtml(step.note)}</p>` : ''}
+        ${renderRoutineBoosters(step.id)}`
+    }
   }
 
   const resolvedRoutine = dailyResolvedStepIds(progress)
-  const canLater = getTodayStackEntries(progress).some((entry) => entry.key !== action.key && (
+  const canLater = getTodayStackEntries().some((entry) => entry.key !== action.key && (
     entry.type === 'todo' ? entry.plan?.status === 'pending' : !resolvedRoutine.has(entry.id)
   ))
+  const undoHtml = renderDailyUndoToast() || renderPowerUndoToast()
 
   renderShell(`
     <div class="day-runner-screen">
-      <header class="runner-head">
-        <div class="day-runner-top">
-          <div class="runner-left">
-            <button type="button" class="runner-eye" id="runner-eye" aria-label="See all of today's cards">${EYE_ICON}</button>
-            <div class="runner-score" aria-label="${score.done} done today"><strong>&#10003; ${score.done}</strong></div>
-          </div>
-          <div class="day-runner-tools">
-            ${renderRunnerMedsPill()}
-            <button type="button" class="day-runner-capture" id="runner-capture" aria-label="Capture a thought">+</button>
-          </div>
+      <div class="day-runner-top">
+        <div class="day-runner-position">${remaining} left</div>
+        <div class="day-runner-tools">
+          <button type="button" class="day-runner-capture" id="runner-capture" aria-label="Capture a todo">+</button>
+          <details class="day-runner-menu">
+            <summary aria-label="Daily options">•••</summary>
+            <div class="day-runner-menu-popover">
+              <button type="button" class="text-button" id="exit-day-runner">Day overview</button>
+            </div>
+          </details>
         </div>
-        <div class="runner-progress" aria-hidden="true"><span style="width:${score.percent}%"></span></div>
-        ${renderLaterTray(progress, action.key)}
-      </header>
-      <section class="day-step-card ${cardClass}" id="day-step-card" aria-label="Current action: ${escapeHtml(action.title)}">
+      </div>
+      <section class="day-step-card ${gymState ? 'day-step-card-gym' : ''} ${action.type === 'todo' ? 'day-step-card-todo' : ''}" id="day-step-card" aria-label="Current action: ${escapeHtml(action.title)}">
         ${cardBody}
       </section>
       <div class="day-action-controls" aria-label="Current action controls">
@@ -5419,339 +3379,136 @@ function renderDayRunner() {
         </div>
         <button type="button" class="day-primary-action" id="primary-current-action">${escapeHtml(primaryLabel)} <span aria-hidden="true">&rarr;</span></button>
       </div>
+      ${undoHtml}
     </div>`,
-    { title: 'Gifts', showAccount: false, showTimer: false, showHeader: false, navTab: 'day', view: 'day-runner', shellClass: 'runner-shell' })
-
-  lastRunnerKey = key
-  syncSprintWithAction(action)
-  if (action.type === 'todo') {
-    if (waitForStuck) scheduleStuckReveal(action)
-    else bindStuckTools(action)
-  } else {
-    document.querySelector('#sprint-pill')?.addEventListener('click', () => startSprint(action))
-  }
+    { title: 'Day', showAccount: false, showTimer: false, showHeader: false, view: 'day-runner' })
 
   document.querySelector('#runner-capture')?.addEventListener('click', showRunnerCapture)
-  document.querySelector('#runner-meds')?.addEventListener('click', showMedsSheet)
-  document.querySelector('#runner-eye')?.addEventListener('click', openGlanceSheet)
-  bindLaterTray()
-  document.querySelector('#rough-day')?.addEventListener('click', () => {
-    toggleEnergyMode()
-    renderDayRunner()
-  })
-  document.querySelector('#gym-choose-other')?.addEventListener('click', () => renderWorkouts())
+  document.querySelector('#exit-day-runner')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
 
-  const primary = document.querySelector('#primary-current-action')
-  const later = document.querySelector('#later-current-action')
-  const skip = document.querySelector('#skip-current-action')
   if (action.type === 'todo') {
-    primary?.addEventListener('click', () => completeTodoFromRunner(action.todo.id))
-    later?.addEventListener('click', () => deferTodoFromRunner(action.todo.id))
-    skip?.addEventListener('click', () => skipTodoFromRunner(action.todo.id))
+    document.querySelector('#primary-current-action')?.addEventListener('click', () => completePowerAction(action.plan.id))
+    document.querySelector('#skip-current-action')?.addEventListener('click', () => skipPowerAction(action.plan.id))
+    document.querySelector('#later-current-action')?.addEventListener('click', () => deferPowerAction(action.plan.id))
   } else {
-    primary?.addEventListener('click', () => triggerDailyPrimaryAction(action.step))
-    later?.addEventListener('click', () => deferRoutineFromRunner(action.step))
-    skip?.addEventListener('click', () => skipRoutineFromRunner(action.step))
+    document.querySelector('#primary-current-action')?.addEventListener('click', () => triggerDailyPrimaryAction(action.step))
+    document.querySelector('#skip-current-action')?.addEventListener('click', () => skipDailyStep(action.step.id))
+    document.querySelector('#later-current-action')?.addEventListener('click', () => deferDailyStep(action.step.id))
   }
+  bindDailyUndoToast()
+  bindPowerUndoToast()
+  bindDailyMeds()
 }
 
-function triggerDailyPrimaryAction(step) {
-  const gymState = getDailyGymState(step)
-  if (gymState) {
-    if (!guardActionTap()) return
-    const nextFolder = gymState.remaining[0] || gymState.suggestion?.folder || null
-    if (nextFolder) openFolder(nextFolder.id, { mode: 'workout' })
-    else renderWorkouts()
+async function addDailyStep(event) {
+  event.preventDefault()
+  if (!currentUser || !dailySystemAvailable) return
+  const title = document.querySelector('#daily-step-title')?.value.trim().slice(0, DAILY_STEP_TITLE_MAX)
+  const note = document.querySelector('#daily-step-note')?.value.trim().slice(0, DAILY_STEP_NOTE_MAX) || ''
+  const substeps = parseDailySubstepsText(document.querySelector('#daily-step-substeps')?.value || '')
+  const form = event.currentTarget
+  const active_days = readRoutineDays(form)
+  const status = document.querySelector('#daily-editor-status')
+  if (!title) return
+  if (!active_days.length) {
+    if (status) status.textContent = 'Choose at least one day.'
     return
   }
-  completeRoutineFromRunner(step)
-}
-
-function completeRoutineFromRunner(step) {
-  if (!guardActionTap()) return
-  unlockAudio()
-  const progressBefore = cloneDailyProgress()
-  if (!advanceDailyAction(step.id, false)) return
-  clearSprintFor(routineStackKey(step.id))
-  celebrateDone().then(() => {
-    renderDayRunner()
-    rememberUndo('Done', () => saveDailyProgress(progressBefore), renderDayRunner)
+  if (status) status.textContent = 'Saving...'
+  const nextOrder = Math.max(0, ...dailySteps.map((step) => Number(step.sort_order) || 0)) + 1
+  const { error } = await supabase.from('daily_steps').insert({
+    user_id: currentUser.id,
+    title,
+    note,
+    substeps,
+    active_days,
+    sort_order: nextOrder,
+    updated_at: new Date().toISOString()
   })
-}
-
-function skipRoutineFromRunner(step) {
-  if (!guardActionTap()) return
-  const progressBefore = cloneDailyProgress()
-  if (!advanceDailyAction(step.id, true)) return
-  clearSprintFor(routineStackKey(step.id))
-  renderDayRunner()
-  rememberUndo('Skipped today', () => saveDailyProgress(progressBefore), renderDayRunner)
-}
-
-function deferRoutineFromRunner(step) {
-  if (!guardActionTap()) return
-  const progressBefore = cloneDailyProgress()
-  if (!deferStackKey(routineStackKey(step.id))) return
-  clearSprintFor(routineStackKey(step.id))
-  renderDayRunner()
-  rememberUndo('Moved to later', () => saveDailyProgress(progressBefore), renderDayRunner)
-}
-
-function completeTodoFromRunner(todoId) {
-  if (!guardActionTap()) return
-  unlockAudio()
-  const progressBefore = cloneDailyProgress()
-  const restore = markTodoDone(todoId)
-  if (!restore) return
-  clearSprintFor(todoStackKey(todoId))
-  const progress = currentDailyProgress()
-  progress.stack_order = normalizeTodayStackOrder(progress)
-  saveDailyProgress(progress)
-  celebrateDone().then(() => {
-    renderDayRunner()
-    rememberUndo('Done', () => {
-      restore()
-      saveDailyProgress(progressBefore)
-    }, renderDayRunner)
-  })
-}
-
-// Skip on a todo means "not today": it stays in Inbox and comes back after a growing gap
-// (tomorrow, then 3 days, then a week), so things you keep skipping fade out on their own.
-function skipTodoFromRunner(todoId) {
-  if (!guardActionTap()) return
-  const planBefore = getTodayPlanForTodo(todoId)
-  const todoBefore = getPowerTodo(todoId)
-  if (!planBefore || !todoBefore) return
-  const progressBefore = cloneDailyProgress()
-  queuePlanWrite(setLocalPowerPlan(todoId, { status: 'skipped', updated_at: nowIso() }))
-  let label = 'Skipped today · still in Inbox'
-  if (actionEngineAvailable) {
-    const days = SNOOZE_STEPS_DAYS[Math.min(todoBefore.snooze_count, SNOOZE_STEPS_DAYS.length - 1)]
-    const until = addDaysKey(todayDateKey(), days)
-    patchLocalTodo(todoId, { snoozed_until: until, snooze_count: todoBefore.snooze_count + 1 })
-    label = `Skipped · back ${returnDayLabel(until)}`
+  if (error) {
+    if (status) status.textContent = isNetworkError(error) ? 'Connect to edit your routine.' : error.message
+    return
   }
-  clearSprintFor(todoStackKey(todoId))
+  await loadDailySystem()
   saveSnapshot()
-  renderDayRunner()
-  rememberUndo(label, () => {
-    queuePlanWrite(setLocalPowerPlan(todoId, { status: planBefore.status, updated_at: nowIso() }))
-    if (actionEngineAvailable) patchLocalTodo(todoId, { snoozed_until: todoBefore.snoozed_until, snooze_count: todoBefore.snooze_count })
-    saveDailyProgress(progressBefore)
-  }, renderDayRunner)
+  renderRoutineSetupScreen()
 }
 
-function deferTodoFromRunner(todoId) {
-  if (!guardActionTap()) return
-  const progressBefore = cloneDailyProgress()
-  if (!deferStackKey(todoStackKey(todoId))) return
-  clearSprintFor(todoStackKey(todoId))
-  renderDayRunner()
-  rememberUndo('Moved to later', () => saveDailyProgress(progressBefore), renderDayRunner)
-}
-
-// "Too big?" Turn the vague thing into one tiny physical first step and do that instead.
-function showShrinkSheet(todo) {
-  if (!todo) return
-  const backdrop = openSheet(`
-    <form class="runner-capture-form" id="shrink-form" autocomplete="off">
-      <div class="sheet-head"><strong>Shrink it</strong><button type="button" class="sheet-close" data-sheet-close aria-label="Close">&times;</button></div>
-      <p class="sheet-copy">What's the very first physical step for <strong>${escapeHtml(shorten(todo.title, 40))}</strong>? Make it so small it feels silly.</p>
-      <input id="shrink-input" type="text" maxlength="${POWER_TODO_TITLE_MAX}" required placeholder="e.g. Open the folder" enterkeyhint="go" />
-      <div class="sheet-hint">Open the email · Find the document · Write one sentence · Put on shoes</div>
-      <button type="submit" class="primary-button">Do this first</button>
-    </form>`, { label: 'Shrink it' })
-  const input = backdrop.querySelector('#shrink-input')
-  input?.focus()
-  backdrop.querySelector('#shrink-form')?.addEventListener('submit', (event) => {
-    event.preventDefault()
-    const step = createLocalTodo(input?.value || '', { size: 'quick', parent_id: todo.id })
-    if (!step) return
-    setTodoTodayStatus(step.id, 'pending', { position: 'before' })
-    clearSprintFor(todoStackKey(todo.id))
-    closeSheet()
-    renderDayRunner()
-    showToast('First step is up. Just that.')
-  })
-}
-
-// ---------- triage: prioritizing without prioritizing ----------
-// Ranking a whole list is the hard part. Deciding about one item at a time is easy, so the inbox
-// is served like the runner: one card, three answers, and it stops when you have enough for today.
-
-function openTriage() {
-  if (!powerActionsAvailable) return
-  closeSheet()
-  triageSession = { passedIds: new Set(), picked: 0, decided: 0, keepGoing: getPendingPowerPlans().length >= TODAY_TODO_TARGET }
-  renderTriage()
-}
-
-function renderTriage() {
-  if (!triageSession) {
-    renderDay('', { forceOverview: true })
+async function updateDailyStep(event) {
+  event.preventDefault()
+  const form = event.currentTarget
+  const id = form.dataset.dailyEdit
+  const title = form.elements.title.value.trim().slice(0, DAILY_STEP_TITLE_MAX)
+  const note = form.elements.note.value.trim().slice(0, DAILY_STEP_NOTE_MAX)
+  const substeps = parseDailySubstepsText(form.elements.substeps?.value || '')
+  const active_days = readRoutineDays(form)
+  if (!title) return
+  if (!active_days.length) {
+    alert('Choose at least one day for this routine step.')
     return
   }
-  const queue = getTriageQueue()
-  const pendingCount = getPendingPowerPlans().length
-  const capReached = pendingCount >= TODAY_TODO_TARGET && !triageSession.keepGoing
-  if (!queue.length || capReached) {
-    renderTriageSummary(queue, capReached)
+  const { error } = await supabase.from('daily_steps').update({
+    title,
+    note,
+    substeps,
+    active_days,
+    updated_at: new Date().toISOString()
+  }).eq('id', id)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit your routine.' : error.message)
     return
   }
-
-  const todo = queue[0]
-  const position = triageSession.decided + 1
-  const total = triageSession.decided + queue.length
-  const stale = todo.snooze_count >= STALE_SNOOZE_COUNT
-  const parent = todo.parent_id ? getAnyTodo(todo.parent_id) : null
-  const countLine = pendingCount > TODAY_TODO_TARGET
-    ? `Today: ${pendingCount} picked (more than ${TODAY_TODO_TARGET})`
-    : `Today: ${pendingCount} of ${TODAY_TODO_TARGET} picked`
-
-  renderShell(`
-    <div class="day-runner-screen triage-screen">
-      <header class="runner-head">
-        <div class="day-runner-top">
-          <div class="runner-score"><strong>Sort inbox</strong><span>${position} of ${total}</span></div>
-          <button type="button" class="triage-exit" id="triage-exit">Done</button>
-        </div>
-        <div class="runner-progress" aria-hidden="true"><span style="width:${Math.round((triageSession.decided / Math.max(1, total)) * 100)}%"></span></div>
-      </header>
-      <section class="day-step-card triage-card" id="day-step-card" aria-label="Inbox item: ${escapeHtml(todo.title)}">
-        <div class="day-step-parent">Inbox <span>${escapeHtml(ageLongLabel(todo.created_at))}</span>${todo.snooze_count ? ` <span>passed ${todo.snooze_count}×</span>` : ''}${parent ? ` <span>step of: ${escapeHtml(shorten(parent.title, 24))}</span>` : ''}</div>
-        <h2>${escapeHtml(todo.title)}</h2>
-        ${stale ? `<div class="defer-nudge"><strong>Passed on ${todo.snooze_count} times.</strong> Dropping it is a real decision, not a failure.</div>` : ''}
-        <div class="card-tools"><button type="button" class="card-link" id="triage-already">Already done? Log it &#10003;</button></div>
-      </section>
-      <div class="day-action-controls">
-        <div class="triage-count-line">${escapeHtml(countLine)}</div>
-        <div class="day-secondary-actions">
-          <button type="button" class="day-option-button" id="triage-not-today">Not today</button>
-          <button type="button" class="day-option-button" id="triage-drop">Drop</button>
-        </div>
-        <button type="button" class="day-primary-action" id="triage-today">TODAY <span aria-hidden="true">&rarr;</span></button>
-      </div>
-    </div>`,
-    { title: 'Sort inbox', showAccount: false, showTimer: false, showHeader: false, view: 'triage' })
-
-  document.querySelector('#triage-exit')?.addEventListener('click', exitTriage)
-  document.querySelector('#triage-today')?.addEventListener('click', () => triageToday(todo.id))
-  document.querySelector('#triage-not-today')?.addEventListener('click', () => triageNotToday(todo.id))
-  document.querySelector('#triage-drop')?.addEventListener('click', () => triageDrop(todo.id))
-  document.querySelector('#triage-already')?.addEventListener('click', () => triageAlreadyDone(todo.id))
+  await loadDailySystem()
+  saveSnapshot()
+  renderRoutineSetupScreen()
 }
 
-function renderTriageSummary(queue, capReached) {
-  const picked = getPendingPowerPlans().map((plan) => getPowerTodo(plan.todo_id)).filter(Boolean)
-  const title = capReached ? `That's your ${TODAY_TODO_TARGET}.` : 'Inbox sorted.'
-  const copy = capReached
-    ? 'A short list you finish beats a long list you avoid. Everything else is safe in Inbox.'
-    : picked.length ? 'Decided. Now it only has to be done.' : 'Nothing picked for today. That is a valid plan.'
-  renderShell(`
-    <div class="day-runner-screen triage-screen">
-      <header class="runner-head">
-        <div class="day-runner-top"><div class="runner-score"><strong>Sort inbox</strong><span>${escapeHtml(plural(triageSession.decided, 'decision'))}</span></div></div>
-        <div class="runner-progress" aria-hidden="true"><span style="width:100%"></span></div>
-      </header>
-      <section class="day-step-card triage-card is-summary" id="day-step-card">
-        <div class="day-step-parent">Today</div>
-        <h2>${escapeHtml(title)}</h2>
-        <p>${escapeHtml(copy)}</p>
-        ${picked.length ? `<ol class="triage-picked">${picked.map((todo) => `<li>${escapeHtml(todo.title)}</li>`).join('')}</ol>` : ''}
-      </section>
-      <div class="day-action-controls">
-        ${capReached && queue.length ? `<div class="day-secondary-actions"><button type="button" class="day-option-button" id="triage-keep-going">Keep sorting · ${queue.length} left</button></div>` : ''}
-        <button type="button" class="day-primary-action" id="triage-finish">BACK TO YOUR DAY <span aria-hidden="true">&rarr;</span></button>
-      </div>
-    </div>`,
-    { title: 'Sort inbox', showAccount: false, showTimer: false, showHeader: false, view: 'triage' })
-
-  document.querySelector('#triage-keep-going')?.addEventListener('click', () => {
-    if (!triageSession) return
-    triageSession.keepGoing = true
-    renderTriage()
-  })
-  document.querySelector('#triage-finish')?.addEventListener('click', exitTriage)
-}
-
-function exitTriage() {
-  triageSession = null
-  openDayOverview()
-}
-
-function rerenderTriage() {
-  if (currentView === 'triage') renderTriage()
-  else rerenderCurrentDayView()
-}
-
-function triageToday(todoId) {
-  if (!triageSession || !guardActionTap(420)) return
-  const progressBefore = cloneDailyProgress()
-  if (!setTodoTodayStatus(todoId, 'pending')) return
-  triageSession.picked += 1
-  triageSession.decided += 1
-  renderTriage()
-  rememberUndo('Added to today', () => {
-    removeTodayPlan(todoId)
-    saveDailyProgress(progressBefore)
-    if (triageSession) {
-      triageSession.picked = Math.max(0, triageSession.picked - 1)
-      triageSession.decided = Math.max(0, triageSession.decided - 1)
+async function moveDailyStep(stepId, direction) {
+  const index = dailySteps.findIndex((step) => step.id === stepId)
+  if (index < 0) return
+  const target = direction === 'up' ? index - 1 : index + 1
+  if (target < 0 || target >= dailySteps.length) return
+  const ordered = [...dailySteps]
+  const [moved] = ordered.splice(index, 1)
+  ordered.splice(target, 0, moved)
+  for (let i = 0; i < ordered.length; i += 1) {
+    const { error } = await supabase.from('daily_steps').update({ sort_order: i + 1, updated_at: new Date().toISOString() }).eq('id', ordered[i].id)
+    if (error) {
+      alert(isNetworkError(error) ? 'Connect to reorder your routine.' : error.message)
+      return
     }
-  }, rerenderTriage)
-}
-
-// "Not today" snoozes with growing gaps (1, 3, then 7 days) so the same item isn't re-decided every morning.
-function triageNotToday(todoId) {
-  if (!triageSession || !guardActionTap(420)) return
-  const todo = getPowerTodo(todoId)
-  if (!todo) return
-  const before = { snoozed_until: todo.snoozed_until, snooze_count: todo.snooze_count }
-  triageSession.passedIds.add(todoId)
-  triageSession.decided += 1
-  let label = 'Not today'
-  if (actionEngineAvailable) {
-    const days = SNOOZE_STEPS_DAYS[Math.min(todo.snooze_count, SNOOZE_STEPS_DAYS.length - 1)]
-    const until = addDaysKey(todayDateKey(), days)
-    patchLocalTodo(todoId, { snoozed_until: until, snooze_count: todo.snooze_count + 1 })
-    label = `Back ${returnDayLabel(until)}`
   }
-  renderTriage()
-  rememberUndo(label, () => {
-    if (actionEngineAvailable) patchLocalTodo(todoId, before)
-    if (triageSession) {
-      triageSession.passedIds.delete(todoId)
-      triageSession.decided = Math.max(0, triageSession.decided - 1)
-    }
-  }, rerenderTriage)
+  await loadDailySystem()
+  saveSnapshot()
+  renderRoutineSetupScreen()
 }
 
-function triageDrop(todoId) {
-  if (!triageSession || !guardActionTap(420)) return
-  const todo = getPowerTodo(todoId)
-  const restore = dropTodo(todoId)
-  if (!restore) return
-  triageSession.decided += 1
-  renderTriage()
-  rememberUndo(`Dropped "${shorten(todo?.title, 22)}"`, () => {
-    restore()
-    if (triageSession) triageSession.decided = Math.max(0, triageSession.decided - 1)
-  }, rerenderTriage)
+async function deleteDailyStep(stepId) {
+  const step = dailySteps.find((item) => item.id === stepId)
+  if (!step || !confirm(`Delete "${step.title}"?`)) return
+  const { error } = await supabase.from('daily_steps').delete().eq('id', stepId)
+  if (error) {
+    alert(isNetworkError(error) ? 'Connect to edit your routine.' : error.message)
+    return
+  }
+  const progress = currentDailyProgress()
+  progress.completed_step_ids = progress.completed_step_ids.filter((id) => id !== stepId)
+  progress.skipped_step_ids = (progress.skipped_step_ids || []).filter((id) => id !== stepId)
+  progress.later_step_ids = (progress.later_step_ids || []).filter((id) => id !== stepId)
+  const positions = { ...(progress.substep_positions || {}) }
+  delete positions[stepId]
+  progress.substep_positions = positions
+  progress.is_complete = false
+  saveDailyProgress(progress)
+  await loadDailySystem()
+  saveSnapshot()
+  renderRoutineSetupScreen()
 }
 
-function triageAlreadyDone(todoId) {
-  if (!triageSession || !guardActionTap(420)) return
-  unlockAudio()
-  const restore = markTodoDone(todoId)
-  if (!restore) return
-  triageSession.decided += 1
-  playDoneTick()
-  renderTriage()
-  rememberUndo('Logged as done', () => {
-    restore()
-    if (triageSession) triageSession.decided = Math.max(0, triageSession.decided - 1)
-  }, rerenderTriage)
+function resetTodayDailyProgress() {
+  if (!confirm('Restart today from step 1?')) return
+  saveDailyProgress(emptyDailyProgress(todayDateKey()))
+  renderDay('', { forceOverview: true })
 }
 
 function renderHome(errorMessage = '') {
@@ -5783,27 +3540,15 @@ function renderHome(errorMessage = '') {
       </div>`
   }).join('')
 
-  // Nothing planned: one suggested workout instead of a menu of choices.
-  const doneToday = getCompletedFolders(todayKey)
-  const suggestion = !todayFolders.length && !missedFolders.length && !doneToday.length ? suggestWorkoutFolder() : null
-  const emptyBody = suggestion ? `
-        <div class="gym-suggestion">
-          <span>Nothing planned · suggested</span>
-          <strong>${escapeHtml(suggestion.folder.name)}</strong>
-          <small>last trained ${escapeHtml(daysAgoLabel(suggestion.last))}</small>
-        </div>
-        <button type="button" class="start-workout-button today-start" id="start-suggested" data-folder-id="${suggestion.folder.id}">Start ${escapeHtml(suggestion.folder.name)} <span aria-hidden="true">&rarr;</span></button>
-        <button type="button" class="quiet-action gym-choose-other" id="choose-workout">Choose another</button>` : `
-        <div class="today-empty">${doneToday.length ? `Done today: ${escapeHtml(doneToday.map((folder) => folder.name).join(' + '))} &#10003;` : 'No workout planned'}</div>
-        <button type="button" class="secondary-button full-button today-choose" id="choose-workout">Choose workout</button>`
-
   const todayCard = `
     <section class="today-card">
       <div class="today-label">Today</div>
       ${todayFolders.length ? `
         <div class="today-workout-list">${todayRows}</div>
         <button type="button" class="quiet-action" id="preload-today">Save videos</button>
-        <div id="preload-status" class="micro-status" aria-live="polite"></div>` : emptyBody}
+        <div id="preload-status" class="micro-status" aria-live="polite"></div>` : `
+        <div class="today-empty">No workout planned</div>
+        <button type="button" class="secondary-button full-button today-choose" id="choose-workout">Choose workout</button>`}
     </section>`
 
   const missedCard = missedFolders.length ? `
@@ -5820,13 +3565,12 @@ function renderHome(errorMessage = '') {
     ${todayCard}
     ${missedCard}
     ${historyAvailable && planningUpgradeAvailable ? `<section class="week-card">${renderWeekProgress(todayKey, { streak: true })}</section>` : ''}
-    <button type="button" class="quiet-action gym-all-workouts" id="open-all-workouts">All workouts</button>`, { title: 'Forge', showAccount: false, showTimer: false, navTab: 'gym', view: 'home' })
+    <button type="button" class="quiet-action gym-all-workouts" id="open-all-workouts">All workouts</button>`, { title: 'Gym', showAccount: false, showTimer: false, navTab: 'gym', view: 'home' })
 
   document.querySelectorAll('[data-start-today]').forEach((button) => {
     button.addEventListener('click', () => openFolder(button.dataset.startToday, { mode: 'workout' }))
   })
   document.querySelector('#resume-home')?.addEventListener('click', () => openFolder(savedFolder.id, { mode: 'workout' }))
-  document.querySelector('#start-suggested')?.addEventListener('click', (event) => openFolder(event.currentTarget.dataset.folderId, { mode: 'workout' }))
   document.querySelector('#choose-workout')?.addEventListener('click', renderWorkouts)
   document.querySelector('#open-all-workouts')?.addEventListener('click', renderWorkouts)
   document.querySelector('#move-missed-today')?.addEventListener('click', moveMissedToToday)
@@ -5863,107 +3607,22 @@ function renderWorkouts(errorMessage = '') {
   document.querySelector('#add-folder-form')?.addEventListener('submit', addFolder)
 }
 
-// ---------- app icon badge ----------
-// "Out of sight, out of mind": an optional count on the home-screen icon is a cue that doesn't need opening the app.
-
-function badgeSupported() {
-  return typeof navigator !== 'undefined' && 'setAppBadge' in navigator
-}
-
-function badgeEnabled() {
-  try {
-    return window.localStorage.getItem(BADGE_KEY) === 'on'
-  } catch {
-    return false
-  }
-}
-
-function updateAppBadge() {
-  if (!badgeSupported() || !badgeEnabled() || !currentUser) return
-  try {
-    const progress = currentDailyProgress()
-    const count = progress.closed_at ? 0 : remainingTodayActionCount(progress)
-    const result = count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge()
-    result?.catch?.(() => {})
-  } catch {
-    // Badges are a bonus.
-  }
-}
-
-async function toggleAppBadge() {
-  if (badgeEnabled()) {
-    try {
-      window.localStorage.setItem(BADGE_KEY, 'off')
-      navigator.clearAppBadge?.()?.catch?.(() => {})
-    } catch {
-      // Ignore.
-    }
-    renderMore()
-    return
-  }
-  // iPhone only shows badges for home-screen apps that have notification permission.
-  // battle angel never sends notifications; the permission only unlocks the number on the icon.
-  try {
-    if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission()
-  } catch {
-    // Permission prompt not available.
-  }
-  try {
-    window.localStorage.setItem(BADGE_KEY, 'on')
-  } catch {
-    // Ignore.
-  }
-  updateAppBadge()
-  renderMore()
-}
-
-function toggleDoneSound() {
-  try {
-    window.localStorage.setItem(DONE_SOUND_KEY, doneSoundOn() ? 'off' : 'on')
-  } catch {
-    // Ignore.
-  }
-  if (doneSoundOn()) {
-    unlockAudio()
-    playDoneTick()
-  }
-  renderMore()
-}
-
 function renderMore(errorMessage = '') {
   activeFolder = null
   activeExerciseGroups = []
   workoutMode = false
   folderEditMode = false
-  const soundOn = doneSoundOn()
-  const badgeOn = badgeEnabled()
-  const permissionBlocked = badgeOn && 'Notification' in window && Notification.permission === 'denied'
   renderShell(`
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}
     ${renderMotivationLibrary()}
-    <section class="more-card settings-card" aria-label="Feedback settings">
-      <button type="button" class="settings-row ${soundOn ? 'is-on' : ''}" id="toggle-done-sound" aria-pressed="${soundOn}">
-        <span><strong>Done sound</strong><small>a short tick each time you finish something</small></span>
-        <span class="settings-state">${soundOn ? 'On' : 'Off'}</span>
-      </button>
-      ${badgeSupported() ? `
-        <button type="button" class="settings-row ${badgeOn ? 'is-on' : ''}" id="toggle-app-badge" aria-pressed="${badgeOn}">
-          <span><strong>App icon count</strong><small>${permissionBlocked ? 'allow notifications for battle angel in iPhone Settings to see it' : "actions left today, on the home-screen icon"}</small></span>
-          <span class="settings-state">${badgeOn ? 'On' : 'Off'}</span>
-        </button>` : ''}
-    </section>
     <section class="more-card">
       <button type="button" class="secondary-button full-button" id="theme-toggle">${getTheme() === 'dark' ? 'Light mode' : 'Dark mode'}</button>
       <button type="button" class="secondary-button full-button" id="backup-library">Backup library</button>
       <button type="button" class="secondary-button full-button" id="sign-out">Sign out</button>
       <div id="backup-status" class="status-line backup-status" aria-live="polite"></div>
       <div class="app-version">battle angel v${APP_VERSION}</div>
-      ${actionEngineAvailable ? '' : '<div class="db-upgrade-note">Database: run <strong>supabase/action_engine_upgrade.sql</strong> once to turn on core steps, snooze, and wrap-up.</div>'}
-      ${routineDaysAvailable ? '' : '<div class="db-upgrade-note">Database: run <strong>supabase/routine_upgrade.sql</strong> once to pick the days each routine step runs and link any step to your workout.</div>'}
     </section>`, { title: 'More', showAccount: false, showTimer: false, navTab: 'more' })
 
-  document.querySelector('#toggle-done-sound')?.addEventListener('click', toggleDoneSound)
-  document.querySelector('#toggle-app-badge')?.addEventListener('click', toggleAppBadge)
   document.querySelector('#theme-toggle')?.addEventListener('click', () => { toggleTheme(); renderMore() })
   document.querySelector('#backup-library')?.addEventListener('click', downloadFullBackup)
   document.querySelector('#sign-out')?.addEventListener('click', () => supabase.auth.signOut())
@@ -5991,13 +3650,11 @@ function getDayFolders(dateKey) {
   return [...planned, ...getCompletedFolders(dateKey).filter((folder) => !plannedIds.has(folder.id))]
 }
 
-// Days in the week with at least one workout done. Chest + Triceps on Monday = 1 day.
+// Each workout module marked done counts once (Chest + Triceps on one day = 2).
 function weekDoneCount(weekStartKey) {
-  let days = 0
-  for (let i = 0; i < 7; i += 1) {
-    if (getCompletedFolders(addDaysKey(weekStartKey, i)).length) days += 1
-  }
-  return days
+  let count = 0
+  for (let i = 0; i < 7; i += 1) count += getCompletedFolders(addDaysKey(weekStartKey, i)).length
+  return count
 }
 
 function isGoldenWeek(weekStartKey) {
@@ -6067,10 +3724,10 @@ function renderWeekProgress(dateKey, options = {}) {
   const done = weekDoneCount(startOfWeekKey(dateKey))
   const streak = options.streak ? renderStreakLine() : ''
   if (done >= GOLDEN_WEEK_TARGET) {
-    return `<div class="week-progress is-golden">Golden week · ${plural(done, 'day')} trained</div>${streak}`
+    return `<div class="week-progress is-golden">Golden week · ${done} workouts done</div>${streak}`
   }
   const pips = Array.from({ length: GOLDEN_WEEK_TARGET }, (_, i) => `<span class="week-pip ${i < done ? 'filled' : ''}"></span>`).join('')
-  return `<div class="week-progress"><span class="week-pips" aria-hidden="true">${pips}</span>${done} of ${GOLDEN_WEEK_TARGET} days trained this week</div>${streak}`
+  return `<div class="week-progress"><span class="week-pips" aria-hidden="true">${pips}</span>${done} of ${GOLDEN_WEEK_TARGET} done this week</div>${streak}`
 }
 
 function renderDoneControls(dateKey) {
@@ -6100,14 +3757,7 @@ function renderPlanner(errorMessage = '') {
   const selectedIds = new Set(selectedFolders.map((folder) => folder.id))
   const weeklyFolders = getWeeklyFolders(plannerSelectedDate)
   const tomorrowKey = addDaysKey(plannerSelectedDate, 1)
-  // A past day is about what you did, not what you planned: one tap logs a workout as done.
-  const logging = plannerSelectedDate < todayDateKey() && canMarkDone()
-  const doneIds = new Set(getCompletedFolders(plannerSelectedDate).map((folder) => folder.id))
-  const missedPlan = selectedFolders.some((folder) => !doneIds.has(folder.id))
-  const folderButtons = folders.map((folder) => logging
-    ? `
-    <button type="button" class="plan-muscle-button log-button ${doneIds.has(folder.id) ? 'is-logged' : ''} ${selectedIds.has(folder.id) && !doneIds.has(folder.id) ? 'is-planned' : ''}" data-log-folder="${folder.id}" aria-pressed="${doneIds.has(folder.id)}">${doneIds.has(folder.id) ? '<span aria-hidden="true">&#10003;</span> ' : ''}${escapeHtml(folder.name)}</button>`
-    : `
+  const folderButtons = folders.map((folder) => `
     <button type="button" class="plan-muscle-button ${selectedIds.has(folder.id) ? 'selected' : ''}" data-schedule-folder="${folder.id}">${escapeHtml(folder.name)}</button>`).join('')
   const moveOptions = selectedFolders.map((folder) => `<option value="${folder.id}">${escapeHtml(folder.name)}</option>`).join('')
 
@@ -6129,13 +3779,12 @@ function renderPlanner(errorMessage = '') {
       <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
     </div>
     <div class="calendar-grid" aria-label="Workout calendar">${calendarCells(plannerMonthStart)}</div>
-    ${canMarkDone() ? '<div class="calendar-hint">Tap a past day to log what you trained. Hold a day to mark its plan done.</div>' : ''}
+    ${canMarkDone() ? '<div class="calendar-hint">Hold a day to mark it done</div>' : ''}
     <section class="plan-day-editor">
       <div class="plan-day-title">${escapeHtml(formatPlanDate(plannerSelectedDate))}</div>
       ${renderWeekProgress(plannerSelectedDate, { streak: startOfWeekKey(plannerSelectedDate) === startOfWeekKey(todayDateKey()) })}
-      ${logging ? `<div class="plan-log-head"><strong>What did you train?</strong><span>Tap to mark done, tap again to undo.${missedPlan ? ' Outlined: planned, not done yet.' : ''}</span></div>` : ''}
       <div class="plan-muscle-grid">${folderButtons}</div>
-      ${logging ? '' : renderDoneControls(plannerSelectedDate)}
+      ${renderDoneControls(plannerSelectedDate)}
       ${selectedFolders.length ? `<div class="plan-day-actions">
         <details class="move-plan">
           <summary>Move</summary>
@@ -6148,7 +3797,7 @@ function renderPlanner(errorMessage = '') {
         <button type="button" class="text-button danger-text" id="clear-plan">Clear day</button>
         ${hasDateScheduleOverride(plannerSelectedDate) && weeklyFolders.length ? '<button type="button" class="text-button" id="reset-weekly">Use weekly</button>' : ''}
       </div>` : ''}
-    </section>`, { title: 'Destiny', showAccount: false, showTimer: false, navTab: 'plan' })
+    </section>`, { title: 'Plan', showAccount: false, showTimer: false, navTab: 'plan' })
 
   document.querySelector('#month-prev').addEventListener('click', () => {
     plannerMonthStart = new Date(plannerMonthStart.getFullYear(), plannerMonthStart.getMonth() - 1, 1)
@@ -6204,9 +3853,6 @@ function renderPlanner(errorMessage = '') {
   })
   document.querySelectorAll('[data-schedule-folder]').forEach((button) => {
     button.addEventListener('click', () => toggleScheduledWorkout(plannerSelectedDate, button.dataset.scheduleFolder))
-  })
-  document.querySelectorAll('[data-log-folder]').forEach((button) => {
-    button.addEventListener('click', () => logPastWorkout(plannerSelectedDate, button.dataset.logFolder))
   })
   document.querySelectorAll('[data-done-folder]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -6435,20 +4081,6 @@ async function setWorkoutDone(dateKey, folderId, done) {
   await flushPendingWrites()
 }
 
-// Past day in Destiny: one tap logs (or un-logs) a workout, no planning first.
-async function logPastWorkout(dateKey, folderId) {
-  const folder = folders.find((item) => item.id === folderId)
-  if (!folder || !canMarkDone() || dateKey > todayDateKey()) return
-  const done = !wasWorkoutCompleted(dateKey, folderId)
-  plannerStatusMessage = `${folder.name} on ${formatPlanDate(dateKey, { short: true })}: ${done ? 'done ✓' : 'undone'}.`
-  if (done) {
-    unlockAudio()
-    playDoneTick()
-    vibrate(12)
-  }
-  await setWorkoutDone(dateKey, folderId, done)
-}
-
 // Long-press a day on the calendar: marks every workout on that day done, or undoes them if all are done.
 async function quickToggleDayDone(dateKey) {
   plannerSelectedDate = dateKey
@@ -6464,7 +4096,7 @@ async function quickToggleDayDone(dateKey) {
   }
   const dayFolders = getDayFolders(dateKey)
   if (!dayFolders.length) {
-    plannerStatusMessage = dateKey < todayDateKey() ? 'Tap what you trained below.' : 'Pick the muscles you trained below, then hold the day again.'
+    plannerStatusMessage = 'Pick the muscles you trained below, then hold the day again.'
     renderPlanner()
     return
   }
@@ -7978,7 +5610,6 @@ async function recordWorkoutCompletion(folderId, dateKey) {
 
 function finishWorkout() {
   const completedFolderId = activeFolder?.id
-  const completedName = activeFolder?.name || 'Workout'
   if (completedFolderId) recordWorkoutCompletion(completedFolderId, todayDateKey())
   const returnToDailyFlow = maybeCompleteDailyGymStepAfterWorkout()
   clearWorkoutState()
@@ -7992,21 +5623,16 @@ function finishWorkout() {
     activeFolder = null
     activeExerciseGroups = []
     renderDayRunner()
-    playDoneTick()
-    showToast(`${completedName} done ✓ Back to your day.`, { ms: 3200 })
     refreshInBackground()
     return
   }
 
-  const showWeek = historyAvailable && planningUpgradeAvailable
   renderShell(`
     <section class="finish-card">
       <div class="finish-check">&#10003;</div>
-      <h2>${escapeHtml(completedName)} done.</h2>
-      ${showWeek ? `<div class="finish-week">${renderWeekProgress(todayDateKey(), { streak: true })}</div>` : ''}
+      <h2>${escapeHtml(activeFolder.name)} done.</h2>
       <button type="button" class="start-workout-button" id="finish-home">Done</button>
     </section>`, { title: 'Workout complete', showAccount: false, showTimer: false })
-  playDayCompleteChime()
 
   document.querySelector('#finish-home').addEventListener('click', () => {
     renderHome()
@@ -8158,46 +5784,39 @@ function releaseWakeLock() {
   lock?.release?.().catch?.(() => {})
 }
 
-// A new calendar day always starts clean, even if battle angel stayed open overnight on a card.
-function handleDayRollover() {
-  const today = todayDateKey()
-  const progressStale = Boolean(dailyProgress && dailyProgress.progress_date !== today)
-  if (!progressStale && dailyMedsDate === today && powerActionsDate === today) return
-  triageSession = null
-  powerPrompt = null
-  dayUi = { reorder: false, orderAll: false, inboxEdit: false, inboxAll: false }
-  revealedStuckKeys.clear()
-  clearUndo()
-  hideToast(true)
-  closeSheet()
-  clearSprint()
-  dailyMedsDate = today
-  dailyMedTakenIds = mergeDailyMedTakenIds([], today)
-  ensurePowerDate()
-  currentDailyProgress()
-  if (DAY_VIEWS.includes(currentView)) renderDay()
-  if (!currentUser) return
-  Promise.all([loadDailySystem(), loadDailyMeds(), loadPowerActions()]).then(() => {
-    saveSnapshot()
-    if (DAY_VIEWS.includes(currentView) && !document.querySelector('.sheet-backdrop')) renderDay()
-  }).catch(() => {})
-}
-
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') {
-    updateAppBadge()
-    return
+  if (document.visibilityState !== 'visible') return
+  if (workoutMode || timerEndAt) keepAwake()
+  const todayKey = todayDateKey()
+  // Midnight is a hard boundary: routine progress, med checks, and today's selected todos all reset.
+  if (dailyProgress?.progress_date && dailyProgress.progress_date !== todayKey) {
+    dailyProgress = emptyDailyProgress(todayKey)
+    clearDailyUndo()
+    clearPowerUndo()
+    setActiveDayMode(null)
+    dailyMedsDate = todayKey
+    dailyMedTakenIds = mergeDailyMedTakenIds([], todayKey)
+    powerActionsDate = todayKey
+    powerPlans = []
+    Promise.all([loadDailySystem(), loadDailyMeds(), loadPowerActions()]).then(() => {
+      if (String(currentView).startsWith('day')) renderDay('', { forceOverview: true })
+    }).catch(() => {})
   }
-  if (workoutMode || timerEndAt || sprintIsRunning() || finishReel || currentView === 'finish-question') keepAwake()
-  if (finishReel && currentView === 'finish') {
-    updateFinishReel()
-    if (finishReel) document.querySelector('#finish-video:not(.hidden)')?.play()?.catch?.(() => {})
+  // A new local calendar day always starts with a clean routine/meds surface.
+  if (dailyMedsDate !== todayKey) {
+    dailyMedsDate = todayKey
+    dailyMedTakenIds = mergeDailyMedTakenIds([], dailyMedsDate)
+    loadDailyMeds().then(() => {
+      if (['day', 'day-overview'].includes(currentView)) renderDay('', { forceOverview: currentView === 'day-overview' })
+    }).catch(() => {})
   }
-  if (readSprint()) {
-    if (sprintIsRunning()) startSprintTicker()
-    else updateSprintPill()
+  if (powerActionsDate !== todayKey) {
+    powerActionsDate = todayKey
+    powerPlans = []
+    loadPowerActions().then(() => {
+      if (['day', 'day-overview'].includes(currentView)) renderDay('', { forceOverview: currentView === 'day-overview' })
+    }).catch(() => {})
   }
-  handleDayRollover()
   // Signed video links last 12 h; refresh them if the app sat in the background that long.
   if (currentUser && lastVideoSignAt && Date.now() - lastVideoSignAt > 11 * 60 * 60 * 1000) {
     lastVideoSignAt = Date.now()
@@ -8257,7 +5876,6 @@ function readStoredAuthUser() {
 }
 
 async function boot() {
-  clearLegacyAutoPickMarkers()
   const storedUser = readStoredAuthUser()
   const canStartFromSnapshot = Boolean(storedUser && readJson(`battle-angel-snapshot-${storedUser.id}`, null))
   let sessionCheck = null
@@ -8305,11 +5923,9 @@ async function boot() {
         await loadFolders()
         const saved = await syncWorkoutStateFromCloud()
         const cloudChangedWorkout = (saved?.updatedAt || 0) > localUpdatedAt
-        if (viewVersion === version && ['day', 'home', 'day-runner', 'day-prompt'].includes(currentView) && (dataSignature() !== before || cloudChangedWorkout)) {
+        if (viewVersion === version && ['day', 'home'].includes(currentView) && (dataSignature() !== before || cloudChangedWorkout)) {
           if (cloudChangedWorkout && shouldAutoResume(saved)) await routeAfterLoad(saved)
           else if (currentView === 'day') renderDay()
-          else if (currentView === 'day-runner') refreshRunnerIfChanged()
-          else if (currentView === 'day-prompt') refreshPowerPromptIfIdle()
           else renderHome()
         }
       } catch (error) {
@@ -8365,20 +5981,8 @@ async function handleSessionChange(session) {
   dailyMedsAvailable = true
   powerTodos = []
   powerPlans = []
-  powerDoneToday = []
   powerActionsDate = todayDateKey()
   powerActionsAvailable = true
-  actionEngineAvailable = true
-  routineDaysAvailable = true
-  triageSession = null
-  powerPrompt = null
-  dayUi = { reorder: false, orderAll: false, inboxEdit: false, inboxAll: false }
-  lastRunnerKey = ''
-  stopSprintTicker()
-  stopFinishReel()
-  closeSheet()
-  clearUndo()
-  hideToast(true)
   plannerSelectedDate = null
   signedUrlCache = new Map()
   usingCachedData = false
