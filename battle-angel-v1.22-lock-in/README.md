@@ -1,0 +1,444 @@
+# battle angel
+
+**a warrior's spirit needs a warrior's body**
+
+battle angel is a low-friction daily-system + gym app: set your routine and workouts once, then open the app and execute the next thing without deciding what comes next.
+
+## v1.22 — LOCK IN cut
+
+- Removed nonessential instructional copy from the live app.
+- Day is now framed as **LOCK IN.** with **THE ORDER / INBOX / SYSTEM**.
+- Routine setup is **RITUAL.**; execution uses **TASK / RITUAL**, **LATER**, **SKIP**, **DONE**.
+- `i changed.` is reduced to **THEN / NOW / PRESENT / ABSENT**.
+- Monochrome styling is sharper, tighter, flatter, and more cinematic.
+- No database changes.
+
+
+## main tabs
+
+The app uses five focused tabs:
+
+- **Day** — quick-capture todos, arrange today once, then run one combined routine + todo stack one action at a time.
+- **Gym** — today's planned gym modules, resume, offline video prep, and access to all workouts.
+- **Plan** — calendar, recurring weekly plan, and repeat-last-week.
+- **More** — motivation videos and photos, theme, backup, and sign out.
+
+## exercise creation
+
+When you create a new exercise, you can add all reference clips immediately:
+
+- Video 1 — required
+- Video 2 — optional
+- Video 3 — optional
+
+This is intentionally three separate iPhone-friendly pickers, so you do not need to create the exercise and reopen Edit just to add another reference.
+
+## workout mode
+
+Workout Mode stays focused on the current movement, sets/reps, reference videos, cues, optional weight, and the 2:30 rest timer.
+
+If an exercise has a backup movement, **Use backup** switches the active movement with one tap without editing the workout.
+
+You can pause and resume a workout or cancel only the in-progress session without deleting the workout plan or videos.
+
+## planning
+
+Planning is optional and cloud-synced. Weeks run Monday to Sunday everywhere in the app.
+
+### one-off calendar plan
+
+Open **Plan**, tap a date, then tap one or more muscles. Tap a selected muscle again to remove it. Move one module or clear the whole date whenever plans change.
+
+### recurring weekly plan
+
+Open **Plan -> Weekly** and pick one or more muscles for each weekday. Changes save automatically. A manually changed calendar date overrides the weekly plan, so you can move or skip modules without changing the recurring week.
+
+### repeat last week
+
+In **Plan**, tap **Repeat last week** to copy the prior week's effective schedule into the selected week.
+
+### missed day
+
+If yesterday had a planned workout, it was not completed, and today is empty, Today shows one small **Move to today** action.
+
+## saved videos for the gym
+
+On Today, tap **Save videos** under the planned workout. battle angel downloads that workout's reference clips into the browser's local offline storage. When that device opens the workout later, it prefers the locally saved clips.
+
+This offline copy is device-specific. Your master videos remain in private Supabase Storage and continue to sync across devices.
+
+## motivation
+
+Motivation stays closed under **More -> Edit motivation** until you open it. Motivation videos and photos are private, sync across devices, play one after another in random order during the 2:30 rest, and stop when rest ends.
+
+## database
+
+`supabase/schema.sql` is the only database file. It builds a new project from scratch and upgrades an existing one. Every statement is safe to re-run; it never deletes workouts, exercises, videos, plans, history, or Storage files.
+
+When an update says it has database changes, open **Supabase -> SQL Editor**, paste the whole `schema.sql`, and run it. The last query prints a row of checks that should all say `true`.
+
+Older one-off migration files were removed in v1.10. They live on in the GitHub history if you ever need them.
+
+## deployment
+
+After running the latest `supabase/schema.sql` once:
+
+1. Upload the contents of this project to the existing GitHub repository.
+2. Commit the changes.
+3. Netlify rebuilds automatically.
+4. Refresh or reopen battle angel on the iPhone.
+
+Your existing Netlify environment variables remain:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+## data and privacy
+
+- Workout modules: `folders`
+- Exercises and video metadata: `exercises`
+- In-progress session: `workout_progress`
+- Calendar overrides: `workout_schedule`
+- Recurring weekly plan: `workout_weekly_plan`
+- Completed-workout markers: `workout_history`
+- Daily routine steps: `daily_steps`
+- Daily routine progress by date: `daily_progress`
+- Booster list and activity links: `daily_meds`
+- Daily booster checkmarks by date: `daily_med_log`
+- Todo Inbox: `power_todos`
+- Today's selected todos/status: `power_action_plan`
+- Videos: private `gym-videos` Supabase Storage bucket
+
+Row Level Security limits data and Storage objects to the signed-in account. Video playback uses temporary signed URLs.
+
+## iPhone uploads
+
+Saved MP4, MOV, M4V, and WebM clips can be selected from Photos or Files. Larger clips use resumable uploads. Keep battle angel open until the upload completes.
+
+Videos over 12 MB are compressed on the phone before uploading (H.264 MP4, up to 1280px, sized to land under about 45 MB). Reference clips lose their audio since they always play muted; motivation clips keep it. Photos are resized to 1600px JPEG. Keep battle angel open while it compresses; the screen stays awake. Anything still over 50 MB after compressing (very long clips) has to be trimmed first.
+
+## backup
+
+Open **More -> Backup library** to create a ZIP containing the workout library, planning data, Daily System, boosters, Todo Inbox/today selections, motivation references, and uploaded videos. Save the ZIP somewhere independent such as iCloud Drive or your computer.
+
+## v1.8 — multiple workouts per day + rest lock screen
+
+- A calendar day can contain multiple workout modules (for example Chest + Triceps).
+- Weekly recurring planning can also contain multiple modules on the same weekday.
+- Tap a muscle in Plan to add/remove it from that date; selected muscles stay highlighted.
+- Move is kept collapsed and lets you choose which module to move when a date has more than one.
+- Rest is now a full-screen lock-in view: no buttons, only the 2:30 countdown and your motivation clip. It returns to the workout automatically when the timer ends.
+- Run `supabase/multi_workout_upgrade.sql` once before using multi-workout planning on an existing database. The migration only changes planner uniqueness rules; it does not delete workouts, exercises, or videos.
+
+## v1.8.1 — lock-in fixes
+
+No new database changes. If you haven't run `supabase/multi_workout_upgrade.sql` yet, run it once (that's the v1.8 one).
+
+**Workout loop**
+- "Set done" is pinned to the bottom of the screen, always under your thumb. No scrolling.
+- Skipped a busy machine? After you finish an exercise, the app goes to the next *unfinished* one and only ends the workout when everything is done.
+- Set dots are tappable: tap a ✓ to undo a mis-tapped set, tap a number to mark sets done without starting a rest.
+- Double taps on "Set done" are ignored.
+- The weight you type sticks, even offline (it syncs when you're back online).
+- Deleting an exercise mid-workout keeps the rest of your progress.
+
+**Rest**
+- Reopening the app during rest goes straight back to the rest screen (it used to show an error).
+- Motivation starts muted so your music keeps playing. Tap anywhere on the rest screen for sound; the app remembers your choice.
+- The end-of-rest beep works on iPhone (audio is unlocked by your "Set done" tap), and the screen stays awake while you train.
+- Reference clips play silently on loop, no tap needed.
+
+**Offline + speed**
+- After the first visit the app opens instantly from what the phone already knows, then refreshes in the background.
+- With no signal, the app still opens, Today shows your saved plan, and any workout you've opened or saved before runs with its saved videos. Completed workouts and weights sync later.
+- "Save videos" also saves your motivation clips.
+- Clips you upload from this phone are saved on it right away, so it never downloads them again.
+- Video links are reused during a session, so reopening a workout doesn't re-download its clips.
+
+**Fixes**
+- Retrying a failed large upload can no longer create an exercise that points at a missing file.
+- Move Up/Down always works, even when two exercises share a position.
+- Plan tab: coming back to it never leaves you editing a date from another month.
+- Three reference videos fit on one tab row.
+- The old Arms → Biceps rename no longer runs on every launch (or in schema.sql).
+- Backup uses less memory while building the ZIP.
+
+## v1.9 — golden weeks, logging past days, skip, photo motivation
+
+Photos need the storage bucket to accept images. This is included in `supabase/schema.sql`.
+
+**Golden weeks**
+- When 4 or more workouts are marked done in a calendar week (Monday to Sunday, one row), that row turns gold.
+- Each module counts once, so Chest + Triceps on the same day counts as 2.
+- The selected day in Plan shows how close the week is: "2 of 4 done this week".
+- Days with a finished workout show a ✓ in the calendar.
+
+**Log past days**
+- In Plan, tap any past date (or today), tap the muscles you trained, then tap **Mark done** next to each one.
+- Tap **✓ Done** again to undo.
+- Workouts you finish from the Workouts tab without planning them also show on the calendar and count toward the golden week.
+
+**Rest screen**
+- Sound now toggles with a double tap only. A single touch, including swiping up to leave the app, does nothing.
+
+**Skip an exercise**
+- In Workout Mode, **Machine busy? Skip for now** moves to the next unfinished exercise. The skipped one comes back after the others, and the workout won't finish without it.
+
+**Motivation photos + shuffle**
+- **More -> Edit motivation** accepts photos as well as videos.
+- During each 2:30 rest, motivation plays one item after another in random order: videos play once through, photos stay on screen for 6 seconds. If everything has played before rest ends, it reshuffles and keeps going.
+
+## v1.10 — Monday weeks, compression, weight history, streaks
+
+**Database:** run the whole `supabase/schema.sql` once. Then delete these from the `supabase/` folder in GitHub: `calendar_migration.sql`, `planning_upgrade.sql`, `multi_workout_upgrade.sql`, `motivation_images_upgrade.sql`. `schema.sql` already contains everything they did, and it removes an old, looser calendar security rule.
+
+- The calendar, golden weeks, and Repeat last week all run Monday to Sunday.
+- Today shows this week's progress toward a golden week, plus your golden streak ("3 golden weeks in a row"). The current week never breaks a streak while it's still in progress.
+- Undoing a done workout works offline and syncs when you reconnect, the same way marking it done already did.
+- Videos and photos are compressed on the phone before uploading (see iPhone uploads above).
+- Weight history: each exercise keeps the weight you used on each day. It's logged when you finish a set, and updated if you change the weight afterwards that day. Open **Weight history** under the set dots in Workout Mode. It works offline and is included in backups.
+
+## v1.10.1 — mark done from the calendar
+
+No database changes.
+
+- **Hold a day** on the Plan calendar to mark all of its workouts done. Hold it again to undo. On a day with nothing planned, it asks you to pick the muscles first.
+- Workout Mode always shows the weight history line, with a hint before the first entry, so it's clear where weights are saved.
+- **More** shows the app version at the bottom. If it doesn't say v1.10.1 after deploying, the phone or Netlify is still on the old version.
+
+## v1.10.2
+
+- Holding a day on the calendar no longer selects its text on iPhone, so hold-to-mark-done works. Double-tapping the rest screen can't select text either.
+
+
+## v1.11 — daily system
+
+**Database:** run the whole `supabase/schema.sql` once. It only adds the daily-system tables and policies; it does not delete or change existing workout videos, exercises, plans, history, or weight logs.
+
+- New **Day** tab for a personal daily routine.
+- Set the routine up once under **Edit routine**: add a step, optional short note, reorder, edit, or delete.
+- Tap **Start my day** and the app switches to a focused one-card-at-a-time flow.
+- Each card shows only the current step and one large **Done** action; completing it immediately advances to the next step.
+- **Back one step** is available only while running the routine in case of an accidental tap.
+- Daily progress resets by date automatically, saves to Supabase, and is also cached locally so the routine keeps working offline.
+- The previous gym Today screen is now the **Gym** tab. **All workouts** opens the muscle library without adding another bottom tab.
+- Full backups now include daily-system steps and daily progress.
+
+
+## v1.12 — substeps + skip
+
+**Database:** run the whole `supabase/schema.sql` once. This is additive only: it adds substep/skip fields to the Daily System and does not delete gym data, videos, plans, history, or daily steps.
+
+- Daily steps can now have optional substeps. Add them as one line each under the collapsed **Substeps** editor.
+- Substeps stay friction-free during the day: battle angel still shows exactly one action at a time. The parent step is only a small context label.
+- **Done** advances immediately to the next action.
+- **Skip** advances immediately with no confirmation. A normal step is recorded as skipped; a substep simply advances within its parent.
+- **Undo** stays secondary and reverses the most recent daily action if you tapped too quickly.
+- Daily substep position and skipped steps sync to Supabase and are cached locally/offline with the rest of the Daily System.
+- Backups include substeps and skip/substep progress.
+
+
+## v1.13 — daily autopilot
+
+**Database:** run the whole `supabase/schema.sql` once, or run the small `battle-angel-v1.13-daily-flow-upgrade.sql` supplied with this release. This only adds the Daily System `later_step_ids` field and does not delete gym data, videos, plans, history, weights, or daily steps.
+
+- If today's Day routine is already in progress, opening battle angel returns directly to the exact current action. There is no Continue tap.
+- The Day runner is now a full-height iPhone-style focus screen with one dominant action button and no bottom navigation.
+- **Undo** is no longer a permanent button. After Done, Skip, or Later it appears briefly as a small transient toast, then disappears.
+- **Later** moves the current step to the end of today's unresolved routine without changing the routine itself. Swipe the card left for the same action.
+- **Skip** still advances immediately for things that do not need to happen today.
+- A Daily step named **Gym**, **Workout**, or **Training** becomes a bridge to today's planned gym modules. It shows the planned muscles, launches the next workout, and returns to the next Daily action automatically after the gym work is complete.
+- If a Gym step has no planned workout, **Choose workout** opens the workout library; finishing that workout still returns to the Daily flow.
+- Daily backups now include deferred/Later state.
+
+
+## v1.14 — swipe autopilot
+
+No database changes.
+
+- Day stays one card at a time so you do not have to scan a list or choose what comes next.
+- Swipe **right** to finish the current action. On the special Gym card, right starts the next planned workout instead of falsely marking Gym complete.
+- Swipe **left** to send the current step to Later. Later is hidden when there is nothing else left to do.
+- Swipe **up** to skip the current step for today.
+- The card follows your finger and shows a clear Done/Start, Later, or Skip stamp before the swipe commits.
+- Three small tap controls remain as a fallback, but the full routine list stays out of the active runner. Exit is the deliberate escape hatch to edit the routine.
+
+
+## v1.14.1 — iPhone swipe fix
+
+No database changes.
+
+- Daily Autopilot now locks page scrolling while the one-card runner is open, so the iPhone page scrollbar cannot steal the gesture.
+- iPhone uses explicit non-passive touch handling for the card; the card follows your finger immediately.
+- Swipe right = Done/Start, left = Later, up = Skip.
+- Swipe distance is slightly shorter so the gesture feels more natural one-handed.
+- Leaving Daily Autopilot restores normal page scrolling everywhere else in battle angel.
+
+
+## v1.14.2 — buttons-only daily autopilot
+
+No database changes.
+
+- Removed Daily Autopilot swipe gestures. iPhone scrolling and browser gesture handling no longer compete with the routine controls.
+- Daily Autopilot is still one action at a time.
+- A large primary button at the bottom does the expected action: **Done** for normal steps or **Start** for the Gym step.
+- **Later** and **Skip** are smaller secondary buttons above it. **Later** only appears when another unresolved step exists.
+- The runner remains full-screen and automatically resumes the current action when battle angel is reopened.
+- Undo remains a short-lived toast after Done, Later, or Skip.
+
+The default execution mode deliberately does not show the full routine. The routine list stays in the editor/overview so execution requires as little choosing and scanning as possible.
+
+
+## v1.14.3 — autopilot polish
+
+No database changes.
+
+- Daily execution remains strictly one action at a time; the full routine only appears in Edit routine.
+- The primary **DONE** action is visually dominant and stays in the bottom thumb zone.
+- Secondary choices are explicitly **Later today** and **Skip today** so their meaning is obvious without thinking.
+- **Later today** always moves the current parent step behind all other remaining steps for today, while preserving any substep progress already completed.
+- Exit is hidden behind a small ••• menu so leaving autopilot is available without competing with the current action.
+- The active card can still scroll if a note is unusually long, but its scrollbar is hidden so the runner feels like a native iPhone screen.
+- Text selection and accidental browser-style interaction are disabled inside the runner.
+
+
+## v1.15 — daily meds
+
+**Database:** run the whole `supabase/schema.sql` once, or run the small `battle-angel-v1.15-meds-upgrade.sql` supplied with this release. This is additive only.
+
+- A compact **Meds** section sits directly below **Edit routine** on the Day overview.
+- Tap a medication row once to mark it taken; tap again to undo.
+- The check state is tied to the local calendar date, so every new day starts unchecked automatically.
+- **Edit meds** stays collapsed by default and lets you add, rename, reorder, or delete medications without cluttering the normal Day view.
+- Medication checks work from the phone cache and sync to Supabase when online.
+- Backups now include the medication list and daily taken log.
+- The tracker records only what you enter and whether you marked it taken; it does not make dosing decisions or change your routine automatically.
+
+
+## v1.16 — Power Actions
+
+**Database:** run the whole `supabase/schema.sql` once, or run `supabase/power_actions_upgrade.sql`. This is additive only and does not delete gym data, routine steps, meds, videos, plans, history, or weights.
+
+- Daily Autopilot and one-off todos are intentionally separate. The recurring routine stays your fixed daily sequence.
+- Directly under the Start Day card is a compact **Start power actions** card for only the todos you chose for today.
+- **Todos** is a dedicated collapsed section. Add a todo once, then tap **Today** beside only the items you want served today.
+- Power Actions use the same one-card execution model as Daily Autopilot: one action, one large **DONE** button, plus **Later today** and **Skip today**.
+- **Done** permanently completes that todo and removes it from the active todo list. **Skip today** leaves the todo in the master list for another day. **Later today** moves it behind the remaining Power Actions for today.
+- Today's selections are date-specific. A new day starts with zero Power Actions selected, while unfinished todos remain available in the master list.
+- If Power Actions were started and the app closes, battle angel resumes the current Power Action automatically when the fixed Daily routine is not actively running.
+- Power Action execution is cached locally and queued for Supabase sync, matching the app's low-friction/offline-first behavior.
+- Backups include the master todo list and dated Power Action plan/history.
+
+## v1.17 — Day Stack
+
+The Day tab is now one system instead of a separate routine runner and Power Actions runner.
+
+**Capture first, decide later.** The Day overview has one small **Dump a todo...** field. Anything you type there goes to **Inbox** only. It does not interrupt the current day or force you to prioritize it immediately. While Autopilot is running, the small **+** button opens the same quick capture without leaving the current action.
+
+**Plan today only when you want to plan.** Open **Plan today** to see one ordered stack containing the repeating routine plus the todos selected for today. Choose items from Inbox with **+ Today** and use the compact up/down controls to put those todos anywhere between routine actions. This changes only today's order; it never rearranges the permanent routine.
+
+**Execute one thing at a time.** **Start day** runs that combined stack as a single Autopilot. Routine actions, routine substeps, Gym, and selected todos all arrive through the same one-card screen. The only normal decisions are **Done**, **Later today**, or **Skip today**.
+
+- **Done** on a todo completes it and removes it from Inbox.
+- **Later today** moves the current routine block or todo behind the remaining stack.
+- **Skip today** removes it from today's execution. A skipped todo stays in Inbox.
+- A todo that simply never gets finished also stays in Inbox and is available to choose on any future day.
+- A new calendar day starts with a fresh routine and no todos selected. Med checkmarks also reset for the new date.
+
+The visual hierarchy is intentionally quiet: **Start day** first, quick capture second, then collapsed planning/editing sections. The full Inbox is hidden unless you deliberately open it.
+
+### v1.17 database upgrade
+
+Existing installs should run `supabase/day_stack_upgrade.sql` once. It adds the ordered Day Stack field and also creates/repairs the Todo Inbox tables if the earlier v1.16 SQL did not finish. The migration is additive only and does not delete workouts, uploads, routines, meds, calendar data, history, or existing todos.
+
+
+## v1.17.1 - startup fix
+
+- Fixes the blank/black screen in v1.17 caused by missing Day Stack queue helper functions.
+- Adds a visible startup error fallback so a future runtime failure cannot leave a silent black screen.
+- No database changes from v1.17. If the v1.17 Day Stack SQL already ran successfully, do not run another migration for this fix.
+
+## v1.18 — organized Day + weekday routines
+
+**Database:** run `supabase/day_routine_schedule_upgrade.sql` once on an existing install (or run the full `supabase/schema.sql`). It only adds `active_days` to routine steps. Existing routine steps remain **Every day**.
+
+The Day tab is now intentionally split by job instead of stacking editors and settings on one screen:
+
+- **Start / Continue day** — the only dominant action.
+- **Dump a todo...** — permanent quick capture into Inbox; no prioritizing required at capture time.
+- **Meds** — a compact tap-to-mark section only when meds exist.
+- **Today plan** — opens a dedicated planning screen where today's routine and chosen todos share one ordered stack.
+- **Inbox** — opens a dedicated capture/review screen. Unfinished todos stay here for future days.
+- **Routine & meds** — the single setup screen. Routine editing and medication editing no longer live scattered around the Day overview.
+
+### Routine days
+
+Every routine step now has a simple **Runs on** selector: Mo, Tu, We, Th, Fr, Sa, Su. New and existing steps default to every day. For example, "Take out trash" can run only Tuesday and Friday, while "Brush teeth" can remain every day. Only steps scheduled for the current local weekday enter that day's stack.
+
+### Daily reset
+
+At the local calendar-day boundary, battle angel resets today's routine progress, medication checkmarks, and today's selected todos. The permanent routine, medication list, and Todo Inbox remain. If the app was left open overnight, returning to it also forces the new-day reset instead of leaving yesterday's card on screen.
+
+The execution model is unchanged: after you press **Start day**, battle angel serves exactly one action at a time with **Done**, **Later today**, and **Skip today**.
+
+## v1.19 — boosters anchored to routine activities
+
+**Database:** run `supabase/booster_anchors_upgrade.sql` once on an existing install (or run the full `supabase/schema.sql`). The upgrade is additive only.
+
+- The Day overview keeps **Boosters** collapsed by default, showing only the daily taken count until you open it.
+- In **Day -> Setup -> Boosters**, each booster can be linked to one routine activity or left as **Anytime / no activity**.
+- Example: link **Omega 3** and **Vitamin D** to **Breakfast**. When Breakfast reaches Autopilot, those boosters appear directly on the Breakfast card as tap-to-mark rows.
+- A booster linked to a routine with substeps stays visible through that routine block until you mark it taken, so you do not have to remember it between substeps.
+- Marking a booster never blocks the routine's **Done** button. battle angel only surfaces the pairing you configured; it does not decide medication/supplement timing for you.
+- Booster checkmarks are still tied to the local calendar date and reset every new day. The booster list and activity links persist.
+- Deleting a routine step safely returns linked boosters to **Anytime / no activity** instead of deleting them.
+- Backups now include the routine activity link for each booster.
+
+
+## v1.20 — clean Day architecture
+
+No database changes. If v1.19 is already working, upload this app version only.
+
+The Day tab now gives each decision one clear home:
+
+- **Day home** — Start/Continue Day, quick capture, Anytime boosters, then only three destinations: Arrange today, Inbox, Setup.
+- **Arrange today** — the only place to choose todos for today and place them between routine actions.
+- **Inbox** — capture, rename, and delete only. It no longer has duplicate **+ Today** controls.
+- **Setup** — a small settings hub with two destinations: Routine and Boosters. Routine/weekday editing and booster/activity linking no longer share one long screen.
+- **Autopilot** — execution only. It still serves one routine action or selected todo at a time.
+
+Booster display is also de-duplicated:
+
+- A booster linked to a routine activity appears on that activity's Autopilot card, not again on the Day overview.
+- Only boosters set to **Anytime** appear on the Day overview, because they have no routine card to surface them.
+
+The old standalone Power Actions launch/list/runner UI and older duplicate inline Day planner/Inbox renderers were removed from the app code. The existing Supabase todo tables are kept so all existing todos and today's selections remain intact.
+
+## v1.21 — I changed
+
+**Database:** run `supabase/i_changed_upgrade.sql` once on an existing install (or run the full `supabase/schema.sql`). The upgrade is additive only.
+
+A fifth bottom tab, **I changed**, is a quiet reflection space kept separate from Day planning and Gym execution.
+
+- The main screen is a dense two-column gratitude board: **Present** (grateful it is here) and **Absent** (grateful it is gone).
+- Tap **+ Add**, write one thought, choose Present or Absent, and save. The board stays compact so many reminders fit on one iPhone screen.
+- Tap any board entry to edit it, move it to the other column, or remove it. Exact duplicates in the same column are blocked.
+- **My story** stores short or long pieces of your past. Add, edit, or delete them from one dedicated screen.
+- One stored story entry is automatically surfaced on the main **I changed** screen for the entire Monday-Sunday week, then the weekly reminder rotates. This gives you a recurring reminder of where you came from without another task to manage.
+- Gratitude and story entries persist; they do not reset daily. They are also included in Backup library.
+
+
+## v1.21.1 — label polish
+
+- The reflection tab/button and page title now read **i changed.** in lowercase with the period.
+- No database changes.
+
+
+## v1.21.2 — monochrome cleanup
+
+- All green/gold/red accent styling is removed from the interface.
+- In dark mode, primary action buttons are white with black text.
+- Light mode stays strictly grayscale, using black primary actions on white.
+- Completed/check states, progress accents, selected controls, and golden-week treatment are monochrome.
+- Major cards and navigation use tighter corners and less shadow for a cleaner, denser iPhone UI.
+- No database changes.
