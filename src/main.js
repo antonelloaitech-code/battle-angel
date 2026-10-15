@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.23.0'
+const APP_VERSION = '1.24.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -136,6 +136,8 @@ let changedStoryEntries = []
 let changedSystemAvailable = true
 let pendingGoldHint = ''
 let goldHintTimer = null
+let routineWeekdaySelected = new Date().getDay()
+let routineScheduleWriteQueue = Promise.resolve()
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 12
 const MOTIVATION_SOUND_KEY = 'battle-angel-motivation-sound'
@@ -574,8 +576,8 @@ function dailySubstepsText(step) {
 
 function normalizeRoutineDays(value) {
   const source = Array.isArray(value) ? value : ALL_ROUTINE_DAYS
-  const unique = [...new Set(source.map((day) => Number.parseInt(day, 10)).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
-  return unique.length ? unique.sort((a, b) => a - b) : [...ALL_ROUTINE_DAYS]
+  return [...new Set(source.map((day) => Number.parseInt(day, 10)).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
+    .sort((a, b) => a - b)
 }
 
 function routineStepsForDate(dateKey = todayDateKey()) {
@@ -585,6 +587,7 @@ function routineStepsForDate(dateKey = todayDateKey()) {
 
 function routineDaysLabel(days) {
   const normalized = normalizeRoutineDays(days)
+  if (!normalized.length) return 'OFF'
   if (normalized.length === 7) return 'EVERY DAY'
   return ROUTINE_DAY_LABELS.filter(([day]) => normalized.includes(day)).map(([, short]) => short).join(' · ')
 }
@@ -2780,15 +2783,47 @@ function renderMotivationLibrary() {
     </details>`
 }
 
+function routineWeekdayMeta(day = routineWeekdaySelected) {
+  return ROUTINE_DAY_LABELS.find(([value]) => value === day) || ROUTINE_DAY_LABELS[0]
+}
+
 function renderDailyEditor() {
   const progress = currentDailyProgress()
-  const rows = dailySteps.map((step, index) => {
+  const [, selectedShort, selectedFull] = routineWeekdayMeta()
+  const selectedCount = dailySteps.filter((step) => normalizeRoutineDays(step.active_days).includes(routineWeekdaySelected)).length
+  const todayWeekday = new Date().getDay()
+
+  const weekStrip = ROUTINE_DAY_LABELS.map(([day, short, full]) => {
+    const count = dailySteps.filter((step) => normalizeRoutineDays(step.active_days).includes(day)).length
+    const selected = day === routineWeekdaySelected
+    const today = day === todayWeekday
+    return `
+      <button type="button" class="routine-week-day ${selected ? 'is-selected' : ''} ${today ? 'is-today' : ''}" data-routine-weekday="${day}" aria-pressed="${selected ? 'true' : 'false'}" aria-label="${full}, ${count} ritual${count === 1 ? '' : 's'}">
+        <strong>${short.toUpperCase()}</strong>
+        <span>${count}</span>
+      </button>`
+  }).join('')
+
+  const scheduleRows = dailySteps.map((step) => {
+    const active = normalizeRoutineDays(step.active_days).includes(routineWeekdaySelected)
+    const boosterCount = boostersForRoutineStep(step.id).length
+    return `
+      <button type="button" class="routine-week-row ${active ? 'is-active' : ''}" data-routine-day-toggle="${step.id}" aria-pressed="${active ? 'true' : 'false'}">
+        <span class="routine-week-row-copy">
+          <strong>${escapeHtml(step.title)}</strong>
+          ${boosterCount ? `<small>${boosterCount} BOOSTER${boosterCount === 1 ? '' : 'S'}</small>` : ''}
+        </span>
+        <span class="routine-week-check" aria-hidden="true">${active ? '✓' : ''}</span>
+      </button>`
+  }).join('')
+
+  const editRows = dailySteps.map((step, index) => {
     const substeps = normalizeDailySubsteps(step.substeps)
     const activeDays = normalizeRoutineDays(step.active_days)
     return `
       <details class="daily-edit-item">
         <summary>
-          <span class="daily-edit-summary-copy"><strong>${escapeHtml(step.title)}</strong><small>${escapeHtml(routineDaysLabel(activeDays))}${substeps.length ? ` · ${substeps.length} substeps` : ''}</small></span>
+          <span class="daily-edit-summary-copy"><strong>${escapeHtml(step.title)}</strong><small>${escapeHtml(routineDaysLabel(activeDays))}${substeps.length ? ` · ${substeps.length} SUB` : ''}</small></span>
           <span class="daily-edit-more">EDIT</span>
         </summary>
         <form class="daily-edit-form" data-daily-edit="${step.id}">
@@ -2796,7 +2831,6 @@ function renderDailyEditor() {
             <span class="eyebrow">ACTION</span>
             <input name="title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required value="${escapeHtml(step.title)}" />
           </label>
-          ${routineDayPickerHtml(activeDays)}
           <label>
             <span class="eyebrow">NOTE</span>
             <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="">${escapeHtml(step.note || '')}</textarea>
@@ -2819,15 +2853,23 @@ function renderDailyEditor() {
   }).join('')
 
   return `
-    <section class="day-setup-section">
-      <details class="day-setup-add" ${dailySteps.length ? '' : 'open'}>
-        <summary>+ ADD RITUAL</summary>
+    <section class="day-setup-section routine-week-setup">
+      <div class="routine-week-strip" role="tablist" aria-label="Routine week">${weekStrip}</div>
+      <div class="routine-week-head">
+        <strong>${selectedFull.toUpperCase()}.</strong>
+        <span>${selectedCount}</span>
+      </div>
+      <div class="routine-week-list">
+        ${scheduleRows || '<div class="daily-editor-empty">—</div>'}
+      </div>
+
+      <details class="day-setup-add routine-week-add" ${dailySteps.length ? '' : 'open'}>
+        <summary>+ RITUAL</summary>
         <form id="add-daily-step" class="daily-add-form">
           <label>
             <span class="eyebrow">ACTION</span>
             <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="Action" />
           </label>
-          ${routineDayPickerHtml(ALL_ROUTINE_DAYS)}
           <label>
             <span class="eyebrow">NOTE</span>
             <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder=""></textarea>
@@ -2839,17 +2881,56 @@ function renderDailyEditor() {
               <textarea id="daily-step-substeps" rows="4" placeholder="Brush teeth\nSkincare\nGet dressed"></textarea>
             </label>
           </details>
-          <button type="submit" class="primary-button">ADD</button>
+          <button type="submit" class="primary-button">ADD TO ${selectedShort.toUpperCase()}</button>
         </form>
       </details>
-      ${rows ? `<div class="daily-edit-list">${rows}</div>` : '<div class="daily-editor-empty">—</div>'}
+
+      ${editRows ? `<details class="routine-edit-library"><summary>EDIT RITUALS <span>${dailySteps.length}</span></summary><div class="daily-edit-list">${editRows}</div></details>` : ''}
       ${progress.started_at ? '<button type="button" class="text-button danger-text daily-reset" id="reset-day-progress">RESET TODAY</button>' : ''}
       <div id="daily-editor-status" class="status-line" aria-live="polite"></div>
     </section>`
 }
 
+async function toggleRoutineDayAssignment(stepId) {
+  const step = dailySteps.find((item) => item.id === stepId)
+  if (!step || !currentUser || !dailySystemAvailable) return
+  const previous = normalizeRoutineDays(step.active_days)
+  const active = previous.includes(routineWeekdaySelected)
+  const next = active
+    ? previous.filter((day) => day !== routineWeekdaySelected)
+    : [...previous, routineWeekdaySelected].sort((a, b) => a - b)
+
+  step.active_days = next
+  saveSnapshot()
+  renderRoutineSetupScreen()
+
+  routineScheduleWriteQueue = routineScheduleWriteQueue
+    .then(async () => {
+      const { error } = await supabase.from('daily_steps').update({
+        active_days: next,
+        updated_at: new Date().toISOString()
+      }).eq('id', stepId)
+      if (error) throw error
+    })
+    .catch(async (error) => {
+      console.error(error)
+      await loadDailySystem().catch(() => {})
+      saveSnapshot()
+      if (currentView === 'day-routine-setup') renderRoutineSetupScreen()
+      window.setTimeout(() => alert(isNetworkError(error) ? 'OFFLINE.' : 'COULD NOT SAVE.'), 0)
+    })
+}
+
 function bindDailyEditor() {
-  bindRoutineDayPickers()
+  document.querySelectorAll('[data-routine-weekday]').forEach((button) => {
+    button.addEventListener('click', () => {
+      routineWeekdaySelected = Number.parseInt(button.dataset.routineWeekday, 10)
+      renderRoutineSetupScreen()
+    })
+  })
+  document.querySelectorAll('[data-routine-day-toggle]').forEach((button) => {
+    button.addEventListener('click', () => toggleRoutineDayAssignment(button.dataset.routineDayToggle))
+  })
   document.querySelector('#add-daily-step')?.addEventListener('submit', addDailyStep)
   document.querySelectorAll('[data-daily-edit]').forEach((form) => form.addEventListener('submit', updateDailyStep))
   document.querySelectorAll('[data-daily-move]').forEach((button) => {
@@ -3464,7 +3545,7 @@ function renderDaySetupScreen() {
       <div><h2>SYSTEM.</h2></div>
     </div>
     <section class="day-hub day-setup-hub" aria-label="Day setup">
-      ${renderDayHubRow('open-routine-setup', 'RITUAL', '', dailySteps.length)}
+      ${renderDayHubRow('open-routine-setup', 'WEEK', '', dailySteps.length)}
       ${renderDayHubRow('open-booster-setup', 'BOOSTERS', '', dailyMeds.length)}
     </section>`,
     { title: 'SYSTEM.', showAccount: false, showTimer: false, showHeader: false, view: 'day-setup' })
@@ -3477,10 +3558,10 @@ function renderRoutineSetupScreen() {
   renderShell(`
     <div class="day-subview-top">
       <button type="button" class="day-subview-back" id="back-day-setup">‹ SYSTEM</button>
-      <div><h2>RITUAL.</h2></div>
+      <div><h2>WEEK.</h2></div>
     </div>
     ${renderDailyEditor()}`,
-    { title: 'RITUAL.', showAccount: false, showTimer: false, showHeader: false, view: 'day-routine-setup' })
+    { title: 'WEEK.', showAccount: false, showTimer: false, showHeader: false, view: 'day-routine-setup' })
   document.querySelector('#back-day-setup')?.addEventListener('click', renderDaySetupScreen)
   bindDailyEditor()
 }
@@ -3715,14 +3796,9 @@ async function addDailyStep(event) {
   const title = document.querySelector('#daily-step-title')?.value.trim().slice(0, DAILY_STEP_TITLE_MAX)
   const note = document.querySelector('#daily-step-note')?.value.trim().slice(0, DAILY_STEP_NOTE_MAX) || ''
   const substeps = parseDailySubstepsText(document.querySelector('#daily-step-substeps')?.value || '')
-  const form = event.currentTarget
-  const active_days = readRoutineDays(form)
+  const active_days = [routineWeekdaySelected]
   const status = document.querySelector('#daily-editor-status')
   if (!title) return
-  if (!active_days.length) {
-    if (status) status.textContent = 'CHOOSE A DAY.'
-    return
-  }
   if (status) status.textContent = 'SAVING...'
   const nextOrder = Math.max(0, ...dailySteps.map((step) => Number(step.sort_order) || 0)) + 1
   const { error } = await supabase.from('daily_steps').insert({
@@ -3750,12 +3826,8 @@ async function updateDailyStep(event) {
   const title = form.elements.title.value.trim().slice(0, DAILY_STEP_TITLE_MAX)
   const note = form.elements.note.value.trim().slice(0, DAILY_STEP_NOTE_MAX)
   const substeps = parseDailySubstepsText(form.elements.substeps?.value || '')
-  const active_days = readRoutineDays(form)
+  const active_days = normalizeRoutineDays(dailySteps.find((step) => step.id === id)?.active_days)
   if (!title) return
-  if (!active_days.length) {
-    alert('CHOOSE A DAY.')
-    return
-  }
   const { error } = await supabase.from('daily_steps').update({
     title,
     note,

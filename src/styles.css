@@ -4800,3 +4800,178 @@ h1, h2 {
 :root[data-theme="light"] .day-preview-row.is-selected .day-preview-state {
   color: #fff;
 }
+
+/* v1.24: one calendar surface owns routine weekday scheduling. */
+.routine-week-setup {
+  padding-top: 0;
+}
+
+.routine-week-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin: 2px 0 14px;
+}
+
+.routine-week-day {
+  min-width: 0;
+  min-height: 52px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 2px;
+  border: 1px solid #242424;
+  border-radius: 0;
+  background: #000;
+  color: #777;
+  padding: 5px 1px;
+}
+
+.routine-week-day strong {
+  font-size: .62rem;
+  font-weight: 950;
+  letter-spacing: .04em;
+}
+
+.routine-week-day span {
+  font-size: .68rem;
+  font-weight: 900;
+}
+
+.routine-week-day.is-today:not(.is-selected) {
+  border-color: #555;
+  color: #fff;
+}
+
+.routine-week-day.is-selected {
+  border-color: #fff;
+  background: #fff;
+  color: #000;
+}
+
+.routine-week-head {
+  min-height: 42px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #262626;
+  padding: 0 1px 8px;
+}
+
+.routine-week-head strong {
+  font-size: 1.35rem;
+  font-weight: 1000;
+  letter-spacing: -.04em;
+}
+
+.routine-week-head span {
+  color: #666;
+  font-size: .72rem;
+  font-weight: 950;
+}
+
+.routine-week-list {
+  display: grid;
+  margin-bottom: 14px;
+}
+
+.routine-week-row {
+  width: 100%;
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-bottom: 1px solid #171717;
+  border-radius: 0;
+  background: #000;
+  color: #6a6a6a;
+  padding: 7px 2px;
+  text-align: left;
+}
+
+.routine-week-row.is-active {
+  background: #fff;
+  color: #000;
+  border-bottom-color: #fff;
+  padding-inline: 9px;
+}
+
+.routine-week-row-copy {
+  min-width: 0;
+}
+
+.routine-week-row-copy strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: .9rem;
+  font-weight: 950;
+  line-height: 1.12;
+}
+
+.routine-week-row-copy small {
+  display: block;
+  margin-top: 2px;
+  color: inherit;
+  opacity: .55;
+  font-size: .54rem;
+  font-weight: 950;
+  letter-spacing: .11em;
+}
+
+.routine-week-check {
+  min-width: 28px;
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 1000;
+}
+
+.routine-week-add,
+.routine-edit-library {
+  border-top: 1px solid #292929;
+  border-bottom: 1px solid #292929;
+  margin-top: 10px;
+}
+
+.routine-edit-library > summary,
+.routine-week-add > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  font-size: .72rem;
+  font-weight: 950;
+  letter-spacing: .08em;
+}
+
+.routine-edit-library > summary span {
+  color: #666;
+}
+
+.routine-edit-library .daily-edit-list {
+  margin-top: 0;
+}
+
+:root[data-theme="light"] .routine-week-day,
+:root[data-theme="light"] .routine-week-row {
+  background: #fff;
+  color: #777;
+  border-color: #e8e8e8;
+}
+
+:root[data-theme="light"] .routine-week-day.is-selected,
+:root[data-theme="light"] .routine-week-row.is-active {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+
+:root[data-theme="light"] .routine-week-head,
+:root[data-theme="light"] .routine-week-add,
+:root[data-theme="light"] .routine-edit-library {
+  border-color: #dedede;
+}

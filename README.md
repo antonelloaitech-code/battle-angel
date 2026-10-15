@@ -453,3 +453,13 @@ A fifth bottom tab, **I changed**, is a quiet reflection space kept separate fro
 - Completed/check states, progress accents, selected controls, and golden-week treatment are monochrome.
 - Major cards and navigation use tighter corners and less shadow for a cleaner, denser iPhone UI.
 - No database changes.
+
+
+## v1.24 — week calendar
+
+- Day -> System -> Week is now the single place to schedule rituals by weekday.
+- Tap Monday-Sunday, then tap rituals on/off for that day; changes save immediately.
+- Adding a ritual from a selected day schedules it on that day first.
+- Editing ritual names, notes, substeps, and order stays separate under Edit rituals, so weekday scheduling is not duplicated.
+- Booster anchors still attach to ritual activities under System -> Boosters and automatically follow whatever days that ritual is scheduled.
+- No database change from v1.23.
