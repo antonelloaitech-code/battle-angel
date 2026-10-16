@@ -4,6 +4,26 @@
 
 battle angel is a low-friction daily-system + gym app: set your routine and workouts once, then open the app and execute the next thing without deciding what comes next.
 
+## v1.25 — TIGER FLOW
+
+Database update: run `supabase/tiger_flow_upgrade.sql` once on an existing project. It only adds `day_mode` to daily progress and `day_order` to routine steps.
+
+- **SLEEPING TIGER** bypasses the Power 3–5 gate for a low-demand day. The day runs scheduled rituals only; unchosen todos stay in Inbox.
+- Day navigation is flattened: **THE ORDER / INBOX / WEEK / BOOSTERS** are direct destinations. The normal Day screen no longer duplicates a second page title.
+- The Power gate stays visually quiet until 3 actions are selected. At 3–5, **NEXT** appears.
+- **THE ORDER** now uses a dedicated drag handle for fast iPhone reordering, with keyboard-arrow fallback.
+- **WEEK** is a seven-day routine calendar. Select a weekday, add/remove rituals, and drag that day's rituals into the exact order you want. Each weekday can have its own order without rewriting the others.
+- Adding a new ritual from WEEK assigns it only to the selected weekday. The ritual library remains collapsed for occasional editing.
+- Booster activity assignment saves immediately from **BOOSTERS** and stays attached to the ritual wherever that ritual appears.
+- The previous COMMAND DAY behavior remains: Power 3–5, FIELD VIEW bulk completion, 4 distinct workout days for a golden week, restrained gold cues, and the full-screen motivation finale.
+
+## v1.24 — WEEK CALENDAR
+
+No database change beyond the routine weekday support already introduced in v1.18.
+
+- Routine weekday assignment moved from individual edit forms into a seven-day WEEK view.
+- Selecting a day shows only the rituals scheduled for that weekday and lets you add/remove activities from that day.
+
 ## v1.23 — COMMAND DAY
 
 No database changes.
@@ -32,6 +52,7 @@ The app uses five focused tabs:
 - **Day** — quick-capture todos, arrange today once, then run one combined routine + todo stack one action at a time.
 - **Gym** — today's planned gym modules, resume, offline video prep, and access to all workouts.
 - **Plan** — calendar, recurring weekly plan, and repeat-last-week.
+- **i changed.** — gratitude board + weekly past-story reflection.
 - **More** — motivation videos and photos, theme, backup, and sign out.
 
 ## exercise creation
@@ -179,8 +200,8 @@ No new database changes. If you haven't run `supabase/multi_workout_upgrade.sql`
 Photos need the storage bucket to accept images. This is included in `supabase/schema.sql`.
 
 **Golden weeks**
-- When 4 or more workouts are marked done in a calendar week (Monday to Sunday, one row), that row turns gold.
-- Each module counts once, so Chest + Triceps on the same day counts as 2.
+- When workouts are completed on 4 different days in a calendar week (Monday to Sunday), that row turns gold.
+- Multiple workout modules on the same date still count as one workout day.
 - The selected day in Plan shows how close the week is: "2 of 4 done this week".
 - Days with a finished workout show a ✓ in the calendar.
 
@@ -463,3 +484,18 @@ A fifth bottom tab, **I changed**, is a quiet reflection space kept separate fro
 - Editing ritual names, notes, substeps, and order stays separate under Edit rituals, so weekday scheduling is not duplicated.
 - Booster anchors still attach to ritual activities under System -> Boosters and automatically follow whatever days that ritual is scheduled.
 - No database change from v1.23.
+
+## v1.25 — Tiger Flow
+
+**Database:** run `supabase/tiger_flow_upgrade.sql` once on an existing install (or run the full `supabase/schema.sql`). It only adds `day_mode` to daily progress and `day_order` to routine steps.
+
+- **Sleeping Tiger** — the daily Power 3–5 gate now has one deliberate bypass. Choosing **SLEEPING TIGER** keeps the routine and skips Power actions for that date only. Inbox items stay in Inbox.
+- **Power -> Order -> Lock In** — Power selection is no longer duplicated inside the ordering screen. Choose 3–5 once, review the sequence once, then execute.
+- **Direct Day navigation** — the extra System layer is gone. Day goes straight to **THE ORDER**, **INBOX**, **WEEK**, and **BOOSTERS**.
+- **Drag to order** — THE ORDER and the selected weekday routine use a dedicated `≡` handle. Normal page scrolling still works everywhere else. Keyboard arrow keys on the handle remain as a non-drag fallback.
+- **Week order is truly per day** — reordering Monday no longer silently changes Tuesday. Existing routines keep their current order until you customize a weekday.
+- **Week setup** — choose MO–SU, see only what runs that day, tap `+ ADD` for existing rituals or a new ritual, and drag the active list into place.
+- **Booster anchors are immediate** — each booster shows its linked ritual directly in the row; changing the activity saves immediately. Rename/delete stays under `•••`.
+- **No new execution clutter** — FIELD VIEW, bulk done, gold hints, the 4-distinct-workout-day golden week rule, and the full-screen end-of-day motivation video remain intact.
+
+The migration is additive. It does not delete workouts, videos, routines, todos, boosters, calendar/history, weights, or `i changed.` entries.

@@ -3,7 +3,7 @@ import * as tus from 'tus-js-client'
 import { Zip, ZipPassThrough, strToU8 } from 'fflate'
 import './styles.css'
 
-const APP_VERSION = '1.24.0'
+const APP_VERSION = '1.25.0'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const VIDEO_BUCKET = 'gym-videos'
@@ -41,6 +41,8 @@ const DAILY_MED_NAME_MAX = 120
 const POWER_TODO_TITLE_MAX = 160
 const POWER_ACTION_MIN = 3
 const POWER_ACTION_MAX = 5
+const DAY_MODE_STANDARD = 'standard'
+const DAY_MODE_SLEEPING_TIGER = 'sleeping_tiger'
 const CHANGED_BOARD_TEXT_MAX = 400
 const CHANGED_STORY_TEXT_MAX = 2000
 const ALL_ROUTINE_DAYS = [0, 1, 2, 3, 4, 5, 6]
@@ -138,6 +140,7 @@ let pendingGoldHint = ''
 let goldHintTimer = null
 let routineWeekdaySelected = new Date().getDay()
 let routineScheduleWriteQueue = Promise.resolve()
+let routineAddPanelOpen = false
 
 const SIGNED_URL_TTL_SECONDS = 60 * 60 * 12
 const MOTIVATION_SOUND_KEY = 'battle-angel-motivation-sound'
@@ -483,7 +486,7 @@ async function loadSchedule() {
 
 function isMissingDailySystemError(error) {
   const text = `${error?.code || ''} ${error?.message || ''}`.toLowerCase()
-  return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_steps') || text.includes('daily_progress') || text.includes('substeps') || text.includes('skipped_step_ids') || text.includes('substep_positions') || text.includes('later_step_ids') || text.includes('stack_order') || text.includes('active_days')
+  return text.includes('42p01') || text.includes('pgrst205') || text.includes('daily_steps') || text.includes('daily_progress') || text.includes('substeps') || text.includes('skipped_step_ids') || text.includes('substep_positions') || text.includes('later_step_ids') || text.includes('stack_order') || text.includes('active_days') || text.includes('day_mode') || text.includes('day_order')
 }
 
 function isMissingDailyMedsError(error) {
@@ -580,9 +583,32 @@ function normalizeRoutineDays(value) {
     .sort((a, b) => a - b)
 }
 
+function normalizeRoutineDayOrder(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const result = {}
+  Object.entries(value).forEach(([key, raw]) => {
+    const day = Number.parseInt(key, 10)
+    const order = Number.parseInt(raw, 10)
+    if (Number.isInteger(day) && day >= 0 && day <= 6 && Number.isInteger(order) && order > 0) result[String(day)] = order
+  })
+  return result
+}
+
+function routineOrderForWeekday(step, weekday) {
+  const dayOrder = normalizeRoutineDayOrder(step?.day_order)
+  return Number(dayOrder[String(weekday)]) || Number(step?.sort_order) || 0
+}
+
+function routineStepsForWeekday(weekday) {
+  return dailySteps
+    .filter((step) => normalizeRoutineDays(step.active_days).includes(weekday))
+    .sort((a, b) => routineOrderForWeekday(a, weekday) - routineOrderForWeekday(b, weekday)
+      || (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+      || String(a.created_at || '').localeCompare(String(b.created_at || '')))
+}
+
 function routineStepsForDate(dateKey = todayDateKey()) {
-  const weekday = dateFromKey(dateKey).getDay()
-  return dailySteps.filter((step) => normalizeRoutineDays(step.active_days).includes(weekday))
+  return routineStepsForWeekday(dateFromKey(dateKey).getDay())
 }
 
 function routineDaysLabel(days) {
@@ -592,42 +618,6 @@ function routineDaysLabel(days) {
   return ROUTINE_DAY_LABELS.filter(([day]) => normalized.includes(day)).map(([, short]) => short).join(' · ')
 }
 
-function routineDayPickerHtml(days, name = 'active_days') {
-  const selected = new Set(normalizeRoutineDays(days))
-  return `
-    <div class="routine-days-field">
-      <div class="routine-days-head"><span class="eyebrow">DAYS</span><button type="button" class="routine-days-all" data-routine-days-all>ALL</button></div>
-      <div class="routine-days-picker">
-        ${ROUTINE_DAY_LABELS.map(([day, short, full]) => `
-          <label class="routine-day-chip ${selected.has(day) ? 'is-selected' : ''}" title="${full}">
-            <input type="checkbox" name="${name}" value="${day}" ${selected.has(day) ? 'checked' : ''} />
-            <span>${short}</span>
-          </label>`).join('')}
-      </div>
-    </div>`
-}
-
-function readRoutineDays(form) {
-  return [...form.querySelectorAll('input[name="active_days"]:checked')]
-    .map((input) => Number.parseInt(input.value, 10))
-    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
-    .sort((a, b) => a - b)
-}
-
-function bindRoutineDayPickers(root = document) {
-  root.querySelectorAll('.routine-days-field').forEach((field) => {
-    const sync = () => {
-      field.querySelectorAll('.routine-day-chip').forEach((label) => label.classList.toggle('is-selected', Boolean(label.querySelector('input')?.checked)))
-    }
-    field.querySelectorAll('input[name="active_days"]').forEach((input) => input.addEventListener('change', sync))
-    field.querySelector('[data-routine-days-all]')?.addEventListener('click', () => {
-      field.querySelectorAll('input[name="active_days"]').forEach((input) => { input.checked = true })
-      sync()
-    })
-    sync()
-  })
-}
-
 function emptyDailyProgress(dateKey = todayDateKey()) {
   return {
     progress_date: dateKey,
@@ -635,6 +625,7 @@ function emptyDailyProgress(dateKey = todayDateKey()) {
     skipped_step_ids: [],
     later_step_ids: [],
     stack_order: [],
+    day_mode: DAY_MODE_STANDARD,
     substep_positions: {},
     is_complete: false,
     started_at: null,
@@ -653,6 +644,7 @@ function normalizeDailyProgressValue(value, dateKey = todayDateKey()) {
     skipped_step_ids: Array.isArray(value.skipped_step_ids) ? [...new Set(value.skipped_step_ids.filter((id) => typeof id === 'string'))] : [],
     later_step_ids: Array.isArray(value.later_step_ids) ? [...new Set(value.later_step_ids.filter((id) => typeof id === 'string'))] : [],
     stack_order: Array.isArray(value.stack_order) ? [...new Set(value.stack_order.filter((key) => typeof key === 'string' && /^(routine|todo):/.test(key)))] : [],
+    day_mode: value.day_mode === DAY_MODE_SLEEPING_TIGER ? DAY_MODE_SLEEPING_TIGER : DAY_MODE_STANDARD,
     substep_positions: positions,
     is_complete: Boolean(value.is_complete),
     started_at: value.started_at || null,
@@ -676,12 +668,12 @@ async function loadDailySystem() {
   const [stepsResult, progressResult] = await Promise.all([
     supabase
       .from('daily_steps')
-      .select('id,title,note,substeps,active_days,sort_order,created_at,updated_at')
+      .select('id,title,note,substeps,active_days,day_order,sort_order,created_at,updated_at')
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true }),
     supabase
       .from('daily_progress')
-      .select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,substep_positions,is_complete,started_at,updated_at')
+      .select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,day_mode,substep_positions,is_complete,started_at,updated_at')
       .eq('progress_date', dateKey)
       .maybeSingle()
   ])
@@ -697,7 +689,7 @@ async function loadDailySystem() {
     throw firstError
   }
 
-  dailySteps = (stepsResult.data || []).map((step) => ({ ...step, substeps: normalizeDailySubsteps(step.substeps), active_days: normalizeRoutineDays(step.active_days) }))
+  dailySteps = (stepsResult.data || []).map((step) => ({ ...step, substeps: normalizeDailySubsteps(step.substeps), active_days: normalizeRoutineDays(step.active_days), day_order: normalizeRoutineDayOrder(step.day_order) }))
   const cloud = normalizeDailyProgressValue(progressResult.data, dateKey)
   const pending = pendingDailyProgressFor(dateKey)
   const cloudTime = Date.parse(cloud.updated_at || '') || 0
@@ -868,6 +860,40 @@ function powerSelectionIsValid() {
   return count >= POWER_ACTION_MIN && count <= POWER_ACTION_MAX
 }
 
+function isSleepingTigerDay(progress = currentDailyProgress()) {
+  return progress?.day_mode === DAY_MODE_SLEEPING_TIGER
+}
+
+function setDayMode(mode) {
+  const progress = currentDailyProgress()
+  progress.day_mode = mode === DAY_MODE_SLEEPING_TIGER ? DAY_MODE_SLEEPING_TIGER : DAY_MODE_STANDARD
+  progress.stack_order = normalizeTodayStackOrder(progress)
+  progress.is_complete = false
+  saveDailyProgress(progress)
+  return progress
+}
+
+function confirmPowerActionGate() {
+  if (!powerSelectionIsValid()) return
+  setDayMode(DAY_MODE_STANDARD)
+  renderDayPlannerScreen()
+}
+
+function chooseSleepingTigerDay() {
+  const now = new Date().toISOString()
+  getPendingPowerPlans().forEach((plan) => {
+    const todo = getPowerTodo(plan.todo_id)
+    const next = setLocalPowerPlan(plan.id, { status: 'skipped', started_at: null, updated_at: now })
+    if (next) queuePowerPlanWrite(next, todo)
+  })
+  const progress = currentDailyProgress()
+  progress.day_mode = DAY_MODE_SLEEPING_TIGER
+  progress.stack_order = normalizeTodayStackOrder(progress)
+  progress.is_complete = false
+  saveDailyProgress(progress)
+  renderDayPlannerScreen()
+}
+
 // v1.17 Day Stack helpers. Routine steps and today's chosen todos share one ordered queue.
 function routineStackKey(stepId) {
   return `routine:${stepId}`
@@ -881,7 +907,7 @@ function normalizeTodayStackOrder(progress = currentDailyProgress()) {
   const existing = Array.isArray(progress?.stack_order) ? progress.stack_order : []
   const todayRoutine = routineStepsForDate(todayDateKey())
   const routineKeys = todayRoutine.map((step) => routineStackKey(step.id))
-  const todoKeys = getPendingPowerPlans().map((plan) => todoStackKey(plan.todo_id))
+  const todoKeys = progress?.day_mode === DAY_MODE_SLEEPING_TIGER ? [] : getPendingPowerPlans().map((plan) => todoStackKey(plan.todo_id))
   const valid = new Set([...routineKeys, ...todoKeys])
   const normalized = []
 
@@ -1338,7 +1364,7 @@ function getDailyGymState(step = getCurrentDailyStep()) {
 
 function startDailySystem() {
   const progress = currentDailyProgress()
-  if (!progress.started_at && powerActionsAvailable && !powerSelectionIsValid()) {
+  if (!progress.started_at && powerActionsAvailable && !isSleepingTigerDay(progress) && !powerSelectionIsValid()) {
     renderPowerActionGateScreen()
     return
   }
@@ -1745,8 +1771,8 @@ async function downloadFullBackup() {
     }
     if (dailySystemAvailable) {
       const [dailyStepsResult, dailyProgressResult] = await Promise.all([
-        supabase.from('daily_steps').select('id,title,note,substeps,active_days,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
-        supabase.from('daily_progress').select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,substep_positions,is_complete,started_at,updated_at').order('progress_date', { ascending: true })
+        supabase.from('daily_steps').select('id,title,note,substeps,active_days,day_order,sort_order,created_at,updated_at').order('sort_order', { ascending: true }),
+        supabase.from('daily_progress').select('progress_date,completed_step_ids,skipped_step_ids,later_step_ids,stack_order,day_mode,substep_positions,is_complete,started_at,updated_at').order('progress_date', { ascending: true })
       ])
       if (!dailyStepsResult.error) dailyStepBackupRows = dailyStepsResult.data || []
       if (!dailyProgressResult.error) dailyProgressBackupRows = dailyProgressResult.data || []
@@ -2087,7 +2113,7 @@ async function restoreSnapshot() {
   scheduleEntries = snapshot.scheduleEntries || []
   weeklyPlanEntries = snapshot.weeklyPlanEntries || []
   workoutHistory = mergePendingCompletions(snapshot.workoutHistory || [])
-  dailySteps = Array.isArray(snapshot.dailySteps) ? snapshot.dailySteps.map((step) => ({ ...step, substeps: normalizeDailySubsteps(step.substeps), active_days: normalizeRoutineDays(step.active_days) })) : []
+  dailySteps = Array.isArray(snapshot.dailySteps) ? snapshot.dailySteps.map((step) => ({ ...step, substeps: normalizeDailySubsteps(step.substeps), active_days: normalizeRoutineDays(step.active_days), day_order: normalizeRoutineDayOrder(step.day_order) })) : []
   dailyProgress = normalizeDailyProgressValue(snapshot.dailyProgress, todayDateKey())
   const pendingDaily = pendingDailyProgressFor(todayDateKey())
   if (pendingDaily) dailyProgress = pendingDaily
@@ -2273,6 +2299,7 @@ async function flushPendingWrites() {
         skipped_step_ids: dailyItem.skipped_step_ids || [],
         later_step_ids: dailyItem.later_step_ids || [],
         stack_order: dailyItem.stack_order || [],
+        day_mode: dailyItem.day_mode === DAY_MODE_SLEEPING_TIGER ? DAY_MODE_SLEEPING_TIGER : DAY_MODE_STANDARD,
         substep_positions: dailyItem.substep_positions || {},
         is_complete: Boolean(dailyItem.is_complete),
         started_at: dailyItem.started_at || null,
@@ -2368,7 +2395,7 @@ function dataSignature() {
     weeklyPlanEntries,
     workoutHistory.map((entry) => [entry.workout_date, entry.folder_id]),
     motivationVideos.map((video) => video.id),
-    dailySteps.map((step) => [step.id, step.title, step.note, step.substeps, step.active_days, step.sort_order]),
+    dailySteps.map((step) => [step.id, step.title, step.note, step.substeps, step.active_days, step.day_order, step.sort_order]),
     dailyProgress,
     dailyMeds.map((med) => [med.id, med.name, med.routine_step_id, med.sort_order]),
     dailyMedsDate,
@@ -2394,6 +2421,7 @@ async function refreshInBackground() {
   }
   if (viewVersion !== version || (dataSignature() === before && !wasCached)) return
   if (currentView === 'day') renderDay()
+  else if (currentView === 'day-overview') renderDay('', { forceOverview: true })
   else if (currentView === 'home') renderHome()
   else if (currentView === 'workouts') renderWorkouts()
   else if (currentView === 'changed') renderChanged()
@@ -2673,8 +2701,8 @@ function renderBottomNav(activeTab) {
   const tabs = [
     ['day', 'DAY'],
     ['gym', 'GYM'],
-    ['changed', 'i changed.'],
     ['plan', 'PLAN'],
+    ['changed', 'i changed.'],
     ['more', 'MORE']
   ]
   return `<nav class="bottom-nav" aria-label="Main navigation">${tabs.map(([id, label]) => `
@@ -2790,8 +2818,9 @@ function routineWeekdayMeta(day = routineWeekdaySelected) {
 function renderDailyEditor() {
   const progress = currentDailyProgress()
   const [, selectedShort, selectedFull] = routineWeekdayMeta()
-  const selectedCount = dailySteps.filter((step) => normalizeRoutineDays(step.active_days).includes(routineWeekdaySelected)).length
   const todayWeekday = new Date().getDay()
+  const activeSteps = routineStepsForWeekday(routineWeekdaySelected)
+  const inactiveSteps = dailySteps.filter((step) => !normalizeRoutineDays(step.active_days).includes(routineWeekdaySelected))
 
   const weekStrip = ROUTINE_DAY_LABELS.map(([day, short, full]) => {
     const count = dailySteps.filter((step) => normalizeRoutineDays(step.active_days).includes(day)).length
@@ -2804,20 +2833,26 @@ function renderDailyEditor() {
       </button>`
   }).join('')
 
-  const scheduleRows = dailySteps.map((step) => {
-    const active = normalizeRoutineDays(step.active_days).includes(routineWeekdaySelected)
+  const activeRows = activeSteps.map((step, index) => {
     const boosterCount = boostersForRoutineStep(step.id).length
     return `
-      <button type="button" class="routine-week-row ${active ? 'is-active' : ''}" data-routine-day-toggle="${step.id}" aria-pressed="${active ? 'true' : 'false'}">
+      <div class="routine-order-row" data-routine-order-id="${step.id}">
+        <span class="routine-order-number" data-reorder-number>${index + 1}</span>
         <span class="routine-week-row-copy">
           <strong>${escapeHtml(step.title)}</strong>
           ${boosterCount ? `<small>${boosterCount} BOOSTER${boosterCount === 1 ? '' : 'S'}</small>` : ''}
         </span>
-        <span class="routine-week-check" aria-hidden="true">${active ? '✓' : ''}</span>
-      </button>`
+        <button type="button" class="routine-day-remove" data-routine-day-toggle="${step.id}" aria-label="Remove ${escapeHtml(step.title)} from ${escapeHtml(selectedFull)}">×</button>
+        <button type="button" class="day-reorder-handle routine-reorder-handle" data-routine-drag aria-label="Reorder ${escapeHtml(step.title)}">≡</button>
+      </div>`
   }).join('')
 
-  const editRows = dailySteps.map((step, index) => {
+  const inactiveRows = inactiveSteps.map((step) => `
+    <button type="button" class="routine-add-existing-row" data-routine-day-toggle="${step.id}">
+      <span>${escapeHtml(step.title)}</span><strong>+</strong>
+    </button>`).join('')
+
+  const editRows = dailySteps.map((step) => {
     const substeps = normalizeDailySubsteps(step.substeps)
     const activeDays = normalizeRoutineDays(step.active_days)
     return `
@@ -2833,19 +2868,19 @@ function renderDailyEditor() {
           </label>
           <label>
             <span class="eyebrow">NOTE</span>
-            <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder="">${escapeHtml(step.note || '')}</textarea>
+            <textarea name="note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2">${escapeHtml(step.note || '')}</textarea>
           </label>
           <details class="daily-substeps-editor" ${substeps.length ? 'open' : ''}>
             <summary>SUBSTEPS${substeps.length ? ` · ${substeps.length}` : ''}</summary>
             <label>
               <span class="eyebrow">SUBSTEPS</span>
-              <textarea name="substeps" rows="${Math.min(6, Math.max(3, substeps.length + 1))}" placeholder="Brush teeth\nSkincare\nGet dressed">${escapeHtml(dailySubstepsText(step))}</textarea>
+              <textarea name="substeps" rows="${Math.min(6, Math.max(3, substeps.length + 1))}" placeholder="Brush teeth
+Skincare
+Get dressed">${escapeHtml(dailySubstepsText(step))}</textarea>
             </label>
           </details>
           <div class="daily-edit-actions">
             <button type="submit" class="primary-button">SAVE</button>
-            <button type="button" class="secondary-button" data-daily-move="up" data-daily-step-id="${step.id}" ${index === 0 ? 'disabled' : ''}>↑</button>
-            <button type="button" class="secondary-button" data-daily-move="down" data-daily-step-id="${step.id}" ${index === dailySteps.length - 1 ? 'disabled' : ''}>↓</button>
             <button type="button" class="ghost-danger" data-daily-delete="${step.id}">DELETE</button>
           </div>
         </form>
@@ -2857,39 +2892,82 @@ function renderDailyEditor() {
       <div class="routine-week-strip" role="tablist" aria-label="Routine week">${weekStrip}</div>
       <div class="routine-week-head">
         <strong>${selectedFull.toUpperCase()}.</strong>
-        <span>${selectedCount}</span>
+        <span>${activeSteps.length}</span>
       </div>
-      <div class="routine-week-list">
-        ${scheduleRows || '<div class="daily-editor-empty">—</div>'}
+      <div class="routine-order-list" id="routine-order-list">
+        ${activeRows || '<div class="daily-editor-empty">—</div>'}
       </div>
 
-      <details class="day-setup-add routine-week-add" ${dailySteps.length ? '' : 'open'}>
-        <summary>+ RITUAL</summary>
-        <form id="add-daily-step" class="daily-add-form">
-          <label>
-            <span class="eyebrow">ACTION</span>
-            <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="Action" />
-          </label>
-          <label>
-            <span class="eyebrow">NOTE</span>
-            <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2" placeholder=""></textarea>
-          </label>
-          <details class="daily-substeps-editor">
-            <summary>SUBSTEPS</summary>
+      <details class="routine-day-add" id="routine-day-add" ${routineAddPanelOpen ? 'open' : ''}>
+        <summary>+ ADD</summary>
+        <div class="routine-add-existing-list">
+          ${inactiveRows || '<div class="daily-editor-empty">ALL ADDED.</div>'}
+        </div>
+        <details class="routine-new-ritual">
+          <summary>+ NEW RITUAL</summary>
+          <form id="add-daily-step" class="daily-add-form">
             <label>
-              <span class="eyebrow">SUBSTEPS</span>
-              <textarea id="daily-step-substeps" rows="4" placeholder="Brush teeth\nSkincare\nGet dressed"></textarea>
+              <span class="eyebrow">ACTION</span>
+              <input id="daily-step-title" type="text" maxlength="${DAILY_STEP_TITLE_MAX}" required placeholder="Action" />
             </label>
-          </details>
-          <button type="submit" class="primary-button">ADD TO ${selectedShort.toUpperCase()}</button>
-        </form>
+            <label>
+              <span class="eyebrow">NOTE</span>
+              <textarea id="daily-step-note" maxlength="${DAILY_STEP_NOTE_MAX}" rows="2"></textarea>
+            </label>
+            <details class="daily-substeps-editor">
+              <summary>SUBSTEPS</summary>
+              <label>
+                <span class="eyebrow">SUBSTEPS</span>
+                <textarea id="daily-step-substeps" rows="4" placeholder="Brush teeth
+Skincare
+Get dressed"></textarea>
+              </label>
+            </details>
+            <button type="submit" class="primary-button">ADD TO ${selectedShort.toUpperCase()}</button>
+          </form>
+        </details>
       </details>
 
-      ${editRows ? `<details class="routine-edit-library"><summary>EDIT RITUALS <span>${dailySteps.length}</span></summary><div class="daily-edit-list">${editRows}</div></details>` : ''}
+      ${editRows ? `<details class="routine-edit-library"><summary>LIBRARY <span>${dailySteps.length}</span></summary><div class="daily-edit-list">${editRows}</div></details>` : ''}
       ${progress.started_at ? '<button type="button" class="text-button danger-text daily-reset" id="reset-day-progress">RESET TODAY</button>' : ''}
       <div id="daily-editor-status" class="status-line" aria-live="polite"></div>
     </section>`
 }
+
+function commitRoutineDayOrder(activeIds) {
+  if (!activeIds.length) return
+  const dayKey = String(routineWeekdaySelected)
+  const positions = new Map(activeIds.map((id, index) => [id, index + 1]))
+  const changed = []
+
+  dailySteps = dailySteps.map((step) => {
+    if (!positions.has(step.id)) return step
+    const previous = normalizeRoutineDayOrder(step.day_order)
+    const nextOrder = positions.get(step.id)
+    if (Number(previous[dayKey]) === nextOrder) return step
+    const day_order = { ...previous, [dayKey]: nextOrder }
+    const next = { ...step, day_order }
+    changed.push(next)
+    return next
+  })
+  saveSnapshot()
+  if (!changed.length) return
+
+  routineScheduleWriteQueue = routineScheduleWriteQueue
+    .then(async () => {
+      const results = await Promise.all(changed.map((step) => supabase.from('daily_steps').update({ day_order: step.day_order, updated_at: new Date().toISOString() }).eq('id', step.id)))
+      const failed = results.find((result) => result.error)
+      if (failed?.error) throw failed.error
+    })
+    .catch(async (error) => {
+      console.error(error)
+      await loadDailySystem().catch(() => {})
+      saveSnapshot()
+      if (currentView === 'day-routine-setup') renderRoutineSetupScreen()
+      window.setTimeout(() => alert(isNetworkError(error) ? 'OFFLINE.' : 'COULD NOT SAVE ORDER.'), 0)
+    })
+}
+
 
 async function toggleRoutineDayAssignment(stepId) {
   const step = dailySteps.find((item) => item.id === stepId)
@@ -2899,8 +2977,13 @@ async function toggleRoutineDayAssignment(stepId) {
   const next = active
     ? previous.filter((day) => day !== routineWeekdaySelected)
     : [...previous, routineWeekdaySelected].sort((a, b) => a - b)
+  const dayKey = String(routineWeekdaySelected)
+  const day_order = normalizeRoutineDayOrder(step.day_order)
+  if (active) delete day_order[dayKey]
+  else day_order[dayKey] = routineStepsForWeekday(routineWeekdaySelected).length + 1
 
   step.active_days = next
+  step.day_order = day_order
   saveSnapshot()
   renderRoutineSetupScreen()
 
@@ -2908,6 +2991,7 @@ async function toggleRoutineDayAssignment(stepId) {
     .then(async () => {
       const { error } = await supabase.from('daily_steps').update({
         active_days: next,
+        day_order,
         updated_at: new Date().toISOString()
       }).eq('id', stepId)
       if (error) throw error
@@ -2925,17 +3009,23 @@ function bindDailyEditor() {
   document.querySelectorAll('[data-routine-weekday]').forEach((button) => {
     button.addEventListener('click', () => {
       routineWeekdaySelected = Number.parseInt(button.dataset.routineWeekday, 10)
+      routineAddPanelOpen = false
       renderRoutineSetupScreen()
     })
   })
+  document.querySelector('#routine-day-add')?.addEventListener('toggle', (event) => { routineAddPanelOpen = event.currentTarget.open })
   document.querySelectorAll('[data-routine-day-toggle]').forEach((button) => {
     button.addEventListener('click', () => toggleRoutineDayAssignment(button.dataset.routineDayToggle))
   })
+  bindVerticalReorder({
+    listSelector: '#routine-order-list',
+    rowSelector: '[data-routine-order-id]',
+    handleSelector: '[data-routine-drag]',
+    keyName: 'routineOrderId',
+    onCommit: commitRoutineDayOrder
+  })
   document.querySelector('#add-daily-step')?.addEventListener('submit', addDailyStep)
   document.querySelectorAll('[data-daily-edit]').forEach((form) => form.addEventListener('submit', updateDailyStep))
-  document.querySelectorAll('[data-daily-move]').forEach((button) => {
-    button.addEventListener('click', () => moveDailyStep(button.dataset.dailyStepId, button.dataset.dailyMove))
-  })
   document.querySelectorAll('[data-daily-delete]').forEach((button) => {
     button.addEventListener('click', () => deleteDailyStep(button.dataset.dailyDelete))
   })
@@ -2947,10 +3037,10 @@ function bindDailyMeds() {
     button.addEventListener('click', () => toggleDailyMed(button.dataset.dailyMedToggle))
   })
   document.querySelector('#add-daily-med')?.addEventListener('submit', addDailyMed)
-  document.querySelectorAll('[data-daily-med-edit]').forEach((form) => form.addEventListener('submit', updateDailyMed))
-  document.querySelectorAll('[data-daily-med-move]').forEach((button) => {
-    button.addEventListener('click', () => moveDailyMed(button.dataset.dailyMedId, button.dataset.dailyMedMove))
+  document.querySelectorAll('[data-booster-anchor]').forEach((select) => {
+    select.addEventListener('change', () => updateDailyMedAnchor(select.dataset.boosterAnchor, select.value || null))
   })
+  document.querySelectorAll('[data-daily-med-edit]').forEach((form) => form.addEventListener('submit', updateDailyMed))
   document.querySelectorAll('[data-daily-med-delete]').forEach((button) => {
     button.addEventListener('click', () => deleteDailyMed(button.dataset.dailyMedDelete))
   })
@@ -2990,7 +3080,7 @@ async function updateDailyMed(event) {
   const name = form.elements.name.value.trim().slice(0, DAILY_MED_NAME_MAX)
   if (!name) return
   const changes = { name, updated_at: new Date().toISOString() }
-  if (dailyMedAnchorsAvailable) changes.routine_step_id = form.elements.routine_step_id?.value || null
+  if (dailyMedAnchorsAvailable && form.elements.routine_step_id) changes.routine_step_id = form.elements.routine_step_id.value || null
   const { error } = await supabase.from('daily_meds').update(changes).eq('id', id)
   if (error) {
     alert(isNetworkError(error) ? 'Connect to edit boosters.' : error.message)
@@ -3001,24 +3091,28 @@ async function updateDailyMed(event) {
   renderBoosterSetupScreen()
 }
 
-async function moveDailyMed(medId, direction) {
-  const index = dailyMeds.findIndex((med) => med.id === medId)
-  if (index < 0) return
-  const target = direction === 'up' ? index - 1 : index + 1
-  if (target < 0 || target >= dailyMeds.length) return
-  const ordered = [...dailyMeds]
-  const [moved] = ordered.splice(index, 1)
-  ordered.splice(target, 0, moved)
-  for (let i = 0; i < ordered.length; i += 1) {
-    const { error } = await supabase.from('daily_meds').update({ sort_order: i + 1, updated_at: new Date().toISOString() }).eq('id', ordered[i].id)
-    if (error) {
-      alert(isNetworkError(error) ? 'Connect to reorder boosters.' : error.message)
-      return
-    }
-  }
-  await loadDailyMeds()
+
+async function updateDailyMedAnchor(medId, routineStepId) {
+  if (!dailyMedAnchorsAvailable) return
+  const med = dailyMeds.find((item) => item.id === medId)
+  if (!med) return
+  const previous = med.routine_step_id || null
+  const next = routineStepId || null
+  if (previous === next) return
+
+  med.routine_step_id = next
   saveSnapshot()
-  renderBoosterSetupScreen()
+  const { error } = await supabase.from('daily_meds').update({
+    routine_step_id: next,
+    updated_at: new Date().toISOString()
+  }).eq('id', medId)
+
+  if (error) {
+    med.routine_step_id = previous
+    saveSnapshot()
+    renderBoosterSetupScreen()
+    window.setTimeout(() => alert(isNetworkError(error) ? 'OFFLINE.' : 'COULD NOT SAVE.'), 0)
+  }
 }
 
 async function deleteDailyMed(medId) {
@@ -3053,9 +3147,96 @@ function renderQuickCapture() {
     </section>`
 }
 
+function updateReorderNumbers(list) {
+  list?.querySelectorAll('[data-reorder-number]').forEach((node, index) => { node.textContent = String(index + 1) })
+}
+
+function bindVerticalReorder({ listSelector, rowSelector, handleSelector, keyName, onCommit }) {
+  const list = document.querySelector(listSelector)
+  if (!list) return
+  const rows = () => [...list.querySelectorAll(rowSelector)]
+  const commit = () => {
+    updateReorderNumbers(list)
+    const keys = rows().map((row) => row.dataset[keyName]).filter(Boolean)
+    onCommit(keys)
+  }
+
+  list.querySelectorAll(handleSelector).forEach((handle) => {
+    const row = handle.closest(rowSelector)
+    if (!row) return
+
+    handle.addEventListener('keydown', (event) => {
+      if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return
+      event.preventDefault()
+      const ordered = rows()
+      const index = ordered.indexOf(row)
+      const target = event.key === 'ArrowUp' ? index - 1 : index + 1
+      if (target < 0 || target >= ordered.length) return
+      if (event.key === 'ArrowUp') list.insertBefore(row, ordered[target])
+      else list.insertBefore(ordered[target], row)
+      commit()
+      handle.focus()
+    })
+
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return
+      event.preventDefault()
+      const startOrder = rows().map((item) => item.dataset[keyName]).join('|')
+      const pointerId = event.pointerId
+      row.classList.add('is-dragging')
+      list.classList.add('is-reordering')
+      try { handle.setPointerCapture?.(pointerId) } catch {}
+
+      const move = (pointerEvent) => {
+        if (pointerEvent.pointerId !== pointerId) return
+        pointerEvent.preventDefault()
+        const y = pointerEvent.clientY
+        const others = rows().filter((item) => item !== row)
+        const before = others.find((item) => {
+          const rect = item.getBoundingClientRect()
+          return y < rect.top + rect.height / 2
+        })
+        if (before) list.insertBefore(row, before)
+        else list.appendChild(row)
+        updateReorderNumbers(list)
+        if (y < 72) window.scrollBy(0, -10)
+        else if (y > window.innerHeight - 72) window.scrollBy(0, 10)
+      }
+
+      const end = (pointerEvent) => {
+        if (pointerEvent.pointerId !== pointerId) return
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', end)
+        window.removeEventListener('pointercancel', end)
+        try { handle.releasePointerCapture?.(pointerId) } catch {}
+        row.classList.remove('is-dragging')
+        list.classList.remove('is-reordering')
+        const endOrder = rows().map((item) => item.dataset[keyName]).join('|')
+        if (endOrder !== startOrder) commit()
+      }
+
+      window.addEventListener('pointermove', move, { passive: false })
+      window.addEventListener('pointerup', end)
+      window.addEventListener('pointercancel', end)
+    })
+  })
+}
+
+function commitTodayStackOrder(keys) {
+  const progress = currentDailyProgress()
+  const valid = new Set(normalizeTodayStackOrder(progress))
+  progress.stack_order = keys.filter((key) => valid.has(key))
+  progress.is_complete = false
+  saveDailyProgress(progress)
+}
+
 function bindTodayPlanner() {
-  document.querySelectorAll('[data-stack-move]').forEach((button) => {
-    button.addEventListener('click', () => moveTodayStackItem(button.dataset.stackKey, button.dataset.stackMove))
+  bindVerticalReorder({
+    listSelector: '#today-order-list',
+    rowSelector: '[data-stack-row]',
+    handleSelector: '[data-stack-drag]',
+    keyName: 'stackRow',
+    onCommit: commitTodayStackOrder
   })
 }
 
@@ -3268,92 +3449,90 @@ function renderDailyMedsSetup() {
   if (!dailyMedsAvailable) {
     return `
       <section class="day-setup-section">
-        <div class="day-setup-section-head"><div><h2>BOOSTERS.</h2></div></div>
         <div class="daily-editor-empty">SUPABASE UPDATE REQUIRED.</div>
       </section>`
   }
-  const editRows = dailyMeds.map((med, index) => `
-    <form class="daily-med-edit-row booster-edit-row" data-daily-med-edit="${med.id}">
-      <div class="booster-edit-fields">
-        <input name="name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required value="${escapeHtml(med.name)}" aria-label="Booster name" />
-        ${dailyMedAnchorsAvailable ? `<select name="routine_step_id" aria-label="Activity for ${escapeHtml(med.name)}">${routineStepOptionsHtml(med.routine_step_id)}</select>` : ''}
-      </div>
-      <div class="daily-med-edit-actions">
-        <button type="submit" class="small-button">SAVE</button>
-        <button type="button" class="small-button" data-daily-med-move="up" data-daily-med-id="${med.id}" ${index === 0 ? 'disabled' : ''}>↑</button>
-        <button type="button" class="small-button" data-daily-med-move="down" data-daily-med-id="${med.id}" ${index === dailyMeds.length - 1 ? 'disabled' : ''}>↓</button>
-        <button type="button" class="text-button danger-text" data-daily-med-delete="${med.id}">DELETE</button>
-      </div>
-    </form>`).join('')
+
+  const rows = dailyMeds.map((med) => `
+    <div class="booster-row">
+      <strong class="booster-name">${escapeHtml(med.name)}</strong>
+      ${dailyMedAnchorsAvailable ? `<select class="booster-anchor-select" data-booster-anchor="${med.id}" aria-label="Activity for ${escapeHtml(med.name)}">${routineStepOptionsHtml(med.routine_step_id)}</select>` : ''}
+      <details class="booster-more">
+        <summary aria-label="Edit ${escapeHtml(med.name)}">•••</summary>
+        <form class="booster-edit-sheet" data-daily-med-edit="${med.id}">
+          <input name="name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required value="${escapeHtml(med.name)}" aria-label="Booster name" />
+          <div class="booster-edit-actions">
+            <button type="submit" class="small-button">SAVE</button>
+            <button type="button" class="text-button danger-text" data-daily-med-delete="${med.id}">DELETE</button>
+          </div>
+        </form>
+      </details>
+    </div>`).join('')
+
   return `
-    <section class="day-setup-section">
+    <section class="day-setup-section booster-setup-section">
       ${dailyMedAnchorsAvailable ? '' : '<div class="notice info">SUPABASE UPDATE REQUIRED.</div>'}
-      <form id="add-daily-med" class="daily-med-add-form day-setup-med-add booster-add-form">
-        <div class="booster-add-fields">
-          <input id="daily-med-name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required placeholder="Add booster" aria-label="Booster name" />
-          ${dailyMedAnchorsAvailable ? `<select id="daily-med-routine-step" aria-label="Routine activity">${routineStepOptionsHtml('')}</select>` : ''}
-        </div>
-        <button type="submit" class="primary-button">Add</button>
+      <form id="add-daily-med" class="booster-add-form">
+        <input id="daily-med-name" type="text" maxlength="${DAILY_MED_NAME_MAX}" required placeholder="Booster" aria-label="Booster name" />
+        ${dailyMedAnchorsAvailable ? `<select id="daily-med-routine-step" aria-label="Activity">${routineStepOptionsHtml('')}</select>` : ''}
+        <button type="submit" class="primary-button">ADD</button>
       </form>
-      ${editRows ? `<div class="daily-med-edit-list">${editRows}</div>` : ''}
+      ${rows ? `<div class="booster-list">${rows}</div>` : '<div class="daily-editor-empty">—</div>'}
       <div id="daily-meds-status" class="status-line" aria-live="polite"></div>
     </section>`
 }
 
 
-function renderDayHubRow(id, title, detail = '', count = '') {
-  return `
-    <button type="button" class="day-hub-row" id="${id}">
-      <span class="day-hub-copy"><strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ''}</span>
-      ${count !== '' ? `<span class="day-hub-count">${escapeHtml(String(count))}</span>` : ''}
-      <span class="day-hub-chevron" aria-hidden="true">›</span>
-    </button>`
+function renderDayCommandButton(id, title, count = '') {
+  return `<button type="button" class="day-command-button" id="${id}"><strong>${escapeHtml(title)}</strong>${count !== '' ? `<span>${escapeHtml(String(count))}</span>` : ''}</button>`
 }
 
 function renderTodayPlanList() {
   const entries = getTodayStackEntries()
   if (!entries.length) return '<div class="day-plan-empty">—</div>'
-  return `<div class="day-plan-list">${entries.map((entry, index) => `
-    <div class="day-plan-row ${entry.type === 'todo' ? 'is-todo' : ''}">
-      <span class="day-plan-number">${index + 1}</span>
+  return `<div class="day-plan-list" id="today-order-list">${entries.map((entry, index) => `
+    <div class="day-plan-row ${entry.type === 'todo' ? 'is-todo' : ''}" data-stack-row="${escapeHtml(entry.key)}">
+      <span class="day-plan-number" data-reorder-number>${index + 1}</span>
       <span class="day-plan-copy">
         <strong>${escapeHtml(entry.title)}</strong>
         <small>${entry.type === 'todo' ? 'POWER' : 'RITUAL'}</small>
       </span>
       <span class="day-plan-controls">
-        <button type="button" data-stack-move="up" data-stack-key="${escapeHtml(entry.key)}" ${index === 0 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} earlier">↑</button>
-        <button type="button" data-stack-move="down" data-stack-key="${escapeHtml(entry.key)}" ${index === entries.length - 1 ? 'disabled' : ''} aria-label="Move ${escapeHtml(entry.title)} later">↓</button>
         ${entry.type === 'todo' ? `<button type="button" class="is-remove" data-power-today="${entry.id}" aria-label="Remove ${escapeHtml(entry.title)} from today">×</button>` : ''}
+        <button type="button" class="day-reorder-handle" data-stack-drag aria-label="Reorder ${escapeHtml(entry.title)}">≡</button>
       </span>
     </div>`).join('')}</div>`
 }
 
 function renderDayPlannerScreen() {
-  const entries = getTodayStackEntries()
-  const selectedTodoIds = new Set(entries.filter((entry) => entry.type === 'todo').map((entry) => entry.id))
-  const inboxChoices = powerTodos.filter((todo) => !selectedTodoIds.has(todo.id))
-  const powerCount = selectedTodoIds.size
+  const progress = currentDailyProgress()
+  progress.stack_order = normalizeTodayStackOrder(progress)
+  const entries = getTodayStackEntries(progress)
+  const started = Boolean(progress.started_at)
+  const sleepingTiger = isSleepingTigerDay(progress)
+  const powerCount = getSelectedPowerCount()
+  const powerReady = !powerActionsAvailable || sleepingTiger || powerSelectionIsValid()
+  const canStart = entries.length > 0 && (started || powerReady)
   const dayName = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).format(new Date())
+  const modeLabel = sleepingTiger ? 'SLEEPING TIGER' : `POWER ${powerCount}/${POWER_ACTION_MIN}`
+  const footerLabel = started ? 'RESUME' : (canStart ? 'LOCK IN' : 'CHOOSE POWER')
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-home">‹ LOCK IN</button>
+      <button type="button" class="day-subview-back" id="back-day-home">‹ DAY</button>
       <div><div class="today-label">${escapeHtml(dayName)}</div><h2>THE ORDER.</h2></div>
+      ${!started && powerActionsAvailable ? `<button type="button" class="day-mode-chip ${sleepingTiger ? 'is-sleeping-tiger' : ''}" id="edit-power-mode">${escapeHtml(modeLabel)}</button>` : ''}
     </div>
     <section class="day-plan-card">
-      <div class="day-compact-head"><strong>TODAY</strong><span>${entries.length}</span></div>
       ${renderTodayPlanList()}
     </section>
-    <section class="day-plan-inbox">
-      <div class="day-compact-head"><strong>POWER · 3—5</strong><span>${powerCount}/${POWER_ACTION_MAX}</span></div>
-      ${inboxChoices.length ? `<div class="day-plan-inbox-list">${inboxChoices.map((todo) => `
-        <button type="button" class="day-plan-inbox-row" data-power-today="${todo.id}" ${powerCount >= POWER_ACTION_MAX ? 'disabled' : ''}>
-          <span>${escapeHtml(todo.title)}</span><strong>+</strong>
-        </button>`).join('')}</div>` : '<div class="day-plan-empty">—</div>'}
-    </section>
-    <button type="button" class="day-primary-footer" id="plan-start-day" ${entries.length ? '' : 'disabled'}>${currentDailyProgress().started_at ? 'RESUME' : 'LOCK IN'} <span aria-hidden="true">→</span></button>`,
+    <button type="button" class="day-primary-footer" id="plan-start-day" ${entries.length ? '' : 'disabled'}>${escapeHtml(footerLabel)} <span aria-hidden="true">→</span></button>`,
     { title: 'THE ORDER.', showAccount: false, showTimer: false, showHeader: false, view: 'day-plan' })
   document.querySelector('#back-day-home')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
-  document.querySelector('#plan-start-day')?.addEventListener('click', requestStartDailySystem)
+  document.querySelector('#edit-power-mode')?.addEventListener('click', renderPowerActionGateScreen)
+  document.querySelector('#plan-start-day')?.addEventListener('click', () => {
+    if (!started && !powerReady) renderPowerActionGateScreen()
+    else startDailySystem()
+  })
   bindTodayPlanner()
   bindPowerTodos()
 }
@@ -3363,12 +3542,12 @@ function renderPowerActionGateScreen() {
   const selected = powerTodos.filter((todo) => selectedIds.has(todo.id))
   const available = powerTodos.filter((todo) => !selectedIds.has(todo.id))
   const count = selected.length
-  const canLock = count >= POWER_ACTION_MIN && count <= POWER_ACTION_MAX
+  const canContinue = count >= POWER_ACTION_MIN && count <= POWER_ACTION_MAX
   renderShell(`
     <div class="day-subview-top power-gate-head">
       <button type="button" class="day-subview-back" id="back-power-day">‹ DAY</button>
-      <div><div class="today-label">TODAY</div><h2>POWER 3—5.</h2></div>
-      <div class="power-gate-count ${canLock ? 'is-ready' : ''}">${count}/${POWER_ACTION_MAX}</div>
+      <div><div class="today-label">TODAY</div><h2>POWER.</h2></div>
+      <div class="power-gate-count ${canContinue ? 'is-ready' : ''}">${count}/${POWER_ACTION_MIN}<small> · MAX ${POWER_ACTION_MAX}</small></div>
     </div>
     <section class="power-gate-list" aria-label="Today's power actions">
       ${selected.map((todo, index) => `<button type="button" class="power-gate-row is-selected" data-power-today="${todo.id}"><span class="power-gate-number">${index + 1}</span><strong>${escapeHtml(todo.title)}</strong><span class="power-gate-mark">✓</span></button>`).join('')}
@@ -3376,10 +3555,12 @@ function renderPowerActionGateScreen() {
       ${powerTodos.length ? '' : '<div class="day-plan-empty">—</div>'}
     </section>
     ${renderQuickCapture()}
-    <button type="button" class="day-primary-footer" id="confirm-power-actions" ${canLock ? '' : 'disabled'}>LOCK IN <span aria-hidden="true">→</span></button>`,
-    { title: 'POWER 3—5.', showAccount: false, showTimer: false, showHeader: false, view: 'day-power' })
+    <button type="button" class="sleeping-tiger-button" id="sleeping-tiger-day">SLEEPING TIGER</button>
+    ${canContinue ? '<button type="button" class="day-primary-footer" id="confirm-power-actions">NEXT <span aria-hidden="true">→</span></button>' : ''}`,
+    { title: 'POWER.', showAccount: false, showTimer: false, showHeader: false, view: 'day-power' })
   document.querySelector('#back-power-day')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
-  document.querySelector('#confirm-power-actions')?.addEventListener('click', startDailySystem)
+  document.querySelector('#confirm-power-actions')?.addEventListener('click', confirmPowerActionGate)
+  document.querySelector('#sleeping-tiger-day')?.addEventListener('click', chooseSleepingTigerDay)
   bindPowerTodos()
 }
 
@@ -3389,11 +3570,15 @@ function requestStartDailySystem() {
     startDailySystem()
     return
   }
+  if (isSleepingTigerDay(progress)) {
+    renderDayPlannerScreen()
+    return
+  }
   if (powerActionsAvailable) {
     renderPowerActionGateScreen()
     return
   }
-  startDailySystem()
+  renderDayPlannerScreen()
 }
 
 function previewBack() {
@@ -3525,7 +3710,7 @@ function renderDayInboxScreen() {
       </div>`).join('')
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-home">‹ LOCK IN</button>
+      <button type="button" class="day-subview-back" id="back-day-home">‹ DAY</button>
       <div><h2>INBOX.</h2></div>
     </div>
     ${renderQuickCapture()}
@@ -3538,43 +3723,27 @@ function renderDayInboxScreen() {
   bindPowerTodos()
 }
 
-function renderDaySetupScreen() {
-  renderShell(`
-    <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-home">‹ LOCK IN</button>
-      <div><h2>SYSTEM.</h2></div>
-    </div>
-    <section class="day-hub day-setup-hub" aria-label="Day setup">
-      ${renderDayHubRow('open-routine-setup', 'WEEK', '', dailySteps.length)}
-      ${renderDayHubRow('open-booster-setup', 'BOOSTERS', '', dailyMeds.length)}
-    </section>`,
-    { title: 'SYSTEM.', showAccount: false, showTimer: false, showHeader: false, view: 'day-setup' })
-  document.querySelector('#back-day-home')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
-  document.querySelector('#open-routine-setup')?.addEventListener('click', renderRoutineSetupScreen)
-  document.querySelector('#open-booster-setup')?.addEventListener('click', renderBoosterSetupScreen)
-}
-
 function renderRoutineSetupScreen() {
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-setup">‹ SYSTEM</button>
+      <button type="button" class="day-subview-back" id="back-day-setup">‹ DAY</button>
       <div><h2>WEEK.</h2></div>
     </div>
     ${renderDailyEditor()}`,
     { title: 'WEEK.', showAccount: false, showTimer: false, showHeader: false, view: 'day-routine-setup' })
-  document.querySelector('#back-day-setup')?.addEventListener('click', renderDaySetupScreen)
+  document.querySelector('#back-day-setup')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
   bindDailyEditor()
 }
 
 function renderBoosterSetupScreen() {
   renderShell(`
     <div class="day-subview-top">
-      <button type="button" class="day-subview-back" id="back-day-setup">‹ SYSTEM</button>
+      <button type="button" class="day-subview-back" id="back-day-setup">‹ DAY</button>
       <div><h2>BOOSTERS.</h2></div>
     </div>
     ${renderDailyMedsSetup()}`,
     { title: 'BOOSTERS.', showAccount: false, showTimer: false, showHeader: false, view: 'day-booster-setup' })
-  document.querySelector('#back-day-setup')?.addEventListener('click', renderDaySetupScreen)
+  document.querySelector('#back-day-setup')?.addEventListener('click', () => renderDay('', { forceOverview: true }))
   bindDailyMeds()
 }
 
@@ -3636,6 +3805,7 @@ function renderDay(errorMessage = '', options = {}) {
   const remaining = remainingTodayActionCount(progress)
   const started = Boolean(progress.started_at)
   const complete = started && remaining === 0
+  const sleepingTiger = isSleepingTigerDay(progress)
 
   if (!options.forceOverview && !errorMessage && started && !complete) {
     renderDayRunner()
@@ -3647,8 +3817,8 @@ function renderDay(errorMessage = '', options = {}) {
     hero = `
       <section class="day-home-hero">
         <div class="day-hero-line"><div class="today-label">TODAY</div></div>
-        <h2>NO ORDERS.</h2>
-        <button type="button" class="start-workout-button day-start-button" id="empty-plan-day">BUILD DAY <span aria-hidden="true">→</span></button>
+        <h2>EMPTY.</h2>
+        <button type="button" class="start-workout-button day-start-button" id="empty-plan-day">BEGIN <span aria-hidden="true">→</span></button>
       </section>`
   } else if (complete) {
     hero = `
@@ -3657,12 +3827,11 @@ function renderDay(errorMessage = '', options = {}) {
         <h2>COMPLETE.</h2>
       </section>`
   } else {
-    const helper = `${remaining} LEFT`
     hero = `
       <section class="day-home-hero">
         <div class="day-hero-line"><div class="today-label">TODAY</div>${renderDayEyeButton('preview-day')}</div>
-        <h2>${started ? 'LOCKED IN.' : 'LOCK IN.'}</h2>
-        <div class="day-lock-count">${escapeHtml(helper)}</div>
+        <h2>${started ? 'LOCKED IN.' : (sleepingTiger ? 'SLEEPING TIGER.' : 'LOCK IN.')}</h2>
+        <div class="day-lock-count">${escapeHtml(`${remaining} LEFT`)}</div>
         <button type="button" class="start-workout-button day-start-button" id="start-day">${started ? 'RESUME' : 'BEGIN'} <span aria-hidden="true">→</span></button>
       </section>`
   }
@@ -3673,19 +3842,21 @@ function renderDay(errorMessage = '', options = {}) {
     ${hero}
     ${renderQuickCapture()}
     ${renderDailyMedsQuick()}
-    <section class="day-hub" aria-label="Day controls">
-      ${renderDayHubRow('open-day-plan', 'THE ORDER', '', entries.length)}
-      ${renderDayHubRow('open-day-inbox', 'INBOX', '', powerTodos.length)}
-      ${renderDayHubRow('open-day-setup', 'SYSTEM')}
+    <section class="day-command-grid" aria-label="Day controls">
+      ${renderDayCommandButton('open-day-plan', 'THE ORDER', entries.length)}
+      ${renderDayCommandButton('open-day-inbox', 'INBOX', powerTodos.length)}
+      ${renderDayCommandButton('open-routine-setup', 'WEEK')}
+      ${renderDayCommandButton('open-booster-setup', 'BOOSTERS', dailyMeds.length)}
     </section>`,
-    { title: 'LOCK IN.', showAccount: false, showTimer: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
+    { title: 'LOCK IN.', showAccount: false, showTimer: false, showHeader: false, navTab: 'day', view: options.forceOverview ? 'day-overview' : 'day' })
 
   document.querySelector('#start-day')?.addEventListener('click', requestStartDailySystem)
   document.querySelector('#preview-day')?.addEventListener('click', renderDayPreviewScreen)
-  document.querySelector('#empty-plan-day')?.addEventListener('click', renderDayPlannerScreen)
+  document.querySelector('#empty-plan-day')?.addEventListener('click', requestStartDailySystem)
   document.querySelector('#open-day-plan')?.addEventListener('click', renderDayPlannerScreen)
   document.querySelector('#open-day-inbox')?.addEventListener('click', renderDayInboxScreen)
-  document.querySelector('#open-day-setup')?.addEventListener('click', renderDaySetupScreen)
+  document.querySelector('#open-routine-setup')?.addEventListener('click', renderRoutineSetupScreen)
+  document.querySelector('#open-booster-setup')?.addEventListener('click', renderBoosterSetupScreen)
   bindDailyMeds()
   bindPowerTodos()
 }
@@ -3797,6 +3968,7 @@ async function addDailyStep(event) {
   const note = document.querySelector('#daily-step-note')?.value.trim().slice(0, DAILY_STEP_NOTE_MAX) || ''
   const substeps = parseDailySubstepsText(document.querySelector('#daily-step-substeps')?.value || '')
   const active_days = [routineWeekdaySelected]
+  const day_order = { [String(routineWeekdaySelected)]: routineStepsForWeekday(routineWeekdaySelected).length + 1 }
   const status = document.querySelector('#daily-editor-status')
   if (!title) return
   if (status) status.textContent = 'SAVING...'
@@ -3807,6 +3979,7 @@ async function addDailyStep(event) {
     note,
     substeps,
     active_days,
+    day_order,
     sort_order: nextOrder,
     updated_at: new Date().toISOString()
   })
@@ -3838,26 +4011,6 @@ async function updateDailyStep(event) {
   if (error) {
     alert(isNetworkError(error) ? 'OFFLINE.' : error.message)
     return
-  }
-  await loadDailySystem()
-  saveSnapshot()
-  renderRoutineSetupScreen()
-}
-
-async function moveDailyStep(stepId, direction) {
-  const index = dailySteps.findIndex((step) => step.id === stepId)
-  if (index < 0) return
-  const target = direction === 'up' ? index - 1 : index + 1
-  if (target < 0 || target >= dailySteps.length) return
-  const ordered = [...dailySteps]
-  const [moved] = ordered.splice(index, 1)
-  ordered.splice(target, 0, moved)
-  for (let i = 0; i < ordered.length; i += 1) {
-    const { error } = await supabase.from('daily_steps').update({ sort_order: i + 1, updated_at: new Date().toISOString() }).eq('id', ordered[i].id)
-    if (error) {
-      alert(isNetworkError(error) ? 'Connect to reorder your routine.' : error.message)
-      return
-    }
   }
   await loadDailySystem()
   saveSnapshot()
@@ -4381,9 +4534,11 @@ function renderPlanner(errorMessage = '') {
         <strong>${escapeHtml(formatMonthTitle(plannerMonthStart))}</strong>
         <button type="button" class="small-button" id="month-next" aria-label="Next month">&rarr;</button>
       </div>
-      <button type="button" class="small-button" id="weekly-plan">WEEK</button>
+      <div class="planner-tools">
+        <button type="button" class="small-button" id="weekly-plan">WEEK</button>
+        <button type="button" class="small-button" id="repeat-last-week">REPEAT</button>
+      </div>
     </div>
-    <button type="button" class="quiet-action planner-repeat" id="repeat-last-week">REPEAT</button>
     ${!scheduleAvailable ? `<div class="notice error">PLAN · SUPABASE UPDATE REQUIRED.</div>` : ''}
     ${!planningUpgradeAvailable ? `<div class="notice info">SUPABASE UPDATE REQUIRED.</div>` : ''}
     ${errorMessage ? `<div class="notice error">${escapeHtml(errorMessage)}</div>` : ''}

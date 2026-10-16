@@ -561,6 +561,7 @@ create table if not exists public.daily_steps (
   note text not null default '' check (char_length(note) <= 320),
   substeps jsonb not null default '[]'::jsonb check (jsonb_typeof(substeps) = 'array'),
   active_days jsonb not null default '[0,1,2,3,4,5,6]'::jsonb check (jsonb_typeof(active_days) = 'array'),
+  day_order jsonb not null default '{}'::jsonb check (jsonb_typeof(day_order) = 'object'),
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -577,6 +578,10 @@ alter table public.daily_steps
 alter table public.daily_steps
   add column if not exists active_days jsonb not null default '[0,1,2,3,4,5,6]'::jsonb;
 
+-- v1.25: optional per-weekday order. Existing routines fall back to their global sort order.
+alter table public.daily_steps
+  add column if not exists day_order jsonb not null default '{}'::jsonb;
+
 create table if not exists public.daily_progress (
   user_id uuid not null references auth.users(id) on delete cascade,
   progress_date date not null,
@@ -584,6 +589,7 @@ create table if not exists public.daily_progress (
   skipped_step_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(skipped_step_ids) = 'array'),
   later_step_ids jsonb not null default '[]'::jsonb check (jsonb_typeof(later_step_ids) = 'array'),
   stack_order jsonb not null default '[]'::jsonb check (jsonb_typeof(stack_order) = 'array'),
+  day_mode text not null default 'standard',
   substep_positions jsonb not null default '{}'::jsonb check (jsonb_typeof(substep_positions) = 'object'),
   is_complete boolean not null default false,
   started_at timestamptz,
@@ -607,6 +613,10 @@ alter table public.daily_progress
 -- v1.17: one ordered stack interleaves routine steps and selected todos for today.
 alter table public.daily_progress
   add column if not exists stack_order jsonb not null default '[]'::jsonb;
+
+-- v1.25: Sleeping Tiger lets a day run routines without requiring Power actions.
+alter table public.daily_progress
+  add column if not exists day_mode text not null default 'standard';
 
 alter table public.daily_steps enable row level security;
 alter table public.daily_progress enable row level security;
@@ -889,7 +899,9 @@ select
   exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'daily_med_log') as daily_med_log_ready,
   exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'power_todos') as power_todos_ready,
   exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'power_action_plan') as power_action_plan_ready,
-  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'stack_order') as day_stack_ready;
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'stack_order') as day_stack_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_progress' and column_name = 'day_mode') as sleeping_tiger_ready,
+  exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'daily_steps' and column_name = 'day_order') as routine_day_order_ready;
 -- battle angel v1.21 - "I changed" gratitude + story
 -- Additive only. Safe to re-run. Does not delete or modify gym, day, todo, booster, or media data.
 

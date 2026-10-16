@@ -4975,3 +4975,422 @@ h1, h2 {
 :root[data-theme="light"] .routine-edit-library {
   border-color: #dedede;
 }
+
+/* v1.25: Tiger Flow. One decision at a time, direct navigation, fast reorder. */
+.day-command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.day-command-button {
+  min-width: 0;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #292929;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  padding: 9px 11px;
+  text-align: left;
+}
+
+.day-command-button strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .73rem;
+  font-weight: 1000;
+  letter-spacing: .055em;
+}
+
+.day-command-button span {
+  flex: 0 0 auto;
+  color: #777;
+  font-size: .69rem;
+  font-weight: 950;
+}
+
+.day-subview-back {
+  min-width: 52px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #8a8a8a;
+  padding: 8px 2px;
+  text-align: left;
+  font-size: .7rem;
+  font-weight: 950;
+  letter-spacing: .05em;
+}
+
+.day-plan-card,
+.day-inbox-card-flat,
+.day-setup-section {
+  border-radius: 0;
+}
+
+.day-plan-list {
+  border-top: 0;
+}
+
+.day-plan-row {
+  min-height: 52px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 7px;
+  background: #000;
+  border-bottom: 1px solid #171717;
+  padding: 5px 2px;
+}
+
+.day-plan-row.is-todo {
+  background: #000;
+}
+
+.day-plan-number,
+.routine-order-number {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 0;
+  background: transparent;
+  color: #555;
+  font-size: .66rem;
+  font-weight: 950;
+}
+
+.day-plan-copy strong {
+  font-size: .9rem;
+  font-weight: 950;
+}
+
+.day-plan-copy small {
+  color: #555;
+  font-size: .54rem;
+  font-weight: 950;
+  letter-spacing: .11em;
+}
+
+.day-plan-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.day-plan-controls .is-remove,
+.routine-day-remove {
+  width: 42px;
+  height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #555;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.day-reorder-handle,
+.routine-reorder-handle {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  padding: 0;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grab;
+  font-size: 1.1rem;
+  font-weight: 1000;
+  letter-spacing: -.12em;
+}
+
+.day-reorder-handle:active,
+.routine-reorder-handle:active { cursor: grabbing; }
+
+[data-stack-row].is-dragging,
+[data-routine-order-id].is-dragging {
+  background: #fff;
+  color: #000;
+}
+
+[data-stack-row].is-dragging .day-plan-number,
+[data-stack-row].is-dragging .day-plan-copy small,
+[data-stack-row].is-dragging .day-reorder-handle,
+[data-routine-order-id].is-dragging .routine-order-number,
+[data-routine-order-id].is-dragging .routine-reorder-handle,
+[data-routine-order-id].is-dragging .routine-day-remove {
+  color: #000;
+}
+
+.day-mode-chip {
+  min-height: 40px;
+  border: 1px solid #333;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  padding: 7px 9px;
+  font-size: .58rem;
+  font-weight: 1000;
+  letter-spacing: .06em;
+}
+
+.day-mode-chip.is-sleeping-tiger {
+  border-color: #fff;
+}
+
+.power-gate-count {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.power-gate-count small {
+  color: #555;
+  font: inherit;
+  font-size: .52rem;
+  letter-spacing: .06em;
+}
+
+.sleeping-tiger-button {
+  width: 100%;
+  min-height: 50px;
+  margin: 10px 0 10px;
+  border: 1px solid #333;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 1000;
+  letter-spacing: .09em;
+}
+
+.routine-order-list {
+  display: grid;
+  border-bottom: 1px solid #222;
+}
+
+.routine-order-row {
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 42px 44px;
+  align-items: center;
+  gap: 3px;
+  border-bottom: 1px solid #171717;
+  background: #000;
+  color: #fff;
+  padding: 3px 0;
+}
+
+.routine-order-row:last-child { border-bottom: 0; }
+
+.routine-add-existing-list {
+  display: grid;
+  border-top: 1px solid #1d1d1d;
+}
+
+.routine-add-existing-row {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid #171717;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  padding: 6px 2px;
+  text-align: left;
+}
+
+.routine-add-existing-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .86rem;
+  font-weight: 900;
+}
+
+.routine-add-existing-row strong {
+  min-width: 42px;
+  text-align: center;
+  font-size: 1.2rem;
+}
+
+.routine-day-add,
+.routine-edit-library,
+.routine-new-ritual {
+  border-radius: 0;
+}
+
+.routine-new-ritual > summary {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: #8a8a8a;
+  font-size: .68rem;
+  font-weight: 950;
+  letter-spacing: .07em;
+}
+
+.booster-setup-section {
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  margin-top: 4px;
+}
+
+.booster-add-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(104px, .75fr) auto;
+  gap: 5px;
+  align-items: stretch;
+}
+
+.booster-add-form input,
+.booster-add-form select,
+.booster-anchor-select,
+.booster-edit-sheet input {
+  min-width: 0;
+  min-height: 46px;
+  border: 1px solid #272727;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 16px;
+}
+
+.booster-add-form .primary-button {
+  min-width: 58px;
+  border-radius: 0;
+}
+
+.booster-list {
+  display: grid;
+  margin-top: 12px;
+  border-top: 1px solid #222;
+}
+
+.booster-row {
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(110px, 1.1fr) 44px;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid #191919;
+}
+
+.booster-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .86rem;
+  font-weight: 950;
+}
+
+.booster-anchor-select {
+  width: 100%;
+  min-height: 40px;
+  padding-block: 6px;
+  font-size: 14px;
+}
+
+.booster-more {
+  position: relative;
+}
+
+.booster-more > summary {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  list-style: none;
+  color: #777;
+  font-weight: 1000;
+}
+
+.booster-more > summary::-webkit-details-marker { display: none; }
+
+.booster-edit-sheet {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  padding: 0 0 8px;
+}
+
+.booster-edit-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (max-width: 390px) {
+  .day-command-button { min-height: 54px; padding-inline: 8px; }
+  .day-command-button strong { font-size: .66rem; }
+  .routine-order-row { grid-template-columns: 26px minmax(0, 1fr) 38px 42px; }
+  .booster-add-form { grid-template-columns: minmax(0, 1fr) 94px; }
+  .booster-add-form .primary-button { grid-column: 1 / -1; width: 100%; min-height: 44px; }
+  .booster-row { grid-template-columns: minmax(0, .8fr) minmax(94px, 1.2fr) 42px; }
+}
+
+:root[data-theme="light"] .day-command-button,
+:root[data-theme="light"] .day-plan-row,
+:root[data-theme="light"] .routine-order-row,
+:root[data-theme="light"] .routine-add-existing-row,
+:root[data-theme="light"] .sleeping-tiger-button,
+:root[data-theme="light"] .day-mode-chip,
+:root[data-theme="light"] .booster-add-form input,
+:root[data-theme="light"] .booster-add-form select,
+:root[data-theme="light"] .booster-anchor-select,
+:root[data-theme="light"] .booster-edit-sheet input {
+  background: #fff;
+  color: #000;
+  border-color: #dedede;
+}
+
+:root[data-theme="light"] .day-reorder-handle,
+:root[data-theme="light"] .routine-reorder-handle { color: #000; }
+
+:root[data-theme="light"] [data-stack-row].is-dragging,
+:root[data-theme="light"] [data-routine-order-id].is-dragging {
+  background: #000;
+  color: #fff;
+}
+
+:root[data-theme="light"] [data-stack-row].is-dragging .day-plan-number,
+:root[data-theme="light"] [data-stack-row].is-dragging .day-plan-copy small,
+:root[data-theme="light"] [data-stack-row].is-dragging .day-reorder-handle,
+:root[data-theme="light"] [data-routine-order-id].is-dragging .routine-order-number,
+:root[data-theme="light"] [data-routine-order-id].is-dragging .routine-reorder-handle,
+:root[data-theme="light"] [data-routine-order-id].is-dragging .routine-day-remove { color: #fff; }
+
+/* v1.25 planner cleanup: actions live together; toolbar wraps cleanly on small phones. */
+.planner-toolbar { flex-wrap: wrap; }
+.planner-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.planner-tools .small-button { min-height: 44px; }
+.planner-repeat { display: none !important; }
