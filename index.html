@@ -2,27 +2,40 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#0d0f10" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="description" content="battle angel — lock in." />
+    <meta name="description" content="battle angel — one next action." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="battle angel" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>battle angel</title>
     <script>
       (() => {
         try {
-          const saved = localStorage.getItem('battle-angel-theme')
-          document.documentElement.dataset.theme = saved === 'light' ? 'light' : 'dark'
+          const saved = localStorage.getItem("battle-angel-theme");
+          document.documentElement.dataset.theme =
+            saved === "light" ? "light" : "dark";
         } catch {
-          document.documentElement.dataset.theme = 'dark'
+          document.documentElement.dataset.theme = "dark";
         }
-      })()
+      })();
     </script>
+    <script type="module" crossorigin src="/assets/app-d35e5234a5b1.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/app-f905730e9c25.css" />
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
+    <noscript
+      ><main style="padding: 2rem; font-family: system-ui">
+        Enable JavaScript to open battle angel.
+      </main></noscript
+    >
   </body>
 </html>
