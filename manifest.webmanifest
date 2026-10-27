@@ -1,13 +1,13 @@
 {
   "name": "battle angel",
   "short_name": "battle angel",
-  "description": "One next action. Your day, routines and training together.",
+  "description": "Become it by doing it. Plan, begin and see your progress.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0d0f10",
-  "theme_color": "#0d0f10",
+  "background_color": "#101917",
+  "theme_color": "#101917",
   "icons": [
     {
       "src": "/icon.svg",
