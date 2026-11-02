@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-labelledby="title">
   <title id="title">battle angel</title>
-  <rect width="180" height="180" rx="41" fill="#101917"/>
-  <circle cx="92" cy="88" r="67" fill="#1d3129" opacity=".74"/>
-  <path d="M42 103 135 47l-27 52h36L63 149l20-46-41 0Z" fill="#a9dbbc"/>
-  <path d="m94 47 18-17-3 24" fill="none" stroke="#c7ebd4" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="138" cy="139" r="5" fill="#e5c78b"/>
+  <rect width="180" height="180" rx="41" fill="#1c1a17"/>
+  <circle cx="92" cy="88" r="67" fill="#3b3226" opacity=".74"/>
+  <path d="M42 103 135 47l-27 52h36L63 149l20-46-41 0Z" fill="#dbc6a4"/>
+  <path d="m94 47 18-17-3 24" fill="none" stroke="#efddbe" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="138" cy="139" r="5" fill="#cbb786"/>
 </svg>
