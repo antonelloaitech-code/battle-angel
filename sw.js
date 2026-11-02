@@ -1,6 +1,6 @@
 // Versioned offline shell. Only same-origin static assets enter this cache.
-const CACHE = "battle-angel-shell-0d252bc51403";
-const ASSETS = ["/","/assets/app-298cd03988bb.js","/assets/app-ec98b6e3ff36.css","/assets/media-dc82b5ea0a08.js","/manifest.webmanifest","/icon.svg","/apple-touch-icon.png"];
+const CACHE = "battle-angel-shell-485d488ce048";
+const ASSETS = ["/","/assets/app-3584db197d61.js","/assets/app-662a81e25ff4.css","/assets/media-dc82b5ea0a08.js","/manifest.webmanifest","/icon.svg","/apple-touch-icon.png"];
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {

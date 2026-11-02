@@ -1,13 +1,13 @@
 {
   "name": "battle angel",
   "short_name": "battle angel",
-  "description": "Become it by doing it. Plan, begin and see your progress.",
+  "description": "Your day, one action at a time.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#101917",
-  "theme_color": "#101917",
+  "background_color": "#fcfcfa",
+  "theme_color": "#fcfcfa",
   "icons": [
     {
       "src": "/icon.svg",

@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#101917" />
+    <meta name="theme-color" content="#fcfcfa" />
     <meta name="color-scheme" content="dark light" />
     <meta name="description" content="battle angel — become it by doing it. One next action at a time." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -21,14 +21,14 @@
         try {
           const saved = localStorage.getItem("battle-angel-theme");
           document.documentElement.dataset.theme =
-            saved === "light" ? "light" : "dark";
+            saved === "dark" ? "dark" : "light";
         } catch {
-          document.documentElement.dataset.theme = "dark";
+          document.documentElement.dataset.theme = "light";
         }
       })();
     </script>
-    <script type="module" crossorigin src="/assets/app-298cd03988bb.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/app-ec98b6e3ff36.css" />
+    <script type="module" crossorigin src="/assets/app-3584db197d61.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/app-662a81e25ff4.css" />
   </head>
   <body>
     <div id="app"></div>
